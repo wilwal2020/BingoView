@@ -910,17 +910,17 @@ async function processImage(file) {
 
     setLabel("Sending to Claude…");
 
-    const prompt = `This is a Norwegian 90-ball bingo ticket (bingoark). It has 6 strips stacked vertically, each with a 3-row × 9-column grid of 27 cells. Each strip has exactly 15 numbers placed in specific cells; the rest are blank.
+    const prompt = `This is a Norwegian 90-ball bingo ticket (bingoark). It has 6 strips stacked vertically, each identified by a 4-digit number printed in the left margin (e.g. "4201"). Each strip is a 3-row × 9-column grid holding exactly 15 numbers (5 per row), with the other 12 cells blank.
 
-Return a JSON array of 6 objects in top-to-bottom order. Each object must have:
-- "id": the strip identifier printed in the left margin, as a string (e.g. "4201")
-- "corners": four [x, y] points — the four corners of the 3×9 grid in this exact order: top-left, top-right, bottom-right, bottom-left. Values are fractions of the full image dimensions (0.0–1.0). The corners must tightly enclose the 27 grid cells and NOT the left-margin identifier text.
-- "grid": a 3×9 array of rows; each cell holds the integer printed there (1–90) or null if blank. Columns run left-to-right, rows top-to-bottom.
+Return a JSON array of 6 strip objects in top-to-bottom order. Each object must have:
+- "id": the 4-digit strip identifier as a string
+- "corners": the four corners of this strip's 3×9 grid in this exact order: top-left, top-right, bottom-right, bottom-left. Each corner is [x, y] as fractions of the full image dimensions (0.0–1.0). The corners must tightly enclose the 27 grid cells — NOT the identifier text in the left margin.
+- "rows": an array of exactly 3 subarrays (row 0 = top, row 2 = bottom). Each subarray contains the 5 numbers that appear in that row, in left-to-right order.
 
 Output raw JSON only — no prose, no markdown fences.
 
 Example (truncated):
-[{"id":"4201","corners":[[0.18,0.05],[0.92,0.06],[0.93,0.18],[0.17,0.17]],"grid":[[null,11,null,27,null,null,41,null,70],[9,null,24,37,null,53,63,null,null],[2,null,null,36,null,55,65,74,null]]}, ...]`;
+[{"id":"4201","corners":[[0.18,0.05],[0.92,0.06],[0.93,0.18],[0.17,0.17]],"rows":[[11,27,41,70,87],[9,24,37,53,63],[2,36,55,65,74]]}, ...]`;
 
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -958,19 +958,24 @@ Example (truncated):
     if (!Array.isArray(parsed)) throw new Error("Expected array of strips");
 
     // Build numberMap via bilinear interpolation inside each strip quad.
-    // Using 4 corners instead of trusting per-number coords handles the
-    // phone-camera perspective distortion much better.
+    // Column is DERIVED from the number value (col 0 = 1–9, col i = 10i..10i+9,
+    // col 8 = 80–90) because Claude is unreliable at column assignment but
+    // bingo layout makes it deterministic. Row comes from Claude. Corners come
+    // from Claude and use a quadrilateral so tilted phone photos still map
+    // correctly.
+    const colForNumber = n => Math.min(Math.floor(n / 10), 8);
     numberMap = {};
     for (const strip of parsed) {
       if (!strip || !Array.isArray(strip.corners) || strip.corners.length !== 4) continue;
-      if (!Array.isArray(strip.grid)) continue;
+      if (!Array.isArray(strip.rows)) continue;
       const [tl, tr, br, bl] = strip.corners.map(p => ({ x: parseFloat(p[0]), y: parseFloat(p[1]) }));
       for (let row = 0; row < 3; row++) {
-        const rowArr = strip.grid[row];
-        if (!Array.isArray(rowArr)) continue;
-        for (let col = 0; col < 9; col++) {
-          const num = rowArr[col];
+        const nums = strip.rows[row];
+        if (!Array.isArray(nums)) continue;
+        for (const raw of nums) {
+          const num = Number(raw);
           if (!Number.isInteger(num) || num < 1 || num > 90) continue;
+          const col = colForNumber(num);
           const u = (col + 0.5) / 9;   // 0..1 across width
           const v = (row + 0.5) / 3;   // 0..1 down height
           const topX = tl.x + u * (tr.x - tl.x);
