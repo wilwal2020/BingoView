@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>BingoView</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --ink:    #0a0a0a;
+  --paper:  #f5f0e8;
+  --cream:  #ede8dc;
+  --gold:   #e8a020;
+  --gold2:  #c47a10;
+  --red:    #c8281e;
+  --green:  #1a7a40;
+  --dim:    #8a8070;
+  --mono:   'IBM Plex Mono', monospace;
+  --display:'Bebas Neue', sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+body {
+  background: var(--ink);
+  color: var(--paper);
+  font-family: var(--mono);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ═══════════════════════════════════
+   MODE SELECT SCREEN
+═══════════════════════════════════ */
+#screen-mode {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  gap: 40px;
+}
+
+.title-block {
+  text-align: center;
+}
+
+.title-block h1 {
+  font-family: var(--display);
+  font-size: 4rem;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+  line-height: 1;
+  text-shadow: 3px 3px 0 var(--gold2);
+}
+
+.title-block p {
+  font-size: 0.72rem;
+  color: var(--dim);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-top: 6px;
+}
+
+.mode-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.mode-card {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 22px 20px;
+  cursor: pointer;
+  transition: all 0.18s;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.mode-card:hover, .mode-card:active {
+  border-color: var(--gold);
+  background: #1c1a14;
+}
+
+.mode-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.mode-info h2 {
+  font-family: var(--display);
+  font-size: 1.5rem;
+  letter-spacing: 0.06em;
+  color: var(--paper);
+}
+
+.mode-info p {
+  font-size: 0.7rem;
+  color: var(--dim);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+/* ═══════════════════════════════════
+   SHARED ELEMENTS
+═══════════════════════════════════ */
+.screen { display: none; flex-direction: column; flex: 1; }
+.screen.active { display: flex; }
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid #222;
+  background: #111;
+  flex-shrink: 0;
+}
+
+.hdr-title {
+  font-family: var(--display);
+  font-size: 1.4rem;
+  letter-spacing: 0.08em;
+  color: var(--gold);
+}
+
+.conn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #333;
+  transition: background 0.3s, box-shadow 0.3s;
+  flex-shrink: 0;
+}
+.conn-dot.connected    { background: var(--green); box-shadow: 0 0 8px var(--green); }
+.conn-dot.connecting   { background: var(--gold);  box-shadow: 0 0 8px var(--gold); animation: blink 1s infinite; }
+.conn-dot.error        { background: var(--red);   box-shadow: 0 0 8px var(--red); }
+
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.conn-label {
+  font-size: 0.65rem;
+  color: var(--dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ═══════════════════════════════════
+   PHONE SCREEN
+═══════════════════════════════════ */
+#screen-phone {
+  overflow: hidden;
+}
+
+#phone-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Upload state */
+#phone-upload {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  gap: 20px;
+}
+
+.upload-zone {
+  width: 100%;
+  border: 2px dashed #333;
+  border-radius: 14px;
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.2s;
+}
+
+.upload-zone:active { border-color: var(--gold); }
+.upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.upload-zone .up-icon { font-size: 3rem; margin-bottom: 12px; }
+.upload-zone h3 { font-family: var(--display); font-size: 1.6rem; color: var(--gold); letter-spacing: 0.06em; }
+.upload-zone p { font-size: 0.72rem; color: var(--dim); margin-top: 6px; }
+
+.apikey-row {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.apikey-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+.apikey-input {
+  width: 100%;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--paper);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.apikey-input:focus { border-color: var(--gold); }
+
+.apikey-hint {
+  font-size: 0.62rem;
+  color: #444;
+  line-height: 1.4;
+}
+
+#phone-processing {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+}
+
+.spinner {
+  width: 48px; height: 48px;
+  border: 3px solid #222;
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.proc-label {
+  font-size: 0.8rem;
+  color: var(--dim);
+  letter-spacing: 0.1em;
+  text-align: center;
+}
+
+/* Paper view */
+#phone-paper {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#paper-canvas-wrap {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: #000;
+}
+
+#paper-canvas {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* Highlight overlay */
+#highlight-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.highlight-ring {
+  position: absolute;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: ringPop 0.35s cubic-bezier(0.34,1.56,0.64,1) forwards;
+  pointer-events: none;
+}
+
+@keyframes ringPop {
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.3); }
+  60%  { opacity: 1; transform: translate(-50%,-50%) scale(1.15); }
+  100% { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+}
+
+.highlight-ring.current {
+  width: 56px; height: 56px;
+  border: 3px solid var(--red);
+  background: rgba(200,40,30,0.25);
+  box-shadow: 0 0 20px rgba(200,40,30,0.6), inset 0 0 12px rgba(200,40,30,0.3);
+}
+
+.highlight-ring.previous {
+  width: 44px; height: 44px;
+  border: 2px solid var(--gold);
+  background: rgba(232,160,32,0.12);
+  box-shadow: 0 0 10px rgba(232,160,32,0.3);
+  opacity: 0.7;
+}
+
+#phone-status-bar {
+  padding: 10px 18px;
+  background: #111;
+  border-top: 1px solid #222;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.last-called {
+  font-family: var(--display);
+  font-size: 2rem;
+  color: var(--red);
+  letter-spacing: 0.06em;
+  text-shadow: 0 0 16px rgba(200,40,30,0.5);
+}
+
+.last-called span {
+  font-size: 0.65rem;
+  font-family: var(--mono);
+  color: var(--dim);
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.detected-count {
+  font-size: 0.7rem;
+  color: var(--dim);
+  text-align: right;
+}
+
+/* Session code display */
+#phone-code-display {
+  padding: 12px 18px;
+  background: #0d0d0d;
+  border-top: 1px solid #1a1a1a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.code-label { font-size: 0.65rem; color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; }
+.code-value { font-size: 1.1rem; color: var(--gold); letter-spacing: 0.18em; font-weight: 600; }
+
+/* ═══════════════════════════════════
+   IPAD SCREEN
+═══════════════════════════════════ */
+#screen-ipad {
+  overflow: hidden;
+}
+
+#ipad-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  padding: 16px;
+  gap: 16px;
+}
+
+/* Connect section */
+#ipad-connect {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#ipad-connect h3 {
+  font-family: var(--display);
+  font-size: 1.2rem;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+}
+
+.code-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+#peer-code-input {
+  flex: 1;
+  background: #0d0d0d;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-family: var(--mono);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--paper);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  outline: none;
+}
+
+#peer-code-input:focus { border-color: var(--gold); }
+
+.btn-connect {
+  background: var(--gold);
+  color: var(--ink);
+  border: none;
+  border-radius: 8px;
+  padding: 11px 18px;
+  font-family: var(--display);
+  font-size: 1.1rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.btn-connect:hover { background: var(--gold2); }
+
+/* Big called number */
+.big-called {
+  text-align: center;
+  font-family: var(--display);
+  font-size: 7rem;
+  line-height: 1;
+  color: var(--red);
+  text-shadow: 4px 4px 0 #7a0a08, 0 0 60px rgba(200,40,30,0.3);
+  letter-spacing: 0.04em;
+  min-height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Number call pad */
+.call-section {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.call-section h3 {
+  font-size: 0.65rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 12px;
+}
+
+.call-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+#ipad-call-input {
+  flex: 1;
+  background: #0d0d0d;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 14px;
+  font-family: var(--mono);
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: var(--paper);
+  text-align: center;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#ipad-call-input:focus { border-color: var(--red); }
+
+.btn-call {
+  background: var(--red);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 14px 22px;
+  font-family: var(--display);
+  font-size: 1.4rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn-call:hover { background: #a01810; }
+.btn-call:disabled { background: #4a1410; cursor: not-allowed; }
+
+/* Quick grid — all 90 numbers */
+.quick-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 5px;
+}
+
+.qnum {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  border-radius: 6px;
+  background: #0d0d0d;
+  border: 1px solid #2a2a2a;
+  cursor: pointer;
+  color: var(--dim);
+  transition: all 0.12s;
+  user-select: none;
+}
+
+.qnum:hover  { background: #1a1a1a; color: var(--paper); border-color: #444; }
+.qnum:active { background: var(--red); color: #fff; border-color: var(--red); }
+.qnum.called { background: #1a0d0d; color: var(--red); border-color: #3a1010; }
+.qnum.latest { background: var(--red); color: #fff; border-color: var(--red);
+               box-shadow: 0 0 10px rgba(200,40,30,0.5); }
+
+/* History */
+.history-section {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.history-section h3 {
+  font-size: 0.65rem;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  margin-bottom: 10px;
+}
+
+.history-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.chip {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #0d0d0d;
+  border: 1px solid #2a2a2a;
+  color: var(--dim);
+}
+
+.chip.first {
+  background: rgba(200,40,30,0.15);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* Toast */
+#toast {
+  position: fixed;
+  bottom: 20px; left: 50%;
+  transform: translateX(-50%) translateY(60px);
+  background: #222;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-size: 0.8rem;
+  transition: transform 0.25s ease;
+  z-index: 999;
+  white-space: nowrap;
+  pointer-events: none;
+}
+#toast.show { transform: translateX(-50%) translateY(0); }
+#toast.ok  { border-color: var(--green); color: var(--green); }
+#toast.err { border-color: var(--red);   color: var(--red); }
+#toast.warn{ border-color: var(--gold);  color: var(--gold); }
+</style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     MODE SELECT
+══════════════════════════════════════ -->
+<div id="screen-mode" class="screen active">
+  <div class="title-block">
+    <h1>BingoView</h1>
+    <p>Two-device bingo paper tracker</p>
+  </div>
+  <div class="mode-cards">
+    <div class="mode-card" id="pick-phone">
+      <div class="mode-icon">📱</div>
+      <div class="mode-info">
+        <h2>Phone</h2>
+        <p>Scan the paper & show highlights when numbers are called</p>
+      </div>
+    </div>
+    <div class="mode-card" id="pick-ipad">
+      <div class="mode-icon">📋</div>
+      <div class="mode-info">
+        <h2>iPad / Caller</h2>
+        <p>Call numbers — sends highlight to the phone instantly</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     PHONE SCREEN
+══════════════════════════════════════ -->
+<div id="screen-phone" class="screen">
+  <header>
+    <div class="hdr-title">PHONE</div>
+    <div class="conn-label">
+      <div class="conn-dot" id="phone-conn-dot"></div>
+      <span id="phone-conn-label">Waiting</span>
+    </div>
+  </header>
+
+  <div id="phone-body">
+    <!-- Step 1: Upload -->
+    <div id="phone-upload">
+      <div class="upload-zone">
+        <input type="file" id="file-input" accept="image/*" capture="environment">
+        <div class="up-icon">📄</div>
+        <h3>Scan Paper</h3>
+        <p>Tap to photograph the bingo paper</p>
+      </div>
+      <div class="apikey-row">
+        <label class="apikey-label">Anthropic API Key</label>
+        <input type="password" id="apikey-input" class="apikey-input"
+               placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
+        <p class="apikey-hint">Stored locally, never sent anywhere except Anthropic</p>
+      </div>
+    </div>
+
+    <!-- Step 2: Processing -->
+    <div id="phone-processing">
+      <div class="spinner"></div>
+      <div class="proc-label" id="proc-label">Reading numbers…</div>
+    </div>
+
+    <!-- Step 3: Paper view with highlights -->
+    <div id="phone-paper">
+      <div id="paper-canvas-wrap">
+        <canvas id="paper-canvas"></canvas>
+        <div id="highlight-overlay"></div>
+      </div>
+      <div id="phone-status-bar">
+        <div class="last-called">
+          <span>Last called</span>
+          <span id="phone-last-num">—</span>
+        </div>
+        <div class="detected-count" id="phone-detected-count"></div>
+      </div>
+      <div id="phone-code-display">
+        <div>
+          <div class="code-label">Session code (give to iPad)</div>
+          <div class="code-value" id="phone-code-value">——</div>
+        </div>
+        <div class="conn-label">
+          <div class="conn-dot" id="phone-conn-dot2"></div>
+          <span id="phone-conn-label2">Waiting for iPad</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     IPAD SCREEN
+══════════════════════════════════════ -->
+<div id="screen-ipad" class="screen">
+  <header>
+    <div class="hdr-title">CALLER</div>
+    <div class="conn-label">
+      <div class="conn-dot" id="ipad-conn-dot"></div>
+      <span id="ipad-conn-label">Not connected</span>
+    </div>
+  </header>
+
+  <div id="ipad-body">
+    <!-- Connect to phone -->
+    <div id="ipad-connect" class="call-section">
+      <h3>Connect to Phone</h3>
+      <div class="code-input-row">
+        <input type="text" id="peer-code-input" placeholder="ENTER CODE" maxlength="6">
+        <button class="btn-connect" id="btn-connect">JOIN</button>
+      </div>
+    </div>
+
+    <!-- Big number display -->
+    <div class="big-called" id="big-called">—</div>
+
+    <!-- Call input -->
+    <div class="call-section">
+      <h3>Call a Number</h3>
+      <div class="call-input-row">
+        <input type="number" id="ipad-call-input" min="1" max="90" placeholder="1–90">
+        <button class="btn-call" id="btn-call-num">GO</button>
+      </div>
+
+      <!-- Quick tap grid -->
+      <div class="quick-grid" id="quick-grid"></div>
+    </div>
+
+    <!-- History -->
+    <div class="history-section">
+      <h3>Called Numbers</h3>
+      <div class="history-chips" id="history-chips">
+        <span style="font-size:0.75rem;color:var(--dim)">None yet</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<!-- ══════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ════════════════════════════════════
+// UTILITIES
+// ════════════════════════════════════
+
+function toast(msg, type = "", dur = 2500) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.className = "show " + type;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.className = "", dur);
+}
+
+function setConn(ids, state, label) {
+  ids.forEach(id => {
+    const dot = document.getElementById(id);
+    if (dot) dot.className = "conn-dot " + state;
+  });
+  const labels = { "phone-conn-label": 1, "phone-conn-label2": 1, "ipad-conn-label": 1 };
+  // handled per-call below
+}
+
+// ════════════════════════════════════
+// MODE SELECTION
+// ════════════════════════════════════
+let MODE = null;
+
+function showScreen(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+}
+
+document.getElementById("pick-phone").addEventListener("click", () => {
+  MODE = "phone";
+  showScreen("screen-phone");
+  initPhone();
+});
+
+document.getElementById("pick-ipad").addEventListener("click", () => {
+  MODE = "ipad";
+  showScreen("screen-ipad");
+  initIPad();
+});
+
+// ════════════════════════════════════
+// SHARED PEER STATE
+// ════════════════════════════════════
+let peer = null;
+let conn = null;
+
+function generateCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({length: 6}, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
+// ════════════════════════════════════
+// PHONE MODE
+// ════════════════════════════════════
+
+let numberMap = {};       // { "42": {x: 0.52, y: 0.31} }  (normalized 0–1)
+let paperImage = null;    // ImageBitmap
+let calledHistory = [];
+
+function initPhone() {
+  const code = generateCode();
+  document.getElementById("phone-code-value").textContent = code;
+  document.getElementById("phone-conn-label").textContent = "My code: " + code;
+
+  // Init PeerJS with our code as ID
+  peer = new Peer(code, { debug: 0 });
+
+  peer.on("open", () => {
+    console.log("Peer open:", code);
+  });
+
+  peer.on("connection", (c) => {
+    conn = c;
+    setConnStatus("connected", "iPad connected");
+
+    c.on("data", (data) => {
+      if (data.type === "call") {
+        handleCalledNumber(data.number);
+      }
+    });
+
+    c.on("close", () => {
+      setConnStatus("error", "iPad disconnected");
+      conn = null;
+    });
+  });
+
+  peer.on("error", (e) => {
+    console.warn("Peer error:", e);
+    setConnStatus("error", "Connection error");
+  });
+
+  // File upload
+  document.getElementById("file-input").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    await processImage(file);
+  });
+
+  // Restore saved API key
+  const saved = localStorage.getItem("bv_apikey");
+  if (saved) document.getElementById("apikey-input").value = saved;
+}
+
+function setConnStatus(state, label) {
+  ["phone-conn-dot", "phone-conn-dot2"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.className = "conn-dot " + state;
+  });
+  ["phone-conn-label", "phone-conn-label2"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = label;
+  });
+}
+
+async function processImage(file) {
+  document.getElementById("phone-upload").style.display = "none";
+  document.getElementById("phone-processing").style.display = "flex";
+  const setLabel = t => document.getElementById("proc-label").textContent = t;
+
+  // Load and save API key
+  const keyInput = document.getElementById("apikey-input");
+  const apiKey = keyInput.value.trim() || localStorage.getItem("bv_apikey") || "";
+  if (!apiKey) {
+    document.getElementById("phone-upload").style.display = "flex";
+    document.getElementById("phone-processing").style.display = "none";
+    toast("Enter your Anthropic API key first", "err", 4000);
+    return;
+  }
+  localStorage.setItem("bv_apikey", apiKey);
+
+  try {
+    // Draw image to canvas (for display later)
+    const bitmap = await createImageBitmap(file);
+    paperImage = bitmap;
+    const canvas = document.getElementById("paper-canvas");
+    canvas.width  = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0);
+
+    // Resize image for API — max 1600px on longest side to keep tokens low
+    setLabel("Preparing image…");
+    const MAX = 1600;
+    let sendCanvas = canvas;
+    if (Math.max(bitmap.width, bitmap.height) > MAX) {
+      const scale = MAX / Math.max(bitmap.width, bitmap.height);
+      sendCanvas = document.createElement("canvas");
+      sendCanvas.width  = Math.round(bitmap.width  * scale);
+      sendCanvas.height = Math.round(bitmap.height * scale);
+      sendCanvas.getContext("2d").drawImage(bitmap, 0, 0, sendCanvas.width, sendCanvas.height);
+    }
+
+    // Convert to base64 JPEG
+    const b64 = sendCanvas.toDataURL("image/jpeg", 0.92).split(",")[1];
+
+    setLabel("Sending to Claude…");
+
+    const prompt = `This is a Norwegian 90-ball bingo ticket (bingoark). It contains 6 strips, each with a 3×9 grid. Each strip has 15 numbers placed in specific cells; the rest are blank.
+
+Your task: return a JSON object mapping every visible number (1–90) to its position as a fraction of the full image dimensions.
+
+Rules:
+- Keys are the number as a string, e.g. "42"
+- Values are [x, y] where x = center of that number's cell divided by image width, y = center divided by image height. Both in range 0.0–1.0
+- Include ALL numbers you can read. There should be exactly 90 total across all strips.
+- Do not include any text, explanation, or markdown. Output raw JSON only.
+
+Example format:
+{"1":[0.12,0.08],"2":[0.34,0.08],...}`;
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-opus-4-5",
+        max_tokens: 2048,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
+            { type: "text",  text: prompt }
+          ]
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err?.error?.message || `API error ${response.status}`);
+    }
+
+    setLabel("Parsing result…");
+    const data = await response.json();
+    const raw  = data.content.find(b => b.type === "text")?.text || "";
+
+    // Strip any accidental markdown fences
+    const clean = raw.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(clean);
+
+    // Validate — expect string keys, [x,y] values
+    numberMap = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const num = parseInt(k);
+      if (!num || num < 1 || num > 90) continue;
+      if (!Array.isArray(v) || v.length < 2) continue;
+      numberMap[String(num)] = { x: parseFloat(v[0]), y: parseFloat(v[1]) };
+    }
+
+    const count = Object.keys(numberMap).length;
+
+    document.getElementById("phone-processing").style.display = "none";
+    document.getElementById("phone-paper").style.display = "flex";
+    document.getElementById("phone-detected-count").textContent = `${count}/90 detected`;
+
+    toast(count >= 85
+      ? `✓ ${count} numbers found`
+      : `⚠ Only ${count} found — try rescanning`,
+      count >= 85 ? "ok" : "warn", 4000);
+
+  } catch(err) {
+    console.error(err);
+    document.getElementById("phone-processing").style.display = "none";
+    document.getElementById("phone-upload").style.display = "flex";
+    setLabel("Error — try again");
+    toast("Error: " + err.message, "err", 5000);
+  }
+}
+
+function handleCalledNumber(number) {
+  const key = String(number);
+  document.getElementById("phone-last-num").textContent = number;
+  calledHistory.unshift(number);
+
+  const overlay = document.getElementById("highlight-overlay");
+  const canvas  = document.getElementById("paper-canvas");
+  const wrap    = document.getElementById("paper-canvas-wrap");
+
+  // Clear old highlights
+  overlay.innerHTML = "";
+
+  if (!numberMap[key]) {
+    toast(`#${number} not found on paper`, "warn");
+    return;
+  }
+
+  // Convert normalized coords to displayed pixel position
+  // The canvas is object-fit:contain inside the wrap, so we need to account for letterboxing
+  const wW = wrap.clientWidth;
+  const wH = wrap.clientHeight;
+  const iW = canvas.width;
+  const iH = canvas.height;
+
+  const scale = Math.min(wW / iW, wH / iH);
+  const dispW = iW * scale;
+  const dispH = iH * scale;
+  const offX  = (wW - dispW) / 2;
+  const offY  = (wH - dispH) / 2;
+
+  const pos = numberMap[key];
+  const px = offX + pos.x * dispW;
+  const py = offY + pos.y * dispH;
+
+  // Draw previous number dimly (last one in history)
+  if (calledHistory.length > 1) {
+    const prevKey = String(calledHistory[1]);
+    if (numberMap[prevKey]) {
+      const pp = numberMap[prevKey];
+      const prevPx = offX + pp.x * dispW;
+      const prevPy = offY + pp.y * dispH;
+      const prev = document.createElement("div");
+      prev.className = "highlight-ring previous";
+      prev.style.left = prevPx + "px";
+      prev.style.top  = prevPy + "px";
+      overlay.appendChild(prev);
+    }
+  }
+
+  // Draw current highlight
+  const ring = document.createElement("div");
+  ring.className = "highlight-ring current";
+  ring.style.left = px + "px";
+  ring.style.top  = py + "px";
+  overlay.appendChild(ring);
+
+  // Pulse screen flash
+  document.body.style.transition = "background 0.05s";
+  document.body.style.background = "rgba(200,40,30,0.15)";
+  setTimeout(() => document.body.style.background = "var(--ink)", 150);
+}
+
+
+// ════════════════════════════════════
+// IPAD MODE
+// ════════════════════════════════════
+let ipadCalledNums = new Set();
+let ipadLatest = null;
+
+function initIPad() {
+  buildQuickGrid();
+
+  peer = new Peer({ debug: 0 });
+  peer.on("open", () => {
+    console.log("iPad peer ready:", peer.id);
+    setIpadConn("connecting", "Ready to connect");
+  });
+  peer.on("error", e => {
+    setIpadConn("error", "Error");
+    toast("Connection error", "err");
+  });
+
+  // Connect button
+  document.getElementById("btn-connect").addEventListener("click", connectToPeer);
+  document.getElementById("peer-code-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") connectToPeer();
+  });
+
+  // Call input
+  document.getElementById("btn-call-num").addEventListener("click", ipadCallNumber);
+  document.getElementById("ipad-call-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") ipadCallNumber();
+  });
+}
+
+function connectToPeer() {
+  const code = document.getElementById("peer-code-input").value.trim().toUpperCase();
+  if (code.length < 4) { toast("Enter the 6-letter code from the phone", "warn"); return; }
+
+  setIpadConn("connecting", "Connecting…");
+  conn = peer.connect(code, { reliable: true });
+
+  conn.on("open", () => {
+    setIpadConn("connected", "Phone connected ✓");
+    toast("Connected to phone!", "ok");
+    document.getElementById("ipad-connect").style.opacity = "0.5";
+  });
+
+  conn.on("close", () => {
+    setIpadConn("error", "Disconnected");
+    conn = null;
+    toast("Phone disconnected", "err");
+  });
+
+  conn.on("error", e => {
+    setIpadConn("error", "Failed");
+    toast("Could not connect — check code", "err");
+  });
+}
+
+function setIpadConn(state, label) {
+  const dot = document.getElementById("ipad-conn-dot");
+  const lbl = document.getElementById("ipad-conn-label");
+  if (dot) dot.className = "conn-dot " + state;
+  if (lbl) lbl.textContent = label;
+}
+
+function ipadCallNumber(num) {
+  if (num === undefined) {
+    num = parseInt(document.getElementById("ipad-call-input").value);
+  }
+  if (!num || num < 1 || num > 90) { toast("Enter 1–90", "err"); return; }
+  if (ipadCalledNums.has(num)) { toast(`${num} already called`, "warn"); return; }
+
+  // Send to phone
+  if (conn && conn.open) {
+    conn.send({ type: "call", number: num });
+  } else {
+    toast("Not connected to phone", "warn");
+  }
+
+  // Update iPad UI
+  ipadCalledNums.add(num);
+  ipadLatest = num;
+
+  document.getElementById("big-called").textContent = num;
+
+  // Update quick grid
+  const cells = document.querySelectorAll(".qnum");
+  cells.forEach(c => {
+    const n = parseInt(c.dataset.n);
+    c.className = "qnum" + (ipadCalledNums.has(n) ? (n === num ? " latest" : " called") : "");
+  });
+
+  // History
+  updateHistory();
+  document.getElementById("ipad-call-input").value = "";
+  document.getElementById("ipad-call-input").focus();
+}
+
+function updateHistory() {
+  const arr = [...ipadCalledNums].reverse();
+  const el = document.getElementById("history-chips");
+  el.innerHTML = arr.map((n, i) =>
+    `<span class="chip ${i === 0 ? 'first' : ''}">${n}</span>`
+  ).join("");
+}
+
+function buildQuickGrid() {
+  const grid = document.getElementById("quick-grid");
+  for (let i = 1; i <= 90; i++) {
+    const cell = document.createElement("div");
+    cell.className = "qnum";
+    cell.textContent = i;
+    cell.dataset.n = i;
+    cell.addEventListener("click", () => ipadCallNumber(i));
+    grid.appendChild(cell);
+  }
+}
+</script>
+</body>
+</html>
