@@ -735,9 +735,26 @@ header {
 <!-- ══════════════════════════════════════
      JAVASCRIPT
 ══════════════════════════════════════ -->
-<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script>
 'use strict';
+
+// ════════════════════════════════════
+// FIREBASE INIT
+// ════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyAmfLA07M4KSTnZJ8fF8VZ4Y96FLygv-Ps",
+  authDomain: "bingoview-2b95c.firebaseapp.com",
+  databaseURL: "https://bingoview-2b95c-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "bingoview-2b95c",
+  storageBucket: "bingoview-2b95c.firebasestorage.app",
+  messagingSenderId: "1010336105188",
+  appId: "1:1010336105188:web:a28e58f68272150306e2f1"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+console.log('[BV] Firebase initialized');
 
 // ════════════════════════════════════
 // UTILITIES
@@ -783,32 +800,14 @@ document.getElementById("pick-ipad").addEventListener("click", () => {
 });
 
 // ════════════════════════════════════
-// SHARED GUN STATE
+// SHARED CHANNEL STATE
 // ════════════════════════════════════
-let gunInstance = null;
-let gunChannel  = null;
-let lastCallTs  = 0;   // deduplicate Gun events
+let channelRef = null;
+let lastCallTs = 0;   // deduplicate call events
 
 function generateCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return Array.from({length: 6}, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-}
-
-function getGun() {
-  if (!gunInstance) {
-    gunInstance = Gun({
-      peers: [
-        'https://gun-manhattan.herokuapp.com/gun',
-        'https://peer.wallie.io/gun',
-        'https://gundb-multiserver.glitch.me/gun'
-      ],
-      localStorage: false,
-      radisk: false
-    });
-    gunInstance.on('hi',  p => console.log('[BV] relay connected:',    p && (p.url || p.id || p)));
-    gunInstance.on('bye', p => console.log('[BV] relay disconnected:', p && (p.url || p.id || p)));
-  }
-  return gunInstance;
 }
 
 // ════════════════════════════════════
@@ -824,23 +823,22 @@ function initPhone() {
   document.getElementById("phone-code-value").textContent = code;
   document.getElementById("phone-conn-label").textContent = "Kode: " + code;
 
-  // Listen on Gun channel for this code
-  const gun = getGun();
-  gunChannel = gun.get('bingoview-' + code);
+  // Listen on Firebase channel for this code
+  channelRef = db.ref('bingoview/' + code);
+  console.log('[BV phone] listening on channel bingoview/' + code);
 
   // Watch for iPad ping → send ack back so iPad knows phone is real
-  gunChannel.get('ipad').on((data) => {
+  channelRef.child('ipad').on('value', (snap) => {
+    const data = snap.val();
     if (!data || !data.ping) return;
     console.log('[BV phone] ping received, sending ack');
-    // Send ack back to iPad
-    gunChannel.get('phone').put({ ack: true, ts: Date.now() });
+    channelRef.child('phone').set({ ack: true, ts: Date.now() });
     setConnStatus("connected", "iPad tilkoblet");
   });
 
-  console.log('[BV phone] listening on channel bingoview-' + code);
-
   // Watch for called numbers — deduplicate by ts
-  gunChannel.get('call').on((data) => {
+  channelRef.child('call').on('value', (snap) => {
+    const data = snap.val();
     if (!data || !data.number || !data.ts) return;
     if (data.ts === lastCallTs) return;
     lastCallTs = data.ts;
@@ -1056,7 +1054,7 @@ function handleCalledNumber(number) {
 // ════════════════════════════════════
 let ipadCalledNums = new Set();
 let ipadLatest = null;
-let ipadChannel = null;
+let ipadChannelRef = null;
 
 function initIPad() {
   buildQuickGrid();
@@ -1081,30 +1079,34 @@ function connectToPhone() {
 
   setIpadConn("connecting", "Connecting…");
 
-  const gun = getGun();
-  ipadChannel = gun.get('bingoview-' + code);
+  ipadChannelRef = db.ref('bingoview/' + code);
+  console.log('[BV ipad] joining channel bingoview/' + code);
 
   // Listen for phone ack before declaring connected
   let confirmed = false;
-  ipadChannel.get('phone').on((data) => {
+  ipadChannelRef.child('phone').on('value', (snap) => {
+    const data = snap.val();
     if (!data || !data.ack) return;
     if (confirmed) return;
     confirmed = true;
     clearTimeout(ackTimeout);
+    console.log('[BV ipad] ack received from phone');
     setIpadConn("connected", "Phone connected ✓");
     toast("Connected!", "ok");
     document.getElementById("ipad-connect").style.opacity = "0.5";
   });
 
   // Send ping — phone will ack back
-  ipadChannel.get('ipad').put({ ts: Date.now(), ping: true });
+  console.log('[BV ipad] sending ping');
+  ipadChannelRef.child('ipad').set({ ts: Date.now(), ping: true });
 
   const ackTimeout = setTimeout(() => {
     if (!confirmed) {
+      console.warn('[BV ipad] timeout — no ack after 10s');
       setIpadConn("error", "No phone found — check code");
       toast("No phone found — check code", "err");
     }
-  }, 8000);
+  }, 10000);
 }
 
 function setIpadConn(state, label) {
@@ -1121,9 +1123,9 @@ function ipadCallNumber(num) {
   if (!num || num < 1 || num > 90) { toast("Enter 1–90", "err"); return; }
   if (ipadCalledNums.has(num)) { toast(`${num} already called`, "warn"); return; }
 
-  // Send to phone via Gun
-  if (ipadChannel) {
-    ipadChannel.get('call').put({ number: num, ts: Date.now() });
+  // Send to phone via Firebase
+  if (ipadChannelRef) {
+    ipadChannelRef.child('call').set({ number: num, ts: Date.now() });
   } else {
     toast("Not connected to phone", "warn");
   }
