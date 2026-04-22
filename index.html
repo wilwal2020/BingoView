@@ -796,10 +796,17 @@ function generateCode() {
 
 function getGun() {
   if (!gunInstance) {
-    gunInstance = Gun([
-      'https://gun-manhattan.herokuapp.com/gun',
-      'https://gun-us.herokuapp.com/gun'
-    ]);
+    gunInstance = Gun({
+      peers: [
+        'https://gun-manhattan.herokuapp.com/gun',
+        'https://peer.wallie.io/gun',
+        'https://gundb-multiserver.glitch.me/gun'
+      ],
+      localStorage: false,
+      radisk: false
+    });
+    gunInstance.on('hi',  p => console.log('[BV] relay connected:',    p && (p.url || p.id || p)));
+    gunInstance.on('bye', p => console.log('[BV] relay disconnected:', p && (p.url || p.id || p)));
   }
   return gunInstance;
 }
@@ -824,10 +831,13 @@ function initPhone() {
   // Watch for iPad ping → send ack back so iPad knows phone is real
   gunChannel.get('ipad').on((data) => {
     if (!data || !data.ping) return;
+    console.log('[BV phone] ping received, sending ack');
     // Send ack back to iPad
     gunChannel.get('phone').put({ ack: true, ts: Date.now() });
     setConnStatus("connected", "iPad tilkoblet");
   });
+
+  console.log('[BV phone] listening on channel bingoview-' + code);
 
   // Watch for called numbers — deduplicate by ts
   gunChannel.get('call').on((data) => {
