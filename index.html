@@ -821,17 +821,18 @@ function initPhone() {
   const gun = getGun();
   gunChannel = gun.get('bingoview-' + code);
 
-  // Watch for iPad heartbeat → show connected
+  // Watch for iPad ping → send ack back so iPad knows phone is real
   gunChannel.get('ipad').on((data) => {
-    if (data && data.connected) {
-      setConnStatus("connected", "iPad tilkoblet");
-    }
+    if (!data || !data.ping) return;
+    // Send ack back to iPad
+    gunChannel.get('phone').put({ ack: true, ts: Date.now() });
+    setConnStatus("connected", "iPad tilkoblet");
   });
 
-  // Watch for called numbers
+  // Watch for called numbers — deduplicate by ts
   gunChannel.get('call').on((data) => {
     if (!data || !data.number || !data.ts) return;
-    if (data.ts === lastCallTs) return;  // deduplicate
+    if (data.ts === lastCallTs) return;
     lastCallTs = data.ts;
     handleCalledNumber(data.number);
   });
@@ -1073,12 +1074,27 @@ function connectToPhone() {
   const gun = getGun();
   ipadChannel = gun.get('bingoview-' + code);
 
-  // Write heartbeat so phone knows iPad is live
-  ipadChannel.get('ipad').put({ ts: Date.now(), connected: true });
+  // Listen for phone ack before declaring connected
+  let confirmed = false;
+  ipadChannel.get('phone').on((data) => {
+    if (!data || !data.ack) return;
+    if (confirmed) return;
+    confirmed = true;
+    clearTimeout(ackTimeout);
+    setIpadConn("connected", "Phone connected ✓");
+    toast("Connected!", "ok");
+    document.getElementById("ipad-connect").style.opacity = "0.5";
+  });
 
-  setIpadConn("connected", "Phone connected ✓");
-  toast("Connected!", "ok");
-  document.getElementById("ipad-connect").style.opacity = "0.5";
+  // Send ping — phone will ack back
+  ipadChannel.get('ipad').put({ ts: Date.now(), ping: true });
+
+  const ackTimeout = setTimeout(() => {
+    if (!confirmed) {
+      setIpadConn("error", "No phone found — check code");
+      toast("No phone found — check code", "err");
+    }
+  }, 8000);
 }
 
 function setIpadConn(state, label) {
