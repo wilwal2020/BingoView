@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>BingoView</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.2/peerjs.min.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
@@ -736,6 +735,7 @@ header {
 <!-- ══════════════════════════════════════
      JAVASCRIPT
 ══════════════════════════════════════ -->
+<script src="https://cdn.jsdelivr.net/npm/gun/gun.js"></script>
 <script>
 'use strict';
 
@@ -783,14 +783,25 @@ document.getElementById("pick-ipad").addEventListener("click", () => {
 });
 
 // ════════════════════════════════════
-// SHARED PEER STATE
+// SHARED GUN STATE
 // ════════════════════════════════════
-let peer = null;
-let conn = null;
+let gunInstance = null;
+let gunChannel  = null;
+let lastCallTs  = 0;   // deduplicate Gun events
 
 function generateCode() {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   return Array.from({length: 6}, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
+function getGun() {
+  if (!gunInstance) {
+    gunInstance = Gun([
+      'https://gun-manhattan.herokuapp.com/gun',
+      'https://gun-us.herokuapp.com/gun'
+    ]);
+  }
+  return gunInstance;
 }
 
 // ════════════════════════════════════
@@ -804,34 +815,25 @@ let calledHistory = [];
 function initPhone() {
   const code = generateCode();
   document.getElementById("phone-code-value").textContent = code;
-  document.getElementById("phone-conn-label").textContent = "My code: " + code;
+  document.getElementById("phone-conn-label").textContent = "Kode: " + code;
 
-  // Init PeerJS with our code as ID
-  peer = new Peer(code, { debug: 0 });
+  // Listen on Gun channel for this code
+  const gun = getGun();
+  gunChannel = gun.get('bingoview-' + code);
 
-  peer.on("open", () => {
-    console.log("Peer open:", code);
+  // Watch for iPad heartbeat → show connected
+  gunChannel.get('ipad').on((data) => {
+    if (data && data.connected) {
+      setConnStatus("connected", "iPad tilkoblet");
+    }
   });
 
-  peer.on("connection", (c) => {
-    conn = c;
-    setConnStatus("connected", "iPad connected");
-
-    c.on("data", (data) => {
-      if (data.type === "call") {
-        handleCalledNumber(data.number);
-      }
-    });
-
-    c.on("close", () => {
-      setConnStatus("error", "iPad disconnected");
-      conn = null;
-    });
-  });
-
-  peer.on("error", (e) => {
-    console.warn("Peer error:", e);
-    setConnStatus("error", "Connection error");
+  // Watch for called numbers
+  gunChannel.get('call').on((data) => {
+    if (!data || !data.number || !data.ts) return;
+    if (data.ts === lastCallTs) return;  // deduplicate
+    lastCallTs = data.ts;
+    handleCalledNumber(data.number);
   });
 
   // File upload
@@ -1043,24 +1045,16 @@ function handleCalledNumber(number) {
 // ════════════════════════════════════
 let ipadCalledNums = new Set();
 let ipadLatest = null;
+let ipadChannel = null;
 
 function initIPad() {
   buildQuickGrid();
-
-  peer = new Peer({ debug: 0 });
-  peer.on("open", () => {
-    console.log("iPad peer ready:", peer.id);
-    setIpadConn("connecting", "Ready to connect");
-  });
-  peer.on("error", e => {
-    setIpadConn("error", "Error");
-    toast("Connection error", "err");
-  });
+  setIpadConn("disconnected", "Not connected");
 
   // Connect button
-  document.getElementById("btn-connect").addEventListener("click", connectToPeer);
+  document.getElementById("btn-connect").addEventListener("click", connectToPhone);
   document.getElementById("peer-code-input").addEventListener("keydown", e => {
-    if (e.key === "Enter") connectToPeer();
+    if (e.key === "Enter") connectToPhone();
   });
 
   // Call input
@@ -1070,29 +1064,21 @@ function initIPad() {
   });
 }
 
-function connectToPeer() {
+function connectToPhone() {
   const code = document.getElementById("peer-code-input").value.trim().toUpperCase();
   if (code.length < 4) { toast("Enter the 6-letter code from the phone", "warn"); return; }
 
   setIpadConn("connecting", "Connecting…");
-  conn = peer.connect(code, { reliable: true });
 
-  conn.on("open", () => {
-    setIpadConn("connected", "Phone connected ✓");
-    toast("Connected to phone!", "ok");
-    document.getElementById("ipad-connect").style.opacity = "0.5";
-  });
+  const gun = getGun();
+  ipadChannel = gun.get('bingoview-' + code);
 
-  conn.on("close", () => {
-    setIpadConn("error", "Disconnected");
-    conn = null;
-    toast("Phone disconnected", "err");
-  });
+  // Write heartbeat so phone knows iPad is live
+  ipadChannel.get('ipad').put({ ts: Date.now(), connected: true });
 
-  conn.on("error", e => {
-    setIpadConn("error", "Failed");
-    toast("Could not connect — check code", "err");
-  });
+  setIpadConn("connected", "Phone connected ✓");
+  toast("Connected!", "ok");
+  document.getElementById("ipad-connect").style.opacity = "0.5";
 }
 
 function setIpadConn(state, label) {
@@ -1109,9 +1095,9 @@ function ipadCallNumber(num) {
   if (!num || num < 1 || num > 90) { toast("Enter 1–90", "err"); return; }
   if (ipadCalledNums.has(num)) { toast(`${num} already called`, "warn"); return; }
 
-  // Send to phone
-  if (conn && conn.open) {
-    conn.send({ type: "call", number: num });
+  // Send to phone via Gun
+  if (ipadChannel) {
+    ipadChannel.get('call').put({ number: num, ts: Date.now() });
   } else {
     toast("Not connected to phone", "warn");
   }
