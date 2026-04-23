@@ -704,7 +704,8 @@ let channelRef = null;
 // ════════════════════════════════════
 
 const GAMES = ['blue','yellow','pink','grey'];
-const GAME_NAMES = { blue:'Spill 1', yellow:'Spill 2', pink:'Spill 3', grey:'Spill 4' };
+const GAME_NAMES   = { blue:'Spill 1', yellow:'Spill 2', pink:'Spill 3', grey:'Spill 4' };
+const GAME_COLORS  = { blue:'#2e6db4', yellow:'#d4a017', pink:'#c94f80', grey:'#7a7a7a' };
 
 // Per-game state: strips (source data), DOM refs, called numbers, current rekke
 const gameState = {};
@@ -1097,6 +1098,9 @@ function renderActiveGame() {
   const gs = gameState[activeGame];
   const wrap = document.getElementById("digital-paper");
   wrap.innerHTML = "";
+  const gameColor = GAME_COLORS[activeGame] || '#fff';
+  wrap.style.background   = gameColor;
+  wrap.style.borderColor  = gameColor;
   document.getElementById("phone-pending").style.display = "none";
 
   if (gs.paperEl) {
