@@ -563,6 +563,7 @@ header {
   <header>
     <div class="hdr-title">PHONE</div>
     <button id="btn-fresh-start">Nytt ark</button>
+    <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
     <div class="conn-label">
       <div class="conn-dot" id="phone-conn-dot"></div>
       <span id="phone-conn-label">Waiting</span>
@@ -643,7 +644,10 @@ header {
       <div id="phone-code-display">
         <div>
           <div class="code-label">Tilkoblet sesjon</div>
-          <div class="code-value" id="phone-code-value">——</div>
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="code-value" id="phone-code-value">——</div>
+            <button id="btn-share-code" title="Del kode" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.06em;padding:4px 9px;cursor:pointer;text-transform:uppercase;">Del</button>
+          </div>
         </div>
         <div class="conn-label">
           <div class="conn-dot" id="phone-conn-dot2"></div>
@@ -810,6 +814,50 @@ function initPhone() {
     }
   });
 
+  // Share session code button
+  document.getElementById("btn-share-code").addEventListener("click", async () => {
+    if (!sessionCode) return;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'BingoView', text: `BingoView-kode: ${sessionCode}` });
+      } else {
+        await navigator.clipboard.writeText(sessionCode);
+        toast('Kode kopiert!', 'ok', 2000);
+      }
+    } catch(e) {}
+  });
+
+  // Share paper button — encodes active game's strips as a URL the recipient opens
+  document.getElementById("btn-share-paper").addEventListener("click", async () => {
+    const strips = gameState[activeGame].strips;
+    if (!strips) return;
+    try {
+      const encoded = btoa(JSON.stringify(strips));
+      const url = location.origin + location.pathname + '?import=' + encodeURIComponent(encoded);
+      if (navigator.share) {
+        await navigator.share({ title: 'Bingo-ark', text: 'Ditt bingo-ark:', url });
+      } else {
+        await navigator.clipboard.writeText(url);
+        toast('Lenke kopiert!', 'ok', 2000);
+      }
+    } catch(e) {}
+  });
+
+  // Import paper from URL — recipient opens a shared link and gets the strips pre-loaded
+  const importParam = new URLSearchParams(location.search).get('import');
+  if (importParam) {
+    try {
+      const strips = JSON.parse(atob(decodeURIComponent(importParam)));
+      if (Array.isArray(strips)) {
+        gameState[activeGame].strips = strips;
+        buildPaperForGame(activeGame);
+        showGameTabs();
+        toast('Ark importert — skriv inn koden for å motta tall', 'ok', 5000);
+      }
+    } catch(e) {}
+    history.replaceState(null, '', location.pathname);
+  }
+
   // Fresh-start button — two-tap confirm to avoid accidental resets
   const freshBtn = document.getElementById("btn-fresh-start");
   let freshConfirmTimeout = null;
@@ -885,6 +933,7 @@ function connectPhone(code) {
   document.getElementById("phone-code-value").textContent = code;
   document.getElementById("phone-connect").style.display = "none";
   document.getElementById("btn-fresh-start").style.display = "block";
+  document.getElementById("btn-share-code").style.display  = "block";
 
   // Restore any saved paper data for this session
   const restored = restoreSession();
@@ -1129,6 +1178,7 @@ function renderActiveGame() {
     wrap.appendChild(gs.paperEl);
     document.getElementById("phone-upload").style.display = "none";
     document.getElementById("phone-paper").style.display = "flex";
+    document.getElementById("btn-share-paper").style.display = "block";
 
     const count = Object.keys(gs.cellMap).length;
     document.getElementById("phone-detected-count").textContent = count ? `${count}/90 detected` : "";
@@ -1150,9 +1200,9 @@ function renderActiveGame() {
 
     updateProximityHighlights(activeGame);
   } else {
-    // No paper uploaded for this game yet — show upload screen
-    document.getElementById("phone-paper").style.display = "none";
+    document.getElementById("phone-paper").style.display  = "none";
     document.getElementById("phone-upload").style.display = "flex";
+    document.getElementById("btn-share-paper").style.display = "none";
   }
 
   updateRekkeLabel();
