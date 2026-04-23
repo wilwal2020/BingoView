@@ -164,6 +164,63 @@ header {
   overflow: hidden;
 }
 
+/* Code-entry connect screen */
+#phone-connect {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 24px;
+}
+.connect-header { text-align: center; }
+.connect-title {
+  font-family: var(--display);
+  font-size: 2rem;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+}
+.connect-sub { font-size: 0.78rem; color: var(--dim); margin-top: 6px; }
+.connect-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+}
+.phone-code-input {
+  width: 100%;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-family: var(--mono);
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--paper);
+  letter-spacing: 0.18em;
+  text-align: center;
+  text-transform: uppercase;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.phone-code-input:focus { border-color: var(--gold); }
+.btn-phone-connect {
+  font-family: var(--display);
+  font-size: 1.3rem;
+  letter-spacing: 0.06em;
+  background: var(--gold);
+  color: var(--ink);
+  border: none;
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-phone-connect:hover { background: var(--gold2); }
+
 #phone-body {
   flex: 1;
   display: flex;
@@ -818,6 +875,21 @@ header {
   </div>
 
   <div id="phone-body">
+    <!-- Step 0: Enter code from bingo site -->
+    <div id="phone-connect">
+      <div class="connect-header">
+        <div class="connect-title">Skriv inn koden</div>
+        <div class="connect-sub">Finn koden på bingo-siden</div>
+      </div>
+      <div class="connect-form">
+        <input id="phone-code-input" class="phone-code-input"
+               type="text" maxlength="6" placeholder="KODE HER"
+               autocomplete="off" autocorrect="off" spellcheck="false"
+               inputmode="text">
+        <button id="btn-phone-connect" class="btn-phone-connect">Koble til</button>
+      </div>
+    </div>
+
     <!-- Step 1: Upload -->
     <div id="phone-upload">
       <div class="upload-zone">
@@ -867,12 +939,12 @@ header {
       </div>
       <div id="phone-code-display">
         <div>
-          <div class="code-label">Session code (give to iPad)</div>
+          <div class="code-label">Tilkoblet sesjon</div>
           <div class="code-value" id="phone-code-value">——</div>
         </div>
         <div class="conn-label">
           <div class="conn-dot" id="phone-conn-dot2"></div>
-          <span id="phone-conn-label2">Waiting for iPad</span>
+          <span id="phone-conn-label2">Tilkoblet</span>
         </div>
       </div>
     </div>
@@ -999,12 +1071,7 @@ document.getElementById("pick-ipad").addEventListener("click", () => {
 // SHARED CHANNEL STATE
 // ════════════════════════════════════
 let channelRef = null;
-let lastCallTs = 0;   // deduplicate call events
 
-function generateCode() {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  return Array.from({length: 6}, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-}
 
 // ════════════════════════════════════
 // PHONE MODE — 4 games
@@ -1031,48 +1098,18 @@ const pendingPhotos = {};         // gameKey → File queued for processing
 let resetTs = 0;                  // callLog entries with ts ≤ resetTs are ignored (pre-reset)
 
 function initPhone() {
-  const code = generateCode();
-  document.getElementById("phone-code-value").textContent = code;
-  document.getElementById("phone-conn-label").textContent = "Kode: " + code;
+  // Show the code-entry screen first
+  document.getElementById("phone-connect").style.display = "flex";
+  document.getElementById("phone-upload").style.display  = "none";
 
-  // Listen on Firebase channel for this code
-  channelRef = db.ref('bingoview/' + code);
-  console.log('[BV phone] listening on channel bingoview/' + code);
-
-  // Watch for iPad ping → send ack back so iPad knows phone is real
-  channelRef.child('ipad').on('value', (snap) => {
-    const data = snap.val();
-    if (!data || !data.ping) return;
-    console.log('[BV phone] ping received, sending ack');
-    channelRef.child('phone').set({ ack: true, ts: Date.now() });
-    setConnStatus("connected", "iPad tilkoblet");
+  // Connect button
+  document.getElementById("btn-phone-connect").addEventListener("click", () => {
+    const code = document.getElementById("phone-code-input").value.trim().toUpperCase();
+    if (code.length < 4) { toast("Skriv inn koden fra bingo-siden", "warn"); return; }
+    connectPhone(code);
   });
-
-  // Watch for called numbers via persistent log — Firebase replays any entries
-  // missed while the phone was backgrounded, so no numbers are skipped.
-  // Fetch resetTs first so we can filter out pre-reset entries on reconnect.
-  channelRef.child('resetTs').once('value', (snap) => {
-    resetTs = snap.val() || 0;
-    channelRef.child('callLog').on('child_added', (snap) => {
-      const data = snap.val();
-      if (!data || !data.number || !data.ts) return;
-      if (data.ts <= resetTs) return;   // pre-reset entry — skip
-      handleCalledNumber(data.number, data.game, data.rekke);
-    });
-  });
-
-  // Watch for state pushes (game/rekke switch without a new number)
-  channelRef.child('state').on('value', (snap) => {
-    const data = snap.val();
-    if (!data) return;
-    applyRemoteState(data.game, data.rekke);
-  });
-
-  // Watch for reset events
-  channelRef.child('reset').on('value', (snap) => {
-    const data = snap.val();
-    if (!data || !data.ts) return;
-    handleRemoteReset(data.scope, data.game);
+  document.getElementById("phone-code-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") document.getElementById("btn-phone-connect").click();
   });
 
   // File upload — queue photo for active game, then show pending screen
@@ -1080,7 +1117,7 @@ function initPhone() {
     const file = e.target.files[0];
     if (!file) return;
     pendingPhotos[activeGame] = file;
-    e.target.value = "";   // reset so same file can be re-selected later
+    e.target.value = "";
     showPendingScreen();
   });
 
@@ -1120,6 +1157,53 @@ function initPhone() {
 
   refreshGameTabs();
   updateUploadTitle();
+}
+
+function connectPhone(code) {
+  channelRef = db.ref('bingoview/' + code);
+  console.log('[BV phone] connecting to bingoview/' + code);
+
+  // Register presence — Firebase removes it automatically on disconnect
+  const phoneId = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const presenceRef = channelRef.child('phones/' + phoneId);
+  presenceRef.set({ ts: Date.now() });
+  presenceRef.onDisconnect().remove();
+
+  // Update UI
+  setConnStatus("connecting", "Kobler til\u2026");
+  document.getElementById("phone-code-value").textContent = code;
+  document.getElementById("phone-connect").style.display = "none";
+  document.getElementById("phone-upload").style.display  = "flex";
+  refreshGameTabs();
+  updateUploadTitle();
+
+  // Mark connected once Firebase confirms the write
+  presenceRef.once('value', () => setConnStatus("connected", "Tilkoblet \u2713"));
+
+  // Called numbers — replay any missed while backgrounded
+  channelRef.child('resetTs').once('value', (snap) => {
+    resetTs = snap.val() || 0;
+    channelRef.child('callLog').on('child_added', (snap) => {
+      const data = snap.val();
+      if (!data || !data.number || !data.ts) return;
+      if (data.ts <= resetTs) return;
+      handleCalledNumber(data.number, data.game, data.rekke);
+    });
+  });
+
+  // Game/rekke state from main site
+  channelRef.child('state').on('value', (snap) => {
+    const data = snap.val();
+    if (!data) return;
+    applyRemoteState(data.game, data.rekke);
+  });
+
+  // Reset events
+  channelRef.child('reset').on('value', (snap) => {
+    const data = snap.val();
+    if (!data || !data.ts) return;
+    handleRemoteReset(data.scope, data.game);
+  });
 }
 
 function setConnStatus(state, label) {
