@@ -835,9 +835,11 @@ function initPhone() {
     btn.addEventListener('click', () => selectActiveGame(btn.dataset.game));
   });
 
-  // Restore saved API key
-  const saved = localStorage.getItem("bv_apikey");
-  if (saved) document.getElementById("apikey-input").value = saved;
+  // Restore saved API key and last session code
+  const savedKey = localStorage.getItem("bv_apikey");
+  if (savedKey) document.getElementById("apikey-input").value = savedKey;
+  const lastCode = localStorage.getItem("bv_last_code");
+  if (lastCode) document.getElementById("phone-code-input").value = lastCode;
 
   refreshGameTabs();
   updateUploadTitle();
@@ -845,6 +847,7 @@ function initPhone() {
 
 function connectPhone(code) {
   sessionCode = code;
+  try { localStorage.setItem('bv_last_code', code); } catch(e) {}
   channelRef = db.ref('bingoview/' + code);
   console.log('[BV phone] connecting to bingoview/' + code);
 
@@ -893,10 +896,12 @@ function connectPhone(code) {
     applyRemoteState(data.game, data.rekke);
   });
 
-  // Reset events
+  // Reset events — ignore stale events that predate this connection
+  const connectedAt = Date.now();
   channelRef.child('reset').on('value', (snap) => {
     const data = snap.val();
     if (!data || !data.ts) return;
+    if (data.ts < connectedAt) return;
     handleRemoteReset(data.scope, data.game);
   });
 }
