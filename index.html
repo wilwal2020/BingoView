@@ -35,13 +35,15 @@ body {
    MODE SELECT SCREEN
 ═══════════════════════════════════ */
 #screen-mode {
-  flex: 1;
-  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 32px 24px;
   gap: 40px;
+}
+#screen-mode.active {
+  display: flex;
+  flex: 1;
 }
 
 .title-block {
@@ -345,6 +347,79 @@ header {
   box-shadow: 0 0 14px rgba(200,40,30,0.55);
   animation: cellPop 0.4s cubic-bezier(0.34,1.56,0.64,1);
   z-index: 2;
+}
+
+/* Proximity-to-win row highlights (three intensity levels).
+   The .latest cell wins over the row tint because its selector is more specific,
+   and .latest has its own background. */
+.cell.row-warm {
+  background: rgba(232,160,32,0.18);
+}
+.cell.row-hot {
+  background: rgba(232,160,32,0.36);
+  color: #8a5500;
+  animation: rowPulse 1.6s ease-in-out infinite;
+}
+.cell.row-winner {
+  background: rgba(26,122,64,0.55);
+  color: #fff;
+  animation: rowWinPulse 1.1s ease-in-out infinite;
+}
+.cell.called.row-warm    { background: rgba(200,40,30,0.30); }
+.cell.called.row-hot     { background: rgba(200,40,30,0.55); color: #fff; }
+.cell.called.row-winner  { background: rgba(26,122,64,0.75); color: #fff; }
+
+@keyframes rowPulse {
+  0%,100% { box-shadow: inset 0 0 0 0 rgba(232,160,32,0); }
+  50%     { box-shadow: inset 0 0 14px 2px rgba(232,160,32,0.55); }
+}
+@keyframes rowWinPulse {
+  0%,100% { box-shadow: inset 0 0 6px 1px rgba(26,122,64,0.5); }
+  50%     { box-shadow: inset 0 0 18px 3px rgba(26,122,64,0.9); }
+}
+
+/* Game tabs strip — row of 4 selectors */
+.game-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  background: #0f0f0f;
+  border-bottom: 1px solid #1e1e1e;
+  flex-shrink: 0;
+}
+
+.game-tab {
+  flex: 1;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 8px 6px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.game-tab:hover { background: #1a1a1a; color: var(--paper); }
+
+.game-tab.active {
+  background: #201c12;
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.game-tab.loaded::after {
+  content: "";
+  position: absolute;
+  top: 4px; right: 6px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
 }
 
 @keyframes cellPop {
@@ -670,14 +745,22 @@ header {
     </div>
   </header>
 
+  <!-- Game tabs — always visible after first upload -->
+  <div id="game-tabs" class="game-tabs" style="display:none">
+    <button class="game-tab" data-game="blue">Spill 1</button>
+    <button class="game-tab" data-game="yellow">Spill 2</button>
+    <button class="game-tab" data-game="pink">Spill 3</button>
+    <button class="game-tab" data-game="grey">Spill 4</button>
+  </div>
+
   <div id="phone-body">
     <!-- Step 1: Upload -->
     <div id="phone-upload">
       <div class="upload-zone">
         <input type="file" id="file-input" accept="image/*" capture="environment">
         <div class="up-icon">📄</div>
-        <h3>Scan Paper</h3>
-        <p>Tap to photograph the bingo paper</p>
+        <h3 id="upload-title">Scan Paper</h3>
+        <p id="upload-sub">Tap to photograph the bingo paper for the active game</p>
       </div>
       <div class="apikey-row">
         <label class="apikey-label">Anthropic API Key</label>
@@ -700,7 +783,7 @@ header {
       </div>
       <div id="phone-status-bar">
         <div class="last-called">
-          <span>Last called</span>
+          <span id="phone-rekke-label">Rekke 1</span>
           <span id="phone-last-num">—</span>
         </div>
         <div class="detected-count" id="phone-detected-count"></div>
@@ -847,12 +930,26 @@ function generateCode() {
 }
 
 // ════════════════════════════════════
-// PHONE MODE
+// PHONE MODE — 4 games
 // ════════════════════════════════════
 
-let cellMap = {};         // { "42": <div.cell> }
-let latestCell = null;
-let calledHistory = [];
+const GAMES = ['blue','yellow','pink','grey'];
+const GAME_NAMES = { blue:'Spill 1', yellow:'Spill 2', pink:'Spill 3', grey:'Spill 4' };
+
+// Per-game state: strips (source data), DOM refs, called numbers, current rekke
+const gameState = {};
+GAMES.forEach(g => gameState[g] = {
+  strips: null,         // parsed strips array from Claude
+  paperEl: null,        // rendered digital paper DOM element
+  cellMap: {},          // { "42": <div.cell> } for this game
+  called: [],           // ordered list of called numbers
+  rekke: 'Rekke1',      // which rekke is active for this game
+});
+
+let activeGame = 'blue';          // currently displayed game on phone
+let currentGame = null;           // the game the main site (iPad) is on
+let currentRekke = 'Rekke1';      // the rekke the main site is on
+let latestCell = null;            // last "latest"-highlighted cell in the active game
 
 function initPhone() {
   const code = generateCode();
@@ -878,19 +975,41 @@ function initPhone() {
     if (!data || !data.number || !data.ts) return;
     if (data.ts === lastCallTs) return;
     lastCallTs = data.ts;
-    handleCalledNumber(data.number);
+    handleCalledNumber(data.number, data.game, data.rekke);
   });
 
-  // File upload
+  // Watch for state pushes (game/rekke switch without a new number)
+  channelRef.child('state').on('value', (snap) => {
+    const data = snap.val();
+    if (!data) return;
+    applyRemoteState(data.game, data.rekke);
+  });
+
+  // Watch for reset events
+  channelRef.child('reset').on('value', (snap) => {
+    const data = snap.val();
+    if (!data || !data.ts) return;
+    handleRemoteReset(data.scope, data.game);
+  });
+
+  // File upload — routes to whichever game tab is active
   document.getElementById("file-input").addEventListener("change", async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     await processImage(file);
   });
 
+  // Game tab clicks
+  document.querySelectorAll('.game-tab').forEach(btn => {
+    btn.addEventListener('click', () => selectActiveGame(btn.dataset.game));
+  });
+
   // Restore saved API key
   const saved = localStorage.getItem("bv_apikey");
   if (saved) document.getElementById("apikey-input").value = saved;
+
+  refreshGameTabs();
+  updateUploadTitle();
 }
 
 function setConnStatus(state, label) {
@@ -982,12 +1101,18 @@ Example:
     const parsed = JSON.parse(clean);
     if (!Array.isArray(parsed)) throw new Error("Expected array of strips");
 
-    // Render the digital paper and build cellMap
-    renderDigitalPaper(parsed);
-    const count = Object.keys(cellMap).length;
+    // Render into the active game slot
+    const gs = gameState[activeGame];
+    gs.strips = parsed;
+    buildPaperForGame(activeGame);
+    const count = Object.keys(gs.cellMap).length;
 
+    // Replay any already-called numbers for this game onto the new paper
+    gs.called.forEach((n, i) => applyCallToGame(activeGame, n, i === gs.called.length - 1));
+
+    showGameTabs();
+    renderActiveGame();
     document.getElementById("phone-processing").style.display = "none";
-    document.getElementById("phone-paper").style.display = "flex";
     document.getElementById("phone-detected-count").textContent = `${count}/90 detected`;
 
     toast(count >= 85
@@ -1004,32 +1129,34 @@ Example:
   }
 }
 
-function renderDigitalPaper(strips) {
-  const paper = document.getElementById("digital-paper");
-  paper.innerHTML = "";
-  cellMap = {};
-  latestCell = null;
+// Build (or rebuild) the paper DOM for one game from its strips data.
+function buildPaperForGame(gameKey) {
+  const gs = gameState[gameKey];
+  if (!gs.strips) return;
+
+  const paper = document.createElement("div");
+  paper.className = "digital-paper-inner";
+  paper.style.cssText = "display:flex;flex-direction:column;gap:4px;";
+  gs.cellMap = {};
 
   const colForNumber = n => Math.min(Math.floor(n / 10), 8);
 
-  for (const strip of strips) {
+  for (const strip of gs.strips) {
     if (!strip || !Array.isArray(strip.rows)) continue;
 
-    // Place numbers into a 3×9 grid using derived column positions
     const grid = Array.from({length: 3}, () => Array(9).fill(null));
     for (let row = 0; row < 3; row++) {
       const nums = strip.rows[row] || [];
       for (const n of nums) {
         const num = Number(n);
         if (!Number.isInteger(num) || num < 1 || num > 90) continue;
-        const col = colForNumber(num);
-        grid[row][col] = num;
-        cellMap[String(num)] = null; // placeholder, set below
+        grid[row][col_safe(num, colForNumber)] = num;
       }
     }
 
     const stripEl = document.createElement("div");
     stripEl.className = "strip";
+    stripEl._rows = [[], [], []];     // row → array of cells that contain numbers
 
     const idEl = document.createElement("div");
     idEl.className = "strip-id";
@@ -1046,7 +1173,10 @@ function renderDigitalPaper(strips) {
         const num = grid[row][col];
         if (num !== null) {
           cell.textContent = num;
-          cellMap[String(num)] = cell;
+          cell.dataset.num = num;
+          cell.dataset.row = row;
+          gs.cellMap[String(num)] = cell;
+          stripEl._rows[row].push(cell);
         }
         gridEl.appendChild(cell);
       }
@@ -1055,33 +1185,246 @@ function renderDigitalPaper(strips) {
     stripEl.appendChild(gridEl);
     paper.appendChild(stripEl);
   }
+
+  gs.paperEl = paper;
 }
 
-function handleCalledNumber(number) {
-  document.getElementById("phone-last-num").textContent = number;
-  calledHistory.unshift(number);
+function col_safe(num, fn) {
+  const c = fn(num);
+  return c < 0 ? 0 : (c > 8 ? 8 : c);
+}
 
-  // Demote previous latest to just "called"
-  if (latestCell) {
-    latestCell.classList.remove("latest");
-    latestCell.classList.add("called");
+// Put the currently active game's paper into view
+function renderActiveGame() {
+  const gs = gameState[activeGame];
+  const wrap = document.getElementById("digital-paper");
+  wrap.innerHTML = "";
+
+  if (gs.paperEl) {
+    wrap.appendChild(gs.paperEl);
+    document.getElementById("phone-upload").style.display = "none";
+    document.getElementById("phone-paper").style.display = "flex";
+
+    const count = Object.keys(gs.cellMap).length;
+    document.getElementById("phone-detected-count").textContent = count ? `${count}/90 detected` : "";
+
+    // Restore latest highlight for this game
+    latestCell = null;
+    if (gs.called.length) {
+      const last = gs.called[gs.called.length - 1];
+      const cell = gs.cellMap[String(last)];
+      if (cell) {
+        cell.classList.remove("called");
+        cell.classList.add("latest");
+        latestCell = cell;
+      }
+      document.getElementById("phone-last-num").textContent = last;
+    } else {
+      document.getElementById("phone-last-num").textContent = "—";
+    }
+
+    updateProximityHighlights(activeGame);
+  } else {
+    // No paper uploaded for this game yet — show upload screen
+    document.getElementById("phone-paper").style.display = "none";
+    document.getElementById("phone-upload").style.display = "flex";
   }
 
-  const cell = cellMap[String(number)];
-  if (!cell) {
-    toast(`#${number} not on this paper`, "warn");
-    return;
+  updateRekkeLabel();
+  refreshGameTabs();
+  updateUploadTitle();
+}
+
+function showGameTabs() {
+  document.getElementById("game-tabs").style.display = "flex";
+}
+
+function refreshGameTabs() {
+  const tabsWrap = document.getElementById("game-tabs");
+  const anyLoaded = GAMES.some(g => gameState[g].strips);
+  tabsWrap.style.display = anyLoaded ? "flex" : "none";
+
+  document.querySelectorAll(".game-tab").forEach(btn => {
+    const g = btn.dataset.game;
+    btn.classList.toggle("active", g === activeGame);
+    btn.classList.toggle("loaded", !!gameState[g].strips);
+    // Suffix game name with "✓" if loaded, "●" mark if this is the main-site current game
+    const marker = (g === currentGame) ? " •" : "";
+    btn.textContent = GAME_NAMES[g] + marker;
+  });
+}
+
+function selectActiveGame(game) {
+  if (!GAMES.includes(game)) return;
+  activeGame = game;
+  renderActiveGame();
+}
+
+function updateUploadTitle() {
+  const gs = gameState[activeGame];
+  const title = document.getElementById("upload-title");
+  const sub   = document.getElementById("upload-sub");
+  if (!title || !sub) return;
+  if (gs.strips) {
+    title.textContent = `Scan new paper (${GAME_NAMES[activeGame]})`;
+  } else {
+    title.textContent = `Scan Paper — ${GAME_NAMES[activeGame]}`;
+  }
+  sub.textContent = "Tap to photograph the bingo paper for the active game";
+}
+
+function updateRekkeLabel() {
+  const gs = gameState[activeGame];
+  const el = document.getElementById("phone-rekke-label");
+  if (el) el.textContent = gs.rekke.replace("Rekke","Rekke ");
+}
+
+// Apply a called number to a given game's state — updates DOM if that game is active
+function applyCallToGame(gameKey, number, isLatestEver) {
+  const gs = gameState[gameKey];
+  if (!gs.cellMap) return;
+  const cell = gs.cellMap[String(number)];
+  if (!cell) return;
+  if (gameKey === activeGame) {
+    cell.classList.remove("latest");
+    cell.classList.add("called");
+    if (isLatestEver) {
+      if (latestCell && latestCell !== cell) {
+        latestCell.classList.remove("latest");
+        latestCell.classList.add("called");
+      }
+      cell.classList.remove("called");
+      cell.classList.add("latest");
+      latestCell = cell;
+    }
+  }
+}
+
+function handleCalledNumber(number, game, rekke) {
+  // Route to the right game bucket. If no game specified, apply to the main-site current game or the active one.
+  const target = (game && GAMES.includes(game)) ? game : (currentGame || activeGame);
+
+  // Update rekke for that game if provided
+  if (rekke && /^Rekke[1-3]$/.test(rekke)) {
+    gameState[target].rekke = rekke;
+    if (target === (currentGame || activeGame)) currentRekke = rekke;
   }
 
-  cell.classList.remove("called");
-  cell.classList.add("latest");
-  latestCell = cell;
-  cell.scrollIntoView({ behavior: "smooth", block: "center" });
+  // Record call (avoid duplicates from rehydration)
+  const called = gameState[target].called;
+  if (called[called.length - 1] !== number) called.push(number);
 
-  // Brief flash on the whole screen
-  document.body.style.transition = "background 0.05s";
-  document.body.style.background = "rgba(200,40,30,0.15)";
-  setTimeout(() => document.body.style.background = "var(--ink)", 150);
+  if (target === activeGame) {
+    document.getElementById("phone-last-num").textContent = number;
+
+    // Demote previous latest
+    if (latestCell) {
+      latestCell.classList.remove("latest");
+      latestCell.classList.add("called");
+    }
+    const cell = gameState[activeGame].cellMap[String(number)];
+    if (cell) {
+      cell.classList.remove("called");
+      cell.classList.add("latest");
+      latestCell = cell;
+    } else if (gameState[activeGame].strips) {
+      toast(`#${number} not on this paper`, "warn");
+    }
+
+    updateProximityHighlights(activeGame);
+    updateRekkeLabel();
+
+    // Brief screen flash (no scroll!)
+    document.body.style.transition = "background 0.05s";
+    document.body.style.background = "rgba(200,40,30,0.15)";
+    setTimeout(() => document.body.style.background = "var(--ink)", 150);
+  } else {
+    // Target game is not the one shown — still update its invisible state so switching is correct
+    updateProximityHighlights(target);
+  }
+}
+
+function applyRemoteState(game, rekke) {
+  let changed = false;
+  if (game && GAMES.includes(game)) {
+    currentGame = game;
+    // auto-follow: if user hasn't pinned a different game, switch view
+    if (activeGame !== game && gameState[game].strips) {
+      activeGame = game;
+      changed = true;
+    }
+  }
+  if (rekke && /^Rekke[1-3]$/.test(rekke)) {
+    currentRekke = rekke;
+    const tgt = currentGame || activeGame;
+    gameState[tgt].rekke = rekke;
+    changed = true;
+  }
+  if (changed) renderActiveGame();
+  else { refreshGameTabs(); updateRekkeLabel(); updateProximityHighlights(activeGame); }
+}
+
+function handleRemoteReset(scope, game) {
+  if (scope === 'all') {
+    GAMES.forEach(g => {
+      gameState[g].called = [];
+      gameState[g].rekke = 'Rekke1';
+      if (gameState[g].strips) buildPaperForGame(g);
+    });
+    toast("Alle spill nullstilt", "warn");
+  } else if (scope === 'game' && game && GAMES.includes(game)) {
+    gameState[game].called = [];
+    gameState[game].rekke = 'Rekke1';
+    if (gameState[game].strips) buildPaperForGame(game);
+    toast(`${GAME_NAMES[game]} nullstilt`, "warn");
+  }
+  renderActiveGame();
+}
+
+// ─── Proximity-to-win highlighting ───────────────────────────
+// For each strip in the given game: compute how many numbers per row are
+// still missing, then highlight the rows that form the win path for the
+// active rekke (Rekke1 → 1 row, Rekke2 → 2 rows, Rekke3 → 3 rows).
+// Start highlighting at ≤2 missing (Rekke1) or ≤3 missing (Rekke2/3).
+function updateProximityHighlights(gameKey) {
+  const gs = gameState[gameKey];
+  if (!gs.paperEl) return;
+  const calledSet = new Set(gs.called.map(String));
+  const rekke = gs.rekke || 'Rekke1';
+  const rowsNeeded = rekke === 'Rekke1' ? 1 : (rekke === 'Rekke2' ? 2 : 3);
+  // missing threshold to START warming
+  const warmThreshold = rekke === 'Rekke1' ? 2 : 3;
+
+  gs.paperEl.querySelectorAll(".strip").forEach(stripEl => {
+    const rowArr = stripEl._rows || [];
+    // Compute missing count per row for this strip
+    const missingPerRow = rowArr.map(cells =>
+      cells.reduce((acc, c) => acc + (calledSet.has(c.dataset.num) ? 0 : 1), 0)
+    );
+
+    // Sort rows by missing ascending, pick top N=rowsNeeded
+    const rowsWithIdx = missingPerRow.map((m, idx) => ({ m, idx }))
+                                     .sort((a, b) => a.m - b.m);
+    const selected = rowsWithIdx.slice(0, rowsNeeded);
+    const totalMissing = selected.reduce((s, r) => s + r.m, 0);
+
+    // Clear previous highlights on this strip
+    rowArr.forEach(cells => cells.forEach(c => {
+      c.classList.remove("row-warm", "row-hot", "row-winner");
+    }));
+
+    if (totalMissing > warmThreshold) return;
+
+    // Intensity: 0 missing = winner; 1 missing = hot; anything else on threshold = warm
+    let cls;
+    if (totalMissing === 0)      cls = "row-winner";
+    else if (totalMissing === 1) cls = "row-hot";
+    else                         cls = "row-warm";
+
+    selected.forEach(({ idx }) => {
+      rowArr[idx].forEach(c => c.classList.add(cls));
+    });
+  });
 }
 
 
