@@ -810,25 +810,47 @@ function initPhone() {
     }
   });
 
-  // Fresh-start button — clears saved paper and resets all game state
-  document.getElementById("btn-fresh-start").addEventListener("click", () => {
-    clearSession();
-    GAMES.forEach(g => {
-      gameState[g].strips = null;
-      gameState[g].paperEl = null;
-      gameState[g].cellMap = {};
-      gameState[g].called  = [];
-      gameState[g].rekke   = 'Rekke1';
-    });
-    activeGame = 'blue';
-    latestCell = null;
-    Object.keys(pendingPhotos).forEach(k => delete pendingPhotos[k]);
-    document.getElementById("phone-pending").style.display = "none";
-    document.getElementById("phone-paper").style.display   = "none";
-    document.getElementById("phone-upload").style.display  = "flex";
-    refreshGameTabs();
-    updateUploadTitle();
-    toast("Nytt ark klart", "ok", 2000);
+  // Fresh-start button — two-tap confirm to avoid accidental resets
+  const freshBtn = document.getElementById("btn-fresh-start");
+  let freshConfirmTimeout = null;
+  freshBtn.addEventListener("click", () => {
+    if (freshBtn.dataset.confirming !== "1") {
+      // First tap — ask for confirmation
+      freshBtn.dataset.confirming = "1";
+      freshBtn.textContent = "Bekreft?";
+      freshBtn.style.borderColor = "var(--red)";
+      freshBtn.style.color       = "var(--red)";
+      freshConfirmTimeout = setTimeout(() => {
+        freshBtn.dataset.confirming = "";
+        freshBtn.textContent = "Nytt ark";
+        freshBtn.style.borderColor = "";
+        freshBtn.style.color       = "";
+      }, 3000);
+    } else {
+      // Second tap — confirmed
+      clearTimeout(freshConfirmTimeout);
+      freshBtn.dataset.confirming = "";
+      freshBtn.textContent = "Nytt ark";
+      freshBtn.style.borderColor = "";
+      freshBtn.style.color       = "";
+      clearSession();
+      GAMES.forEach(g => {
+        gameState[g].strips = null;
+        gameState[g].paperEl = null;
+        gameState[g].cellMap = {};
+        gameState[g].called  = [];
+        gameState[g].rekke   = 'Rekke1';
+      });
+      activeGame = 'blue';
+      latestCell = null;
+      Object.keys(pendingPhotos).forEach(k => delete pendingPhotos[k]);
+      document.getElementById("phone-pending").style.display = "none";
+      document.getElementById("phone-paper").style.display   = "none";
+      document.getElementById("phone-upload").style.display  = "flex";
+      refreshGameTabs();
+      updateUploadTitle();
+      toast("Nytt ark klart", "ok", 2000);
+    }
   });
 
   // Game tab clicks
