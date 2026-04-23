@@ -536,6 +536,22 @@ header {
 #toast.ok  { border-color: var(--green); color: var(--green); }
 #toast.err { border-color: var(--red);   color: var(--red); }
 #toast.warn{ border-color: var(--gold);  color: var(--gold); }
+
+#btn-fresh-start {
+  display: none;
+  background: transparent;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  padding: 5px 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: border-color 0.15s, color 0.15s;
+}
+#btn-fresh-start:hover { border-color: var(--red); color: var(--red); }
 </style>
 </head>
 <body>
@@ -546,6 +562,7 @@ header {
 <div id="screen-phone" class="screen active">
   <header>
     <div class="hdr-title">PHONE</div>
+    <button id="btn-fresh-start">Nytt ark</button>
     <div class="conn-label">
       <div class="conn-dot" id="phone-conn-dot"></div>
       <span id="phone-conn-label">Waiting</span>
@@ -705,6 +722,43 @@ let currentRekke = 'Rekke1';      // the rekke the main site is on
 let latestCell = null;            // last "latest"-highlighted cell in the active game
 const pendingPhotos = {};         // gameKey → File queued for processing
 let resetTs = 0;                  // callLog entries with ts ≤ resetTs are ignored (pre-reset)
+let sessionCode = null;           // code used to connect — key for localStorage
+
+// ── Session persistence ───────────────────────────────────────
+function saveSession() {
+  if (!sessionCode) return;
+  const data = {};
+  GAMES.forEach(g => {
+    data[g] = { strips: gameState[g].strips, called: gameState[g].called, rekke: gameState[g].rekke };
+  });
+  try { localStorage.setItem('bv_paper_' + sessionCode, JSON.stringify(data)); } catch(e) {}
+}
+
+function restoreSession() {
+  if (!sessionCode) return false;
+  let raw;
+  try { raw = localStorage.getItem('bv_paper_' + sessionCode); } catch(e) { return false; }
+  if (!raw) return false;
+  const saved = JSON.parse(raw);
+  let any = false;
+  GAMES.forEach(g => {
+    if (!saved[g] || !saved[g].strips) return;
+    gameState[g].strips = saved[g].strips;
+    gameState[g].called = saved[g].called || [];
+    gameState[g].rekke  = saved[g].rekke  || 'Rekke1';
+    buildPaperForGame(g);
+    gameState[g].called.forEach((n, i) =>
+      applyCallToGame(g, n, i === gameState[g].called.length - 1)
+    );
+    any = true;
+  });
+  return any;
+}
+
+function clearSession() {
+  if (!sessionCode) return;
+  try { localStorage.removeItem('bv_paper_' + sessionCode); } catch(e) {}
+}
 
 function initPhone() {
   // Show the code-entry screen first
@@ -755,6 +809,27 @@ function initPhone() {
     }
   });
 
+  // Fresh-start button — clears saved paper and resets all game state
+  document.getElementById("btn-fresh-start").addEventListener("click", () => {
+    clearSession();
+    GAMES.forEach(g => {
+      gameState[g].strips = null;
+      gameState[g].paperEl = null;
+      gameState[g].cellMap = {};
+      gameState[g].called  = [];
+      gameState[g].rekke   = 'Rekke1';
+    });
+    activeGame = 'blue';
+    latestCell = null;
+    Object.keys(pendingPhotos).forEach(k => delete pendingPhotos[k]);
+    document.getElementById("phone-pending").style.display = "none";
+    document.getElementById("phone-paper").style.display   = "none";
+    document.getElementById("phone-upload").style.display  = "flex";
+    refreshGameTabs();
+    updateUploadTitle();
+    toast("Nytt ark klart", "ok", 2000);
+  });
+
   // Game tab clicks
   document.querySelectorAll('.game-tab').forEach(btn => {
     btn.addEventListener('click', () => selectActiveGame(btn.dataset.game));
@@ -769,6 +844,7 @@ function initPhone() {
 }
 
 function connectPhone(code) {
+  sessionCode = code;
   channelRef = db.ref('bingoview/' + code);
   console.log('[BV phone] connecting to bingoview/' + code);
 
@@ -782,7 +858,17 @@ function connectPhone(code) {
   setConnStatus("connecting", "Kobler til\u2026");
   document.getElementById("phone-code-value").textContent = code;
   document.getElementById("phone-connect").style.display = "none";
-  document.getElementById("phone-upload").style.display  = "flex";
+  document.getElementById("btn-fresh-start").style.display = "block";
+
+  // Restore any saved paper data for this session
+  const restored = restoreSession();
+  if (restored) {
+    showGameTabs();
+    renderActiveGame();
+    toast("Ark gjenopprettet", "ok", 3000);
+  } else {
+    document.getElementById("phone-upload").style.display = "flex";
+  }
   refreshGameTabs();
   updateUploadTitle();
 
@@ -914,6 +1000,7 @@ Example:
     // Replay any already-called numbers for this game onto the new paper
     gs.called.forEach((n, i) => applyCallToGame(activeGame, n, i === gs.called.length - 1));
 
+    saveSession();
     showGameTabs();
     renderActiveGame();
     document.getElementById("phone-processing").style.display = "none";
@@ -1180,9 +1267,9 @@ function handleCalledNumber(number, game, rekke) {
     document.body.style.background = "rgba(200,40,30,0.15)";
     setTimeout(() => document.body.style.background = "var(--ink)", 150);
   } else {
-    // Target game is not the one shown — still update its invisible state so switching is correct
     updateProximityHighlights(target);
   }
+  saveSession();
 }
 
 function applyRemoteState(game, rekke) {
@@ -1207,7 +1294,7 @@ function applyRemoteState(game, rekke) {
 }
 
 function handleRemoteReset(scope, game) {
-  resetTs = Date.now();   // callLog entries before this moment belong to the old game
+  resetTs = Date.now();
   if (scope === 'all') {
     GAMES.forEach(g => {
       gameState[g].called = [];
@@ -1221,6 +1308,7 @@ function handleRemoteReset(scope, game) {
     if (gameState[game].strips) buildPaperForGame(game);
     toast(`${GAME_NAMES[game]} nullstilt`, "warn");
   }
+  saveSession();
   renderActiveGame();
 }
 
