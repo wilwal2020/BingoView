@@ -260,6 +260,73 @@ header {
   text-align: center;
 }
 
+/* Pending / multi-photo queue screen */
+#phone-pending {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 28px;
+  padding: 24px;
+}
+.pending-header { text-align: center; }
+.pending-title {
+  font-family: var(--display);
+  font-size: 2rem;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+  line-height: 1.1;
+}
+.pending-sub {
+  font-size: 0.78rem;
+  color: var(--dim);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+.pending-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+}
+.pending-btn {
+  font-family: var(--display);
+  font-size: 1.2rem;
+  letter-spacing: 0.06em;
+  border: none;
+  border-radius: 10px;
+  padding: 14px 18px;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.pending-btn-primary {
+  background: var(--gold);
+  color: var(--ink);
+}
+.pending-btn-primary:hover { background: var(--gold2); }
+.pending-btn-primary:disabled {
+  background: #3a311a;
+  color: #665a3a;
+  cursor: not-allowed;
+}
+.pending-btn-secondary {
+  background: var(--green);
+  color: #fff;
+}
+.pending-btn-secondary:hover { background: #13633a; }
+.pending-btn-link {
+  background: transparent;
+  border: none;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 8px;
+}
+.pending-btn-link:hover { color: var(--paper); }
+
 /* Paper view */
 #phone-paper {
   display: none;
@@ -349,25 +416,22 @@ header {
   z-index: 2;
 }
 
-/* Proximity-to-win row highlights (three intensity levels).
-   The .latest cell wins over the row tint because its selector is more specific,
-   and .latest has its own background. */
-.cell.row-warm {
-  background: rgba(232,160,32,0.18);
+/* Proximity-to-win row highlights — applied to every cell in the row
+   including blanks. Called / latest cells keep their normal red styling,
+   so the highlight only tints the empty + uncalled cells. */
+.cell.row-warm:not(.called):not(.latest) {
+  background: rgba(232,160,32,0.24);
 }
-.cell.row-hot {
-  background: rgba(232,160,32,0.36);
+.cell.row-hot:not(.called):not(.latest) {
+  background: rgba(232,160,32,0.44);
   color: #8a5500;
   animation: rowPulse 1.6s ease-in-out infinite;
 }
-.cell.row-winner {
+.cell.row-winner:not(.called):not(.latest) {
   background: rgba(26,122,64,0.55);
   color: #fff;
   animation: rowWinPulse 1.1s ease-in-out infinite;
 }
-.cell.called.row-warm    { background: rgba(200,40,30,0.30); }
-.cell.called.row-hot     { background: rgba(200,40,30,0.55); color: #fff; }
-.cell.called.row-winner  { background: rgba(26,122,64,0.75); color: #fff; }
 
 @keyframes rowPulse {
   0%,100% { box-shadow: inset 0 0 0 0 rgba(232,160,32,0); }
@@ -776,6 +840,19 @@ header {
       <div class="proc-label" id="proc-label">Reading numbers…</div>
     </div>
 
+    <!-- Step 2b: Multi-photo queue -->
+    <div id="phone-pending">
+      <div class="pending-header">
+        <div class="pending-title">Bilde lagt til</div>
+        <div id="pending-summary" class="pending-sub"></div>
+      </div>
+      <div class="pending-buttons">
+        <button id="btn-take-next" class="pending-btn pending-btn-primary">Ta bilde for neste spill</button>
+        <button id="btn-process-now" class="pending-btn pending-btn-secondary">Prosesser bildene</button>
+        <button id="btn-pending-back" class="pending-btn-link">Avbryt</button>
+      </div>
+    </div>
+
     <!-- Step 3: Digital paper with highlights -->
     <div id="phone-paper">
       <div id="paper-canvas-wrap">
@@ -950,6 +1027,7 @@ let activeGame = 'blue';          // currently displayed game on phone
 let currentGame = null;           // the game the main site (iPad) is on
 let currentRekke = 'Rekke1';      // the rekke the main site is on
 let latestCell = null;            // last "latest"-highlighted cell in the active game
+const pendingPhotos = {};         // gameKey → File queued for processing
 
 function initPhone() {
   const code = generateCode();
@@ -992,11 +1070,38 @@ function initPhone() {
     handleRemoteReset(data.scope, data.game);
   });
 
-  // File upload — routes to whichever game tab is active
-  document.getElementById("file-input").addEventListener("change", async (e) => {
+  // File upload — queue photo for active game, then show pending screen
+  document.getElementById("file-input").addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    await processImage(file);
+    pendingPhotos[activeGame] = file;
+    e.target.value = "";   // reset so same file can be re-selected later
+    showPendingScreen();
+  });
+
+  document.getElementById("btn-take-next").addEventListener("click", () => {
+    const nextEmpty = GAMES.find(g => !gameState[g].strips && !pendingPhotos[g]);
+    if (!nextEmpty) return;
+    activeGame = nextEmpty;
+    refreshGameTabs();
+    updateUploadTitle();
+    document.getElementById("phone-pending").style.display = "none";
+    document.getElementById("phone-upload").style.display = "flex";
+    setTimeout(() => document.getElementById("file-input").click(), 120);
+  });
+
+  document.getElementById("btn-process-now").addEventListener("click", async () => {
+    await processAllPending();
+  });
+
+  document.getElementById("btn-pending-back").addEventListener("click", () => {
+    document.getElementById("phone-pending").style.display = "none";
+    const gs = gameState[activeGame];
+    if (gs.paperEl) {
+      document.getElementById("phone-paper").style.display = "flex";
+    } else {
+      document.getElementById("phone-upload").style.display = "flex";
+    }
   });
 
   // Game tab clicks
@@ -1024,7 +1129,8 @@ function setConnStatus(state, label) {
 }
 
 async function processImage(file) {
-  document.getElementById("phone-upload").style.display = "none";
+  document.getElementById("phone-pending").style.display    = "none";
+  document.getElementById("phone-upload").style.display     = "none";
   document.getElementById("phone-processing").style.display = "flex";
   const setLabel = t => document.getElementById("proc-label").textContent = t;
 
@@ -1156,7 +1262,8 @@ function buildPaperForGame(gameKey) {
 
     const stripEl = document.createElement("div");
     stripEl.className = "strip";
-    stripEl._rows = [[], [], []];     // row → array of cells that contain numbers
+    stripEl._rows    = [[], [], []];   // ALL 9 cells per row (for highlight classes)
+    stripEl._numRows = [[], [], []];   // only number-containing cells (for missing count)
 
     const idEl = document.createElement("div");
     idEl.className = "strip-id";
@@ -1176,8 +1283,9 @@ function buildPaperForGame(gameKey) {
           cell.dataset.num = num;
           cell.dataset.row = row;
           gs.cellMap[String(num)] = cell;
-          stripEl._rows[row].push(cell);
+          stripEl._numRows[row].push(cell);
         }
+        stripEl._rows[row].push(cell);   // always — all 9 cells
         gridEl.appendChild(cell);
       }
     }
@@ -1199,6 +1307,7 @@ function renderActiveGame() {
   const gs = gameState[activeGame];
   const wrap = document.getElementById("digital-paper");
   wrap.innerHTML = "";
+  document.getElementById("phone-pending").style.display = "none";
 
   if (gs.paperEl) {
     wrap.appendChild(gs.paperEl);
@@ -1271,6 +1380,40 @@ function updateUploadTitle() {
     title.textContent = `Scan Paper — ${GAME_NAMES[activeGame]}`;
   }
   sub.textContent = "Tap to photograph the bingo paper for the active game";
+}
+
+function showPendingScreen() {
+  document.getElementById("phone-upload").style.display     = "none";
+  document.getElementById("phone-processing").style.display = "none";
+  document.getElementById("phone-paper").style.display      = "none";
+  document.getElementById("phone-pending").style.display    = "flex";
+
+  const names = Object.keys(pendingPhotos).map(g => GAME_NAMES[g]);
+  document.getElementById("pending-summary").textContent =
+    names.length === 1
+      ? `Klar: ${names[0]}`
+      : `${names.length} bilder i kø: ${names.join(", ")}`;
+
+  const nextEmpty = GAMES.find(g => !gameState[g].strips && !pendingPhotos[g]);
+  const nextBtn = document.getElementById("btn-take-next");
+  if (nextEmpty) {
+    nextBtn.textContent = `Ta bilde for ${GAME_NAMES[nextEmpty]}`;
+    nextBtn.disabled = false;
+  } else {
+    nextBtn.textContent = "Alle spill har bilde";
+    nextBtn.disabled = true;
+  }
+}
+
+async function processAllPending() {
+  const entries = Object.entries(pendingPhotos);
+  if (!entries.length) return;
+  for (const [gameKey, file] of entries) {
+    activeGame = gameKey;
+    refreshGameTabs();
+    delete pendingPhotos[gameKey];
+    await processImage(file);
+  }
 }
 
 function updateRekkeLabel() {
@@ -1360,7 +1503,8 @@ function applyRemoteState(game, rekke) {
     gameState[tgt].rekke = rekke;
     changed = true;
   }
-  if (changed) renderActiveGame();
+  const pendingVisible = document.getElementById("phone-pending").style.display === "flex";
+  if (changed && !pendingVisible) renderActiveGame();
   else { refreshGameTabs(); updateRekkeLabel(); updateProximityHighlights(activeGame); }
 }
 
@@ -1396,9 +1540,11 @@ function updateProximityHighlights(gameKey) {
   const warmThreshold = rekke === 'Rekke1' ? 2 : 3;
 
   gs.paperEl.querySelectorAll(".strip").forEach(stripEl => {
-    const rowArr = stripEl._rows || [];
-    // Compute missing count per row for this strip
-    const missingPerRow = rowArr.map(cells =>
+    const rowArr  = stripEl._rows    || [];   // all 9 cells per row
+    const numRows = stripEl._numRows || [];   // only number cells per row
+
+    // Compute missing count using only number cells
+    const missingPerRow = numRows.map(cells =>
       cells.reduce((acc, c) => acc + (calledSet.has(c.dataset.num) ? 0 : 1), 0)
     );
 
@@ -1408,7 +1554,7 @@ function updateProximityHighlights(gameKey) {
     const selected = rowsWithIdx.slice(0, rowsNeeded);
     const totalMissing = selected.reduce((s, r) => s + r.m, 0);
 
-    // Clear previous highlights on this strip
+    // Clear previous highlights from ALL cells in all rows
     rowArr.forEach(cells => cells.forEach(c => {
       c.classList.remove("row-warm", "row-hot", "row-winner");
     }));
@@ -1421,6 +1567,7 @@ function updateProximityHighlights(gameKey) {
     else if (totalMissing === 1) cls = "row-hot";
     else                         cls = "row-warm";
 
+    // Apply to ALL 9 cells in each selected row (including blanks)
     selected.forEach(({ idx }) => {
       rowArr[idx].forEach(c => c.classList.add(cls));
     });
