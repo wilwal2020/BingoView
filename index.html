@@ -1028,6 +1028,7 @@ let currentGame = null;           // the game the main site (iPad) is on
 let currentRekke = 'Rekke1';      // the rekke the main site is on
 let latestCell = null;            // last "latest"-highlighted cell in the active game
 const pendingPhotos = {};         // gameKey → File queued for processing
+let resetTs = 0;                  // callLog entries with ts ≤ resetTs are ignored (pre-reset)
 
 function initPhone() {
   const code = generateCode();
@@ -1047,13 +1048,17 @@ function initPhone() {
     setConnStatus("connected", "iPad tilkoblet");
   });
 
-  // Watch for called numbers — deduplicate by ts
-  channelRef.child('call').on('value', (snap) => {
-    const data = snap.val();
-    if (!data || !data.number || !data.ts) return;
-    if (data.ts === lastCallTs) return;
-    lastCallTs = data.ts;
-    handleCalledNumber(data.number, data.game, data.rekke);
+  // Watch for called numbers via persistent log — Firebase replays any entries
+  // missed while the phone was backgrounded, so no numbers are skipped.
+  // Fetch resetTs first so we can filter out pre-reset entries on reconnect.
+  channelRef.child('resetTs').once('value', (snap) => {
+    resetTs = snap.val() || 0;
+    channelRef.child('callLog').on('child_added', (snap) => {
+      const data = snap.val();
+      if (!data || !data.number || !data.ts) return;
+      if (data.ts <= resetTs) return;   // pre-reset entry — skip
+      handleCalledNumber(data.number, data.game, data.rekke);
+    });
   });
 
   // Watch for state pushes (game/rekke switch without a new number)
@@ -1509,6 +1514,7 @@ function applyRemoteState(game, rekke) {
 }
 
 function handleRemoteReset(scope, game) {
+  resetTs = Date.now();   // callLog entries before this moment belong to the old game
   if (scope === 'all') {
     GAMES.forEach(g => {
       gameState[g].called = [];
@@ -1651,7 +1657,9 @@ function ipadCallNumber(num) {
 
   // Send to phone via Firebase
   if (ipadChannelRef) {
-    ipadChannelRef.child('call').set({ number: num, ts: Date.now() });
+    const entry = { number: num, ts: Date.now() };
+    ipadChannelRef.child('call').set(entry);
+    ipadChannelRef.child('callLog').push(entry);
   } else {
     toast("Not connected to phone", "warn");
   }
