@@ -1416,29 +1416,38 @@ function updateProximityHighlights(gameKey) {
       cells.reduce((acc, c) => acc + (calledSet.has(c.dataset.num) ? 0 : 1), 0)
     );
 
-    // Sort rows by missing ascending, pick top N=rowsNeeded
-    const rowsWithIdx = missingPerRow.map((m, idx) => ({ m, idx }))
-                                     .sort((a, b) => a.m - b.m);
-    const selected = rowsWithIdx.slice(0, rowsNeeded);
-    const totalMissing = selected.reduce((s, r) => s + r.m, 0);
-
     // Clear previous highlights from ALL cells in all rows
     rowArr.forEach(cells => cells.forEach(c => {
       c.classList.remove("row-warm", "row-hot", "row-winner");
     }));
 
-    if (totalMissing > warmThreshold) return;
+    if (rowsNeeded === 1) {
+      // Rekke1: highlight every row independently based on its own missing count
+      missingPerRow.forEach((m, idx) => {
+        let cls = null;
+        if (m === 0)                  cls = "row-winner";
+        else if (m === 1)             cls = "row-hot";
+        else if (m <= warmThreshold)  cls = "row-warm";
+        if (cls) rowArr[idx].forEach(c => c.classList.add(cls));
+      });
+    } else {
+      // Rekke2/3: pick the top N rows and evaluate their combined total
+      const rowsWithIdx = missingPerRow.map((m, idx) => ({ m, idx }))
+                                       .sort((a, b) => a.m - b.m);
+      const selected = rowsWithIdx.slice(0, rowsNeeded);
+      const totalMissing = selected.reduce((s, r) => s + r.m, 0);
 
-    // Intensity: 0 missing = winner; 1 missing = hot; anything else on threshold = warm
-    let cls;
-    if (totalMissing === 0)      cls = "row-winner";
-    else if (totalMissing === 1) cls = "row-hot";
-    else                         cls = "row-warm";
+      if (totalMissing > warmThreshold) return;
 
-    // Apply to ALL 9 cells in each selected row (including blanks)
-    selected.forEach(({ idx }) => {
-      rowArr[idx].forEach(c => c.classList.add(cls));
-    });
+      let cls;
+      if (totalMissing === 0)      cls = "row-winner";
+      else if (totalMissing === 1) cls = "row-hot";
+      else                         cls = "row-warm";
+
+      selected.forEach(({ idx }) => {
+        rowArr[idx].forEach(c => c.classList.add(cls));
+      });
+    }
   });
 }
 
