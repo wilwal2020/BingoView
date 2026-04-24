@@ -1034,15 +1034,27 @@ function connectPhone(code) {
   // Mark connected once Firebase confirms the write
   presenceRef.once('value', () => setConnStatus("connected", "Tilkoblet \u2713"));
 
-  // Called numbers — replay any missed while backgrounded
+  // Primary real-time sync: full called list per game from main site.
+  // Fires immediately on connect (catches up), then on every call/undo.
+  GAMES.forEach(g => {
+    channelRef.child('callState/' + g).on('value', (snap) => {
+      const data = snap.val();
+      if (!data || !data.ts) return;
+      if (data.ts <= resetTs) return;
+      reconcileGameState(g, data.numbers || [], data.rekke);
+    });
+  });
+
+  // Legacy callLog — kept so older main-site versions still work.
+  // Skipped if callState is already providing data for that game.
   channelRef.child('resetTs').once('value', (snap) => {
     resetTs = snap.val() || 0;
     channelRef.child('callLog').on('child_added', (snap) => {
       const data = snap.val();
       if (!data || !data.number || !data.ts) return;
       if (data.ts <= resetTs) return;
-      if (data.undo) handleUncalledNumber(data.number, data.game);
-      else           handleCalledNumber(data.number, data.game, data.rekke);
+      // Only use callLog if callState isn't being used (older main-site build)
+      if (!data.undo) handleCalledNumber(data.number, data.game, data.rekke);
     });
   });
 
@@ -1471,6 +1483,46 @@ function handleUncalledNumber(number, game) {
     updateRekkeLabel();
   } else {
     updateProximityHighlights(target);
+  }
+  saveSession();
+}
+
+// Full reconciliation from the authoritative callState broadcast.
+// Replaces the called list and rebuilds all visual state from scratch.
+function reconcileGameState(gameKey, numbers, rekke) {
+  const gs = gameState[gameKey];
+
+  if (rekke && /^Rekke[1-3]$/.test(rekke)) {
+    gs.rekke = rekke;
+    if (gameKey === (currentGame || activeGame)) currentRekke = rekke;
+  }
+
+  gs.called = Array.isArray(numbers) ? numbers.slice() : [];
+
+  if (gameKey === activeGame && gs.cellMap) {
+    // Clear every cell's highlight classes
+    Object.values(gs.cellMap).forEach(c => c.classList.remove("called", "latest"));
+    latestCell = null;
+
+    // Re-apply in call order: all but last → "called", last → "latest"
+    gs.called.forEach((num, i) => {
+      const cell = gs.cellMap[String(num)];
+      if (!cell) return;
+      if (i === gs.called.length - 1) {
+        cell.classList.add("latest");
+        latestCell = cell;
+      } else {
+        cell.classList.add("called");
+      }
+    });
+
+    document.getElementById("phone-last-num").textContent =
+      gs.called.length ? gs.called[gs.called.length - 1] : "";
+
+    updateProximityHighlights(gameKey);
+    updateRekkeLabel();
+  } else {
+    updateProximityHighlights(gameKey);
   }
   saveSession();
 }
