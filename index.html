@@ -996,6 +996,15 @@ function initPhone() {
   const lastCode = localStorage.getItem("bv_last_code");
   if (lastCode) document.getElementById("phone-code-input").value = lastCode;
 
+  // Auto-connect from QR code scan: ?code=XXXXXX
+  const urlCode = new URLSearchParams(location.search).get('code');
+  if (urlCode) {
+    const code = urlCode.trim().toUpperCase();
+    document.getElementById("phone-code-input").value = code;
+    history.replaceState(null, '', location.pathname);
+    connectPhone(code);
+  }
+
   refreshGameTabs();
   updateUploadTitle();
 }
