@@ -1041,7 +1041,8 @@ function connectPhone(code) {
       const data = snap.val();
       if (!data || !data.number || !data.ts) return;
       if (data.ts <= resetTs) return;
-      handleCalledNumber(data.number, data.game, data.rekke);
+      if (data.undo) handleUncalledNumber(data.number, data.game);
+      else           handleCalledNumber(data.number, data.game, data.rekke);
     });
   });
 
@@ -1431,6 +1432,43 @@ function handleCalledNumber(number, game, rekke) {
     document.body.style.transition = "background 0.05s";
     document.body.style.background = "rgba(200,40,30,0.15)";
     setTimeout(() => document.body.style.background = "var(--ink)", 150);
+  } else {
+    updateProximityHighlights(target);
+  }
+  saveSession();
+}
+
+function handleUncalledNumber(number, game) {
+  const target = (game && GAMES.includes(game)) ? game : (currentGame || activeGame);
+  const gs = gameState[target];
+
+  // Remove the number from the called list
+  const idx = gs.called.lastIndexOf(number);
+  if (idx !== -1) gs.called.splice(idx, 1);
+
+  if (target === activeGame) {
+    const cell = gs.cellMap[String(number)];
+    if (cell) {
+      cell.classList.remove("called", "latest");
+      // If this was the latestCell, clear it and promote the new last
+      if (latestCell === cell) {
+        latestCell = null;
+        if (gs.called.length) {
+          const newLast = gs.cellMap[String(gs.called[gs.called.length - 1])];
+          if (newLast) {
+            newLast.classList.remove("called");
+            newLast.classList.add("latest");
+            latestCell = newLast;
+          }
+        }
+      }
+    }
+    // Update last-number display
+    const lastNum = gs.called.length ? gs.called[gs.called.length - 1] : "";
+    document.getElementById("phone-last-num").textContent = lastNum;
+
+    updateProximityHighlights(activeGame);
+    updateRekkeLabel();
   } else {
     updateProximityHighlights(target);
   }
