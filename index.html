@@ -1009,7 +1009,23 @@ function initPhone() {
   updateUploadTitle();
 }
 
-function connectPhone(code) {
+async function connectPhone(code) {
+  setConnStatus("connecting", "Kobler til\u2026");
+
+  // Verify the code is valid — an iPad host must be live on this channel
+  try {
+    const hostSnap = await db.ref('bingoview/' + code + '/host').once('value');
+    if (!hostSnap.exists()) {
+      setConnStatus("error", "Ugyldig kode");
+      toast("Ingen aktiv bingo-sesjon med den koden", "err", 4000);
+      return;
+    }
+  } catch(err) {
+    setConnStatus("error", "Tilkoblingsfeil");
+    toast("Kunne ikke nå serveren", "err", 4000);
+    return;
+  }
+
   sessionCode = code;
   try { localStorage.setItem('bv_last_code', code); } catch(e) {}
   channelRef = db.ref('bingoview/' + code);
@@ -1022,7 +1038,6 @@ function connectPhone(code) {
   presenceRef.onDisconnect().remove();
 
   // Update UI
-  setConnStatus("connecting", "Kobler til\u2026");
   document.getElementById("phone-code-value").textContent = code;
   document.getElementById("phone-connect").style.display = "none";
   document.getElementById("btn-fresh-start").style.display = "block";
