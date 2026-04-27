@@ -644,6 +644,64 @@ header {
 /* Tappable cells in manual mode */
 #digital-paper.tappable .cell[data-num] { cursor: pointer; }
 #digital-paper.tappable .cell[data-num]:active { transform: scale(0.92); }
+
+/* Header toggle button (manual-while-connected) */
+.hdr-toggle {
+  background: transparent;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  padding: 5px 10px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.hdr-toggle:hover { border-color: var(--gold); color: var(--gold); }
+.hdr-toggle.active {
+  background: #201c12;
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+/* Manual-play hint borders on unconfirmed cells.
+   Applied via outline so they coexist with the cell's normal background. */
+.cell.hint-red {
+  outline: 3px solid var(--red);
+  outline-offset: -2px;
+  z-index: 3;
+  animation: cellHintPulse 1.1s ease-in-out infinite;
+}
+.cell.hint-yellow {
+  outline: 3px solid var(--gold);
+  outline-offset: -2px;
+  z-index: 2;
+}
+@keyframes cellHintPulse {
+  0%, 100% { outline-color: var(--red); }
+  50%      { outline-color: rgba(200,40,30,0.4); }
+}
+
+/* User wrongly tapped a cell that wasn't called — strike-through with red overlay */
+.cell.wrong {
+  background: rgba(200,40,30,0.18) !important;
+  color: var(--red) !important;
+}
+.cell.wrong::after {
+  content: '✕';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--red);
+  pointer-events: none;
+  text-shadow: 0 0 4px rgba(0,0,0,0.4);
+}
 </style>
 </head>
 <body>
@@ -655,6 +713,7 @@ header {
   <header>
     <div class="hdr-title">PHONE</div>
     <button id="btn-fresh-start">Nytt ark</button>
+    <button id="btn-manual-toggle" style="display:none" class="hdr-toggle" title="Manuell trykking — bekreft tall selv">Manuell</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
     <div class="conn-label">
       <div class="conn-dot" id="phone-conn-dot"></div>
@@ -832,6 +891,7 @@ const gameState = {};
 function ensureGameState(id) {
   if (!gameState[id]) gameState[id] = {
     strips: null, paperEl: null, cellMap: {}, called: [], rekke: 'Rekke1',
+    hostCalled: [], wrong: [],   // manual-play (connected) bookkeeping
   };
 }
 function getGameIds()    { return gameList.map(g => g.id); }
@@ -841,6 +901,7 @@ function getGameColor(id){ return getGame(id) ? getGame(id).color : '#888'; }
 gameList.forEach(g => ensureGameState(g.id));
 
 let manualMode = false;           // standalone (no Firebase) mode
+let manualPlayMode = false;       // manual confirmation while connected
 
 let activeGame = 'blue';          // currently displayed game on phone
 let currentGame = null;           // the game the main site (iPad) is on
@@ -887,9 +948,7 @@ function restoreSession() {
     gameState[g].called = saved[g].called || [];
     gameState[g].rekke  = saved[g].rekke  || 'Rekke1';
     buildPaperForGame(g);
-    gameState[g].called.forEach((n, i) =>
-      applyCallToGame(g, n, i === gameState[g].called.length - 1)
-    );
+    renderCells(g);
     any = true;
   });
   return any;
@@ -939,9 +998,7 @@ function restoreManualSession() {
     gameState[g.id].called = s.called || [];
     gameState[g.id].rekke  = s.rekke  || 'Rekke1';
     buildPaperForGame(g.id);
-    gameState[g.id].called.forEach((n, i) =>
-      applyCallToGame(g.id, n, i === gameState[g.id].called.length - 1)
-    );
+    renderCells(g.id);
     any = true;
   });
   return any;
@@ -1175,7 +1232,14 @@ function initPhone() {
   document.getElementById("digital-paper").addEventListener("click", (e) => {
     const cell = e.target.closest(".cell");
     if (!cell || !cell.dataset.num) return;
-    if (manualMode) handleManualTap(Number(cell.dataset.num));
+    const num = Number(cell.dataset.num);
+    if (manualMode) handleManualTap(num);
+    else if (manualPlayMode) handleManualPlayTap(num);
+  });
+
+  // Manual-play toggle (visible only when connected)
+  document.getElementById("btn-manual-toggle").addEventListener("click", () => {
+    setManualPlayMode(!manualPlayMode);
   });
 
   // Restore saved API key and last session code
@@ -1217,6 +1281,7 @@ async function connectPhone(code) {
   manualMode = false;
   document.getElementById("rekke-buttons").style.display = "none";
   document.getElementById("phone-code-display").style.display = "flex";
+  document.getElementById("btn-manual-toggle").style.display = "block";
 
   sessionCode = code;
   try { localStorage.setItem('bv_last_code', code); } catch(e) {}
@@ -1390,7 +1455,7 @@ Example:
     const count = Object.keys(gs.cellMap).length;
 
     // Replay any already-called numbers for this game onto the new paper
-    gs.called.forEach((n, i) => applyCallToGame(activeGame, n, i === gs.called.length - 1));
+    renderCells(activeGame);
 
     saveSession();
     publishStripsToHost(activeGame);
@@ -1500,22 +1565,8 @@ function renderActiveGame() {
     const count = Object.keys(gs.cellMap).length;
     document.getElementById("phone-detected-count").textContent = count ? `${count}/90 detected` : "";
 
-    // Restore latest highlight for this game
-    latestCell = null;
-    if (gs.called.length) {
-      const last = gs.called[gs.called.length - 1];
-      const cell = gs.cellMap[String(last)];
-      if (cell) {
-        cell.classList.remove("called");
-        cell.classList.add("latest");
-        latestCell = cell;
-      }
-      document.getElementById("phone-last-num").textContent = last;
-    } else {
-      document.getElementById("phone-last-num").textContent = "—";
-    }
-
-    updateProximityHighlights(activeGame);
+    // Re-paint cells (called/latest + manual-play hints/wrong if applicable)
+    renderCells(activeGame);
   } else {
     document.getElementById("phone-paper").style.display  = "none";
     document.getElementById("phone-upload").style.display = "flex";
@@ -1604,6 +1655,116 @@ function setActiveRekke(rekke) {
   refreshRekkeButtons();
   updateRekkeLabel();
   updateProximityHighlights(activeGame);
+  saveSession();
+}
+
+// ── Unified cell painting ─────────────────────────────────────
+// Re-paints all cells of a game's paper from gs.called / hostCalled / wrong.
+// Honors manualPlayMode: shows hint borders for unconfirmed host calls and
+// persists wrong-mark crosses on cells the user mistakenly tapped.
+function renderCells(gameKey) {
+  const gs = gameState[gameKey];
+  if (!gs || !gs.cellMap) return;
+
+  Object.values(gs.cellMap).forEach(c =>
+    c.classList.remove('called','latest','hint-red','hint-yellow','wrong'));
+  if (gameKey === activeGame) latestCell = null;
+
+  gs.called.forEach((num, i) => {
+    const cell = gs.cellMap[String(num)];
+    if (!cell) return;
+    if (i === gs.called.length - 1) {
+      cell.classList.add('latest');
+      if (gameKey === activeGame) latestCell = cell;
+    } else {
+      cell.classList.add('called');
+    }
+  });
+
+  if (manualPlayMode && Array.isArray(gs.hostCalled) && gs.hostCalled.length) {
+    const confirmed = new Set(gs.called);
+    const unconfirmed = gs.hostCalled.filter(n => !confirmed.has(n));
+    if (unconfirmed.length) {
+      // Latest unconfirmed → red (the next one to find);
+      // every earlier unconfirmed → yellow.
+      const latestPending = unconfirmed[unconfirmed.length - 1];
+      unconfirmed.forEach(num => {
+        const cell = gs.cellMap[String(num)];
+        if (!cell) return;
+        cell.classList.add(num === latestPending ? 'hint-red' : 'hint-yellow');
+      });
+    }
+  }
+
+  (gs.wrong || []).forEach(num => {
+    const cell = gs.cellMap[String(num)];
+    if (cell) cell.classList.add('wrong');
+  });
+
+  if (gameKey === activeGame) {
+    const last = gs.called.length ? gs.called[gs.called.length - 1] : '—';
+    document.getElementById('phone-last-num').textContent = last;
+  }
+  updateProximityHighlights(gameKey);
+}
+
+// ── Manual play (connected mode) ──────────────────────────────
+function setManualPlayMode(on) {
+  if (manualPlayMode === on) return;
+  manualPlayMode = on;
+
+  const btn = document.getElementById('btn-manual-toggle');
+  if (btn) btn.classList.toggle('active', on);
+
+  const wrap = document.getElementById('digital-paper');
+  wrap.classList.toggle('tappable', manualMode || manualPlayMode);
+
+  if (on) {
+    // Take a snapshot of currently-confirmed calls as the host's truth so
+    // every existing call shows up as already confirmed (no hint borders).
+    getGameIds().forEach(g => {
+      const gs = gameState[g];
+      if (!Array.isArray(gs.hostCalled) || gs.hostCalled.length < gs.called.length) {
+        gs.hostCalled = gs.called.slice();
+      }
+      gs.wrong = [];
+    });
+    toast('Manuell trykking på — bekreft tall selv', 'ok', 3000);
+  } else {
+    // Auto-confirm everything the host has called and clear wrong marks
+    getGameIds().forEach(g => {
+      const gs = gameState[g];
+      gs.called = (gs.hostCalled || []).slice();
+      gs.wrong = [];
+    });
+    toast('Manuell trykking av', 'ok', 2000);
+  }
+
+  getGameIds().forEach(g => renderCells(g));
+  saveSession();
+}
+
+function handleManualPlayTap(number) {
+  const gs = gameState[activeGame];
+  if (!gs) return;
+
+  const wrongIdx = gs.wrong.indexOf(number);
+  const calledIdx = gs.called.indexOf(number);
+  const inHost = (gs.hostCalled || []).includes(number);
+
+  if (wrongIdx !== -1) {
+    // Tapping a wrong-marked cell clears it (back to neutral)
+    gs.wrong.splice(wrongIdx, 1);
+  } else if (inHost && calledIdx === -1) {
+    // Confirm a hint → mark as latest user-confirmed
+    gs.called.push(number);
+  } else if (!inHost && calledIdx === -1) {
+    // Wrong tap — number wasn't called
+    gs.wrong.push(number);
+  }
+  // else: already confirmed → no-op
+
+  renderCells(activeGame);
   saveSession();
 }
 
@@ -1804,44 +1965,39 @@ function applyCallToGame(gameKey, number, isLatestEver) {
 function handleCalledNumber(number, game, rekke) {
   // Route to the right game bucket. If no game specified, apply to the main-site current game or the active one.
   const target = (game && getGameIds().includes(game)) ? game : (currentGame || activeGame);
+  const gs = gameState[target];
 
   // Update rekke for that game if provided
   if (rekke && /^Rekke[1-3]$/.test(rekke)) {
-    gameState[target].rekke = rekke;
+    gs.rekke = rekke;
     if (target === (currentGame || activeGame)) currentRekke = rekke;
   }
 
-  // Record call (avoid duplicates from rehydration)
-  const called = gameState[target].called;
-  if (called[called.length - 1] !== number) called.push(number);
+  // Update hostCalled (always)
+  if (!Array.isArray(gs.hostCalled)) gs.hostCalled = [];
+  if (gs.hostCalled[gs.hostCalled.length - 1] !== number) gs.hostCalled.push(number);
+
+  // If this number was previously wrong-marked, the host has now called it —
+  // drop the wrong mark so it can show as a hint.
+  if (Array.isArray(gs.wrong)) {
+    const w = gs.wrong.indexOf(number);
+    if (w !== -1) gs.wrong.splice(w, 1);
+  }
+
+  // In default mode, auto-confirm the call. In manual play, the user has to tap.
+  if (!manualPlayMode) {
+    if (gs.called[gs.called.length - 1] !== number) gs.called.push(number);
+  }
 
   if (target === activeGame) {
-    document.getElementById("phone-last-num").textContent = number;
-
-    // Demote previous latest
-    if (latestCell) {
-      latestCell.classList.remove("latest");
-      latestCell.classList.add("called");
-    }
-    const cell = gameState[activeGame].cellMap[String(number)];
-    if (cell) {
-      cell.classList.remove("called");
-      cell.classList.add("latest");
-      latestCell = cell;
-    } else if (gameState[activeGame].strips) {
-      toast(`#${number} not on this paper`, "warn");
-    }
-
-    updateProximityHighlights(activeGame);
-    updateRekkeLabel();
-
-    // Brief screen flash (no scroll!)
+    // Brief screen flash on every host call regardless of mode
     document.body.style.transition = "background 0.05s";
     document.body.style.background = "rgba(200,40,30,0.15)";
     setTimeout(() => document.body.style.background = "var(--ink)", 150);
-  } else {
-    updateProximityHighlights(target);
   }
+
+  renderCells(target);
+  if (target === activeGame) updateRekkeLabel();
   saveSession();
 }
 
@@ -1883,7 +2039,7 @@ function handleUncalledNumber(number, game) {
 }
 
 // Full reconciliation from the authoritative callState broadcast.
-// Replaces the called list and rebuilds all visual state from scratch.
+// Replaces hostCalled (always) and adjusts called/wrong for manualPlayMode.
 function reconcileGameState(gameKey, numbers, rekke) {
   const gs = gameState[gameKey];
 
@@ -1892,33 +2048,23 @@ function reconcileGameState(gameKey, numbers, rekke) {
     if (gameKey === (currentGame || activeGame)) currentRekke = rekke;
   }
 
-  gs.called = Array.isArray(numbers) ? numbers.slice() : [];
+  const list = Array.isArray(numbers) ? numbers.slice() : [];
+  gs.hostCalled = list;
 
-  if (gameKey === activeGame && gs.cellMap) {
-    // Clear every cell's highlight classes
-    Object.values(gs.cellMap).forEach(c => c.classList.remove("called", "latest"));
-    latestCell = null;
-
-    // Re-apply in call order: all but last → "called", last → "latest"
-    gs.called.forEach((num, i) => {
-      const cell = gs.cellMap[String(num)];
-      if (!cell) return;
-      if (i === gs.called.length - 1) {
-        cell.classList.add("latest");
-        latestCell = cell;
-      } else {
-        cell.classList.add("called");
-      }
-    });
-
-    document.getElementById("phone-last-num").textContent =
-      gs.called.length ? gs.called[gs.called.length - 1] : "";
-
-    updateProximityHighlights(gameKey);
-    updateRekkeLabel();
+  if (manualPlayMode) {
+    // Keep user-confirmed entries that are still in the host list (in user-confirm order)
+    const inList = new Set(list);
+    gs.called = (gs.called || []).filter(n => inList.has(n));
+    // A "wrong" mark is only meaningful for numbers the host hasn't called.
+    // If the host has now called one, drop it from wrong (it'll appear as a hint instead).
+    gs.wrong  = (gs.wrong  || []).filter(n => !inList.has(n));
   } else {
-    updateProximityHighlights(gameKey);
+    gs.called = list.slice();
+    gs.wrong  = [];
   }
+
+  renderCells(gameKey);
+  if (gameKey === activeGame) updateRekkeLabel();
   saveSession();
 }
 
@@ -1945,17 +2091,18 @@ function applyRemoteState(game, rekke) {
 
 function handleRemoteReset(scope, game) {
   resetTs = Date.now();
+  const resetOne = g => {
+    gameState[g].called     = [];
+    gameState[g].hostCalled = [];
+    gameState[g].wrong      = [];
+    gameState[g].rekke      = 'Rekke1';
+    if (gameState[g].strips) buildPaperForGame(g);
+  };
   if (scope === 'all') {
-    getGameIds().forEach(g => {
-      gameState[g].called = [];
-      gameState[g].rekke = 'Rekke1';
-      if (gameState[g].strips) buildPaperForGame(g);
-    });
+    getGameIds().forEach(resetOne);
     toast("Alle spill nullstilt", "warn");
   } else if (scope === 'game' && game && getGameIds().includes(game)) {
-    gameState[game].called = [];
-    gameState[game].rekke = 'Rekke1';
-    if (gameState[game].strips) buildPaperForGame(game);
+    resetOne(game);
     toast(`${getGameName(game)} nullstilt`, "warn");
   }
   saveSession();
