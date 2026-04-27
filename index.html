@@ -849,6 +849,17 @@ let latestCell = null;            // last "latest"-highlighted cell in the activ
 const pendingPhotos = {};         // gameKey → File queued for processing
 let resetTs = 0;                  // callLog entries with ts ≤ resetTs are ignored (pre-reset)
 let sessionCode = null;           // code used to connect — key for localStorage
+let phoneId = null;               // assigned in connectPhone — used when publishing papers
+
+// Publish a game's strips to the host so it can render the paper and
+// highlight close-to-winning numbers in the ball grid. No-op outside
+// connected mode or if the paper isn't loaded yet.
+function publishStripsToHost(gameKey) {
+  if (!channelRef || !phoneId || manualMode) return;
+  const strips = gameState[gameKey] && gameState[gameKey].strips;
+  if (!strips) return;
+  channelRef.child('phones/' + phoneId + '/papers/' + gameKey).set(strips);
+}
 
 // ── Session persistence ───────────────────────────────────────
 const MANUAL_KEY = 'bv_paper_manual';
@@ -1083,6 +1094,7 @@ function initPhone() {
       gameState[activeGame].strips = strips;
       buildPaperForGame(activeGame);
       saveSession();
+      publishStripsToHost(activeGame);
       showGameTabs();
       renderActiveGame();
       toast("Tilfeldig ark generert!", "ok", 2000);
@@ -1099,6 +1111,7 @@ function initPhone() {
       if (Array.isArray(strips)) {
         gameState[activeGame].strips = strips;
         buildPaperForGame(activeGame);
+        publishStripsToHost(activeGame);
         showGameTabs();
         toast('Ark importert — skriv inn koden for å motta tall', 'ok', 5000);
       }
@@ -1211,7 +1224,7 @@ async function connectPhone(code) {
   console.log('[BV phone] connecting to bingoview/' + code);
 
   // Register presence — Firebase removes it automatically on disconnect
-  const phoneId = Math.random().toString(36).slice(2, 8).toUpperCase();
+  phoneId = Math.random().toString(36).slice(2, 8).toUpperCase();
   const presenceRef = channelRef.child('phones/' + phoneId);
   presenceRef.set({ ts: Date.now() });
   presenceRef.onDisconnect().remove();
@@ -1228,6 +1241,8 @@ async function connectPhone(code) {
     showGameTabs();
     renderActiveGame();
     toast("Ark gjenopprettet", "ok", 3000);
+    // Publish all restored papers so the host can render them
+    getGameIds().forEach(g => publishStripsToHost(g));
   } else {
     document.getElementById("phone-upload").style.display = "flex";
   }
@@ -1378,6 +1393,7 @@ Example:
     gs.called.forEach((n, i) => applyCallToGame(activeGame, n, i === gs.called.length - 1));
 
     saveSession();
+    publishStripsToHost(activeGame);
     showGameTabs();
     renderActiveGame();
     document.getElementById("phone-processing").style.display = "none";
