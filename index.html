@@ -2048,7 +2048,7 @@ function reconcileGameState(gameKey, numbers, rekke) {
     if (gameKey === (currentGame || activeGame)) currentRekke = rekke;
   }
 
-  const list = Array.isArray(numbers) ? numbers.slice() : [];
+  const list = Array.isArray(numbers) ? numbers.map(Number) : [];
   gs.hostCalled = list;
 
   if (manualPlayMode) {
