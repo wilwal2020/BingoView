@@ -1128,12 +1128,20 @@ function initPhone() {
     } catch(e) {}
   });
 
-  // Share paper button — encodes active game's strips as a URL the recipient opens
+  // Share paper button — encodes ALL loaded games' strips as a URL the recipient opens
   document.getElementById("btn-share-paper").addEventListener("click", async () => {
-    const strips = gameState[activeGame].strips;
-    if (!strips) return;
+    const games = {};
+    let hasAny = false;
+    getGameIds().forEach(g => {
+      if (gameState[g] && gameState[g].strips) {
+        games[g] = gameState[g].strips;
+        hasAny = true;
+      }
+    });
+    if (!hasAny) return;
     try {
-      const encoded = btoa(JSON.stringify(strips));
+      const payload = { version: 2, games };
+      const encoded = btoa(JSON.stringify(payload));
       const url = location.origin + location.pathname + '?import=' + encodeURIComponent(encoded);
       if (navigator.share) {
         await navigator.share({ title: 'Bingo-ark', text: 'Ditt bingo-ark:', url });
@@ -1164,9 +1172,22 @@ function initPhone() {
   const importParam = new URLSearchParams(location.search).get('import');
   if (importParam) {
     try {
-      const strips = JSON.parse(atob(decodeURIComponent(importParam)));
-      if (Array.isArray(strips)) {
-        gameState[activeGame].strips = strips;
+      const decoded = JSON.parse(atob(decodeURIComponent(importParam)));
+      if (decoded && decoded.version === 2 && decoded.games && typeof decoded.games === 'object') {
+        // Multi-game format (version 2): load each game's strips
+        Object.entries(decoded.games).forEach(([g, strips]) => {
+          if (gameState[g] && Array.isArray(strips)) {
+            gameState[g].strips = strips;
+            buildPaperForGame(g);
+            publishStripsToHost(g);
+          }
+        });
+        showGameTabs();
+        const count = Object.keys(decoded.games).length;
+        toast(`${count} ark importert — skriv inn koden for å motta tall`, 'ok', 5000);
+      } else if (Array.isArray(decoded)) {
+        // Legacy single-game format (version 1)
+        gameState[activeGame].strips = decoded;
         buildPaperForGame(activeGame);
         publishStripsToHost(activeGame);
         showGameTabs();
@@ -1377,7 +1398,7 @@ function setConnStatus(state, label) {
   });
 }
 
-async function processImage(file) {
+async function processImage(file, targetGame) {
   document.getElementById("phone-pending").style.display    = "none";
   document.getElementById("phone-upload").style.display     = "none";
   document.getElementById("phone-processing").style.display = "flex";
@@ -1456,17 +1477,18 @@ Example:
     const parsed = JSON.parse(clean);
     if (!Array.isArray(parsed)) throw new Error("Expected array of strips");
 
-    // Render into the active game slot
-    const gs = gameState[activeGame];
+    // Render into the target game slot (captured at call time, not read from global activeGame)
+    const resolvedGame = targetGame || activeGame;
+    const gs = gameState[resolvedGame];
     gs.strips = parsed;
-    buildPaperForGame(activeGame);
+    buildPaperForGame(resolvedGame);
     const count = Object.keys(gs.cellMap).length;
 
     // Replay any already-called numbers for this game onto the new paper
-    renderCells(activeGame);
+    renderCells(resolvedGame);
 
     saveSession();
-    publishStripsToHost(activeGame);
+    publishStripsToHost(resolvedGame);
     showGameTabs();
     renderActiveGame();
     document.getElementById("phone-processing").style.display = "none";
@@ -1939,7 +1961,9 @@ async function processAllPending() {
     activeGame = gameKey;
     refreshGameTabs();
     delete pendingPhotos[gameKey];
-    await processImage(file);
+    // Pass gameKey explicitly so processImage uses the correct game
+    // even if activeGame changes during the async API call
+    await processImage(file, gameKey);
   }
 }
 
