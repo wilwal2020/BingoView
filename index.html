@@ -1288,11 +1288,19 @@ async function connectPhone(code) {
   channelRef = db.ref('bingoview/' + code);
   console.log('[BV phone] connecting to bingoview/' + code);
 
-  // Register presence — Firebase removes it automatically on disconnect
+  // Register presence — Firebase removes it automatically on disconnect.
+  // Re-register every time the SDK reconnects (network drop, background, etc.)
+  // so the host never loses sight of this phone.
   phoneId = Math.random().toString(36).slice(2, 8).toUpperCase();
   const presenceRef = channelRef.child('phones/' + phoneId);
-  presenceRef.set({ ts: Date.now() });
-  presenceRef.onDisconnect().remove();
+
+  db.ref('.info/connected').on('value', (snap) => {
+    if (!snap.val()) return;          // offline — nothing to do
+    presenceRef.onDisconnect().remove();
+    presenceRef.set({ ts: Date.now() });
+    // Re-publish papers so the host's highlight feature sees them again
+    getGameIds().forEach(g => publishStripsToHost(g));
+  });
 
   // Update UI
   document.getElementById("phone-code-value").textContent = code;
