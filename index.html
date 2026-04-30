@@ -1228,11 +1228,25 @@ let phoneId = null;               // assigned in connectPhone — used when publ
 // Publish a game's strips to the host so it can render the paper and
 // highlight close-to-winning numbers in the ball grid. No-op outside
 // connected mode or if the paper isn't loaded yet.
+//
+// Writes to TWO Firebase paths:
+//   * phones/<id>/papers/<game>  — legacy (older host versions)
+//   * papers/<id>/<game>         — persistent (survives disconnect)
+//
+// papers_meta/<id> tracks gameKeys + lastSeen so the host can render
+// offline phones with a meaningful label.
 function publishStripsToHost(gameKey) {
   if (!channelRef || !phoneId || manualMode) return;
   const strips = gameState[gameKey] && gameState[gameKey].strips;
   if (!strips) return;
   channelRef.child('phones/' + phoneId + '/papers/' + gameKey).set(strips);
+  channelRef.child('papers/' + phoneId + '/' + gameKey).set(strips);
+  // Update meta — list all game keys this phone currently has loaded
+  const allKeys = getGameIds().filter(g => gameState[g] && gameState[g].strips);
+  channelRef.child('papers_meta/' + phoneId).update({
+    lastSeen: Date.now(),
+    gameKeys: allKeys,
+  });
 }
 
 // ── Session persistence ───────────────────────────────────────
@@ -1729,7 +1743,15 @@ async function connectPhone(code) {
   // Register presence — Firebase removes it automatically on disconnect.
   // Re-register every time the SDK reconnects (network drop, background, etc.)
   // so the host never loses sight of this phone.
-  phoneId = Math.random().toString(36).slice(2, 8).toUpperCase();
+  // Persistent phoneId per device so reconnects retain identity (and so
+  // host-side persistent papers stay associated with the same phone).
+  let storedPhoneId;
+  try { storedPhoneId = localStorage.getItem('bv_phoneId'); } catch (e) {}
+  if (!storedPhoneId) {
+    storedPhoneId = Math.random().toString(36).slice(2, 8).toUpperCase();
+    try { localStorage.setItem('bv_phoneId', storedPhoneId); } catch (e) {}
+  }
+  phoneId = storedPhoneId;
   const presenceRef = channelRef.child('phones/' + phoneId);
 
   db.ref('.info/connected').on('value', (snap) => {
@@ -1738,6 +1760,10 @@ async function connectPhone(code) {
     presenceRef.set({ ts: Date.now() });
     // Re-publish papers so the host's highlight feature sees them again
     getGameIds().forEach(g => publishStripsToHost(g));
+    // Update the persisted papers_meta lastSeen
+    channelRef.child('papers_meta/' + phoneId).update({
+      lastSeen: Date.now(),
+    });
   });
 
   // Update UI
