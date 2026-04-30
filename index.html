@@ -702,6 +702,155 @@ header {
   pointer-events: none;
   text-shadow: 0 0 4px rgba(0,0,0,0.4);
 }
+
+/* ── BV settings overlay + icon button ─────────── */
+.bv-icon-btn {
+  background: transparent;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  padding: 3px 9px;
+  cursor: pointer;
+  margin-left: 6px;
+}
+.bv-icon-btn:hover { color: var(--gold); border-color: var(--gold); }
+
+.bv-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.78);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 28px 18px;
+  overflow-y: auto;
+}
+.bv-overlay-card {
+  background: #181818;
+  border: 1px solid #2a2a2a;
+  border-radius: 12px;
+  padding: 18px;
+  width: 100%;
+  max-width: 420px;
+  color: var(--paper);
+  font-family: var(--mono);
+}
+.bv-overlay-title {
+  font-family: var(--display);
+  font-size: 1.4rem;
+  color: var(--gold);
+  letter-spacing: 0.06em;
+  margin-bottom: 14px;
+}
+.bv-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.bv-row:last-of-type { border-bottom: none; }
+.bv-row-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+.bv-row-label > span:first-child {
+  font-size: 0.85rem;
+  color: var(--paper);
+}
+.bv-row-desc {
+  font-size: 0.7rem;
+  color: var(--dim);
+}
+.bv-toggle {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+.bv-toggle input { opacity: 0; width: 0; height: 0; }
+.bv-toggle-track {
+  position: absolute;
+  inset: 0;
+  background: #333;
+  border-radius: 12px;
+  transition: background 0.15s;
+  cursor: pointer;
+}
+.bv-toggle-track::before {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: 3px;
+  top: 3px;
+  background: #ddd;
+  border-radius: 50%;
+  transition: transform 0.15s;
+}
+.bv-toggle input:checked + .bv-toggle-track { background: var(--green); }
+.bv-toggle input:checked + .bv-toggle-track::before { transform: translateX(18px); }
+.bv-overlay-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.bv-overlay-btn {
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+.bv-overlay-btn:hover { border-color: var(--gold); color: var(--gold); }
+.bv-overlay-btn-danger { border-color: var(--red); color: var(--red); }
+.bv-overlay-btn-danger:hover { background: var(--red); color: #fff; }
+.bv-errlog-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  background: #0e0e0e;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 6px;
+  font-size: 0.72rem;
+}
+.bv-errlog-empty {
+  padding: 22px;
+  text-align: center;
+  color: var(--dim);
+}
+.bv-errlog-entry {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  word-break: break-word;
+}
+.bv-errlog-entry:last-child { border-bottom: none; }
+.bv-errlog-kind {
+  color: #ff8888;
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+}
+.bv-errlog-time { color: var(--dim); font-size: 0.65rem; margin-left: 6px; }
+.bv-errlog-msg { color: #ffd0c0; margin-top: 2px; }
+.bv-errlog-stack {
+  color: rgba(255,255,255,0.55);
+  white-space: pre-wrap;
+  margin-top: 3px;
+  font-size: 0.68rem;
+}
 </style>
 </head>
 <body>
@@ -715,11 +864,70 @@ header {
     <button id="btn-fresh-start">Nytt ark</button>
     <button id="btn-manual-toggle" style="display:none" class="hdr-toggle" title="Manuell trykking — bekreft tall selv">Manuell</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
+    <button id="btn-bv-settings" class="bv-icon-btn" title="Lyd og vibrasjon" aria-label="Innstillinger">⚙</button>
     <div class="conn-label">
       <div class="conn-dot" id="phone-conn-dot"></div>
       <span id="phone-conn-label">Waiting</span>
     </div>
   </header>
+
+  <!-- BV settings overlay -->
+  <div id="bv-settings-overlay" class="bv-overlay" style="display:none">
+    <div class="bv-overlay-card">
+      <div class="bv-overlay-title">Lyd & vibrasjon</div>
+      <div class="bv-row">
+        <div class="bv-row-label">
+          <span>Vibrer ved nytt tall</span>
+          <span class="bv-row-desc">Kort vibrasjon når host kaller et tall</span>
+        </div>
+        <label class="bv-toggle">
+          <input type="checkbox" id="bv-vibrate-on">
+          <span class="bv-toggle-track"></span>
+        </label>
+      </div>
+      <div class="bv-row">
+        <div class="bv-row-label">
+          <span>Lyd ved nytt tall</span>
+          <span class="bv-row-desc">Diskré tone når host kaller et tall</span>
+        </div>
+        <label class="bv-toggle">
+          <input type="checkbox" id="bv-sound-on">
+          <span class="bv-toggle-track"></span>
+        </label>
+      </div>
+      <div class="bv-row">
+        <div class="bv-row-label">
+          <span>Sterk vibrasjon ved 1 igjen</span>
+          <span class="bv-row-desc">Lengre vibrasjon når du mangler 1 tall på rekka</span>
+        </div>
+        <label class="bv-toggle">
+          <input type="checkbox" id="bv-strong-vibrate-on">
+          <span class="bv-toggle-track"></span>
+        </label>
+      </div>
+      <div class="bv-row">
+        <div class="bv-row-label"><span>Feil-logg</span><span class="bv-row-desc">Se loggede JS-feil</span></div>
+        <button id="bv-errlog-open" class="bv-overlay-btn">Vis</button>
+      </div>
+      <div class="bv-overlay-actions">
+        <button id="bv-settings-close" class="bv-overlay-btn">Lukk</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- BV error log overlay -->
+  <div id="bv-errlog-overlay" class="bv-overlay" style="display:none">
+    <div class="bv-overlay-card">
+      <div class="bv-overlay-title">Feil-logg</div>
+      <div id="bv-errlog-subtitle" class="bv-row-desc" style="margin-bottom:8px"></div>
+      <div id="bv-errlog-list" class="bv-errlog-list"></div>
+      <div class="bv-overlay-actions">
+        <button id="bv-errlog-copy" class="bv-overlay-btn">Kopier</button>
+        <button id="bv-errlog-clear" class="bv-overlay-btn bv-overlay-btn-danger">Tøm</button>
+        <button id="bv-errlog-close" class="bv-overlay-btn">Lukk</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Game tabs — rendered dynamically -->
   <div id="game-tabs" class="game-tabs" style="display:none"></div>
@@ -843,6 +1051,111 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 console.log('[BV] Firebase initialized');
+
+// ════════════════════════════════════
+// ERROR CAPTURE — ring buffer of last 50
+// ════════════════════════════════════
+(function () {
+  const KEY = 'bv_errorLog';
+  const MAX = 50;
+  function read() {
+    try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) { return []; }
+  }
+  function write(list) {
+    try { localStorage.setItem(KEY, JSON.stringify(list.slice(-MAX))); } catch (e) {}
+  }
+  function record(kind, msg, stack, extra) {
+    const list = read();
+    list.push({
+      ts: Date.now(),
+      kind,
+      msg: String(msg || '').slice(0, 500),
+      stack: String(stack || '').slice(0, 2000),
+      url: location.href,
+      ua: navigator.userAgent,
+      extra: extra || null,
+    });
+    write(list);
+    if (typeof window.__bvErrLogChanged === 'function') {
+      try { window.__bvErrLogChanged(); } catch (e) {}
+    }
+  }
+  window.addEventListener('error', e => {
+    record('error', e.message, e.error && e.error.stack, {
+      file: e.filename, line: e.lineno, col: e.colno,
+    });
+  });
+  window.addEventListener('unhandledrejection', e => {
+    const r = e.reason;
+    record('promise', r && r.message ? r.message : String(r), r && r.stack);
+  });
+  window.bvErrorLog = {
+    get: read,
+    clear: () => { write([]); if (typeof window.__bvErrLogChanged === 'function') window.__bvErrLogChanged(); },
+    record,
+  };
+})();
+
+// ════════════════════════════════════
+// FEEDBACK — vibrate + sound settings
+// ════════════════════════════════════
+const FEEDBACK_KEY = 'bv_feedback';
+const feedback = (() => {
+  const defaults = { vibrate: true, sound: false, strongVibrate: true };
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}'); } catch (e) {}
+  return { ...defaults, ...saved };
+})();
+function saveFeedback() {
+  try { localStorage.setItem(FEEDBACK_KEY, JSON.stringify(feedback)); } catch (e) {}
+}
+
+let _audioCtx = null;
+function getAudioCtx() {
+  if (!_audioCtx) {
+    try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; }
+  }
+  return _audioCtx;
+}
+function playTick() {
+  if (!feedback.sound) return;
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  try {
+    if (ctx.state === 'suspended') ctx.resume();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.2);
+  } catch (e) {}
+}
+function vibrateShort() {
+  if (!feedback.vibrate) return;
+  try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
+}
+function vibrateStrong() {
+  if (!feedback.strongVibrate) return;
+  try { if (navigator.vibrate) navigator.vibrate([180, 70, 180, 70, 180]); } catch (e) {}
+}
+
+// Track per-game proximity state to detect transitions to "1 missing"
+const _proximityState = {};
+function checkProximityTransition(gameKey) {
+  const gs = gameState[gameKey];
+  if (!gs || !gs.paperEl) return;
+  const hasOneAway = gs.paperEl.querySelector('.row-hot') !== null;
+  const had = _proximityState[gameKey] || false;
+  if (hasOneAway && !had) {
+    vibrateStrong();
+  }
+  _proximityState[gameKey] = hasOneAway;
+}
 
 // ════════════════════════════════════
 // UTILITIES
@@ -1238,6 +1551,110 @@ function initPhone() {
       refreshRekkeButtons();
       updateUploadTitle();
       toast("Nytt ark klart", "ok", 2000);
+    }
+  });
+
+  // BV settings overlay (sound / vibrate)
+  const settingsOverlay = document.getElementById("bv-settings-overlay");
+  const errlogOverlay   = document.getElementById("bv-errlog-overlay");
+  const vibrateOn       = document.getElementById("bv-vibrate-on");
+  const soundOn         = document.getElementById("bv-sound-on");
+  const strongOn        = document.getElementById("bv-strong-vibrate-on");
+  vibrateOn.checked = !!feedback.vibrate;
+  soundOn.checked   = !!feedback.sound;
+  strongOn.checked  = !!feedback.strongVibrate;
+
+  document.getElementById("btn-bv-settings").addEventListener("click", () => {
+    settingsOverlay.style.display = "flex";
+    // Resume audio on user gesture so subsequent ticks aren't blocked
+    const ctx = getAudioCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  });
+  document.getElementById("bv-settings-close").addEventListener("click", () => {
+    settingsOverlay.style.display = "none";
+  });
+  settingsOverlay.addEventListener("click", e => {
+    if (e.target === settingsOverlay) settingsOverlay.style.display = "none";
+  });
+  vibrateOn.addEventListener("change", () => {
+    feedback.vibrate = vibrateOn.checked;
+    saveFeedback();
+    if (feedback.vibrate) vibrateShort(); // preview
+  });
+  soundOn.addEventListener("change", () => {
+    feedback.sound = soundOn.checked;
+    saveFeedback();
+    if (feedback.sound) playTick(); // preview
+  });
+  strongOn.addEventListener("change", () => {
+    feedback.strongVibrate = strongOn.checked;
+    saveFeedback();
+    if (feedback.strongVibrate) vibrateStrong(); // preview
+  });
+
+  // BV error log overlay
+  function renderBvErrLog() {
+    const list = (window.bvErrorLog && window.bvErrorLog.get()) || [];
+    document.getElementById("bv-errlog-subtitle").textContent =
+      list.length === 0 ? "Ingen feil registrert" :
+      list.length === 1 ? "1 feil registrert" :
+                          `${list.length} feil registrert`;
+    const wrap = document.getElementById("bv-errlog-list");
+    wrap.innerHTML = "";
+    if (!list.length) {
+      wrap.innerHTML = '<div class="bv-errlog-empty">Alt fungerer som det skal.</div>';
+      return;
+    }
+    list.slice().reverse().forEach(err => {
+      const e = document.createElement("div");
+      e.className = "bv-errlog-entry";
+      const time = new Date(err.ts).toLocaleString('no-NO');
+      e.innerHTML =
+        `<div><span class="bv-errlog-kind">${err.kind || 'error'}</span><span class="bv-errlog-time">${time}</span></div>` +
+        `<div class="bv-errlog-msg"></div>` +
+        (err.stack ? `<div class="bv-errlog-stack"></div>` : '');
+      e.querySelector('.bv-errlog-msg').textContent = err.msg || '';
+      if (err.stack) e.querySelector('.bv-errlog-stack').textContent = err.stack;
+      wrap.appendChild(e);
+    });
+  }
+  window.__bvErrLogChanged = () => {
+    if (errlogOverlay.style.display === 'flex') renderBvErrLog();
+  };
+  document.getElementById("bv-errlog-open").addEventListener("click", () => {
+    settingsOverlay.style.display = "none";
+    errlogOverlay.style.display = "flex";
+    renderBvErrLog();
+  });
+  document.getElementById("bv-errlog-close").addEventListener("click", () => {
+    errlogOverlay.style.display = "none";
+  });
+  errlogOverlay.addEventListener("click", e => {
+    if (e.target === errlogOverlay) errlogOverlay.style.display = "none";
+  });
+  document.getElementById("bv-errlog-clear").addEventListener("click", () => {
+    if (window.bvErrorLog) window.bvErrorLog.clear();
+    renderBvErrLog();
+  });
+  document.getElementById("bv-errlog-copy").addEventListener("click", () => {
+    const list = (window.bvErrorLog && window.bvErrorLog.get()) || [];
+    const text = JSON.stringify(list, null, 2);
+    const btn = document.getElementById("bv-errlog-copy");
+    const orig = btn.textContent;
+    const finish = (ok) => {
+      btn.textContent = ok ? "Kopiert ✓" : "Feil";
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => finish(true), () => finish(false));
+    } else {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        finish(true);
+      } catch (e) { finish(false); }
     }
   });
 
@@ -2028,8 +2445,14 @@ function handleCalledNumber(number, game, rekke) {
     setTimeout(() => document.body.style.background = "var(--ink)", 150);
   }
 
+  // Haptic + audio feedback on every host call
+  vibrateShort();
+  playTick();
+
   renderCells(target);
   if (target === activeGame) updateRekkeLabel();
+  // Detect transition to "1 number from rekke" → strong vibration
+  checkProximityTransition(target);
   saveSession();
 }
 
@@ -2083,6 +2506,11 @@ function reconcileGameState(gameKey, numbers, rekke) {
   const list = Array.isArray(numbers) ? numbers.map(Number) : [];
   gs.hostCalled = list;
 
+  // Detect newly-added numbers (vs previous state) for haptic feedback.
+  const prevHostCalledLen = (gs._prevHostLen != null) ? gs._prevHostLen : list.length;
+  const newCallArrived = list.length > prevHostCalledLen;
+  gs._prevHostLen = list.length;
+
   if (manualPlayMode) {
     // Keep user-confirmed entries that are still in the host list (in user-confirm order)
     const inList = new Set(list);
@@ -2097,6 +2525,14 @@ function reconcileGameState(gameKey, numbers, rekke) {
 
   renderCells(gameKey);
   if (gameKey === activeGame) updateRekkeLabel();
+
+  // Haptic + tone on a new host call (skip first-load reconcile that just catches up)
+  if (newCallArrived) {
+    vibrateShort();
+    playTick();
+  }
+  checkProximityTransition(gameKey);
+
   saveSession();
 }
 
