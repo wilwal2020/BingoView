@@ -411,10 +411,18 @@ header {
   color: #8a5500;
   animation: rowPulse 1.6s ease-in-out infinite;
 }
-.cell.row-winner:not(.called):not(.latest) {
-  background: rgba(26,122,64,0.55);
+/* Winning row: paint EVERY cell green, including the called/latest ones,
+   so the entire winning row reads as one solid bingo line. */
+.cell.row-winner,
+.cell.row-winner.called,
+.cell.row-winner.latest {
+  background: var(--green);
   color: #fff;
+  box-shadow: none;
   animation: rowWinPulse 1.1s ease-in-out infinite;
+}
+.cell.row-winner.latest {
+  z-index: 2;
 }
 
 @keyframes rowPulse {
@@ -424,6 +432,31 @@ header {
 @keyframes rowWinPulse {
   0%,100% { box-shadow: inset 0 0 6px 1px rgba(26,122,64,0.5); }
   50%     { box-shadow: inset 0 0 18px 3px rgba(26,122,64,0.9); }
+}
+
+/* Big control-number banner shown above a strip when it has a winning row.
+   Spans both grid columns of .strip and stays hidden until .has-winner is set. */
+.strip-id-banner {
+  display: none;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--green);
+  color: #fff;
+  font-family: var(--display);
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 8px 12px;
+  border-bottom: 1.5px solid #222;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+.strip-id-banner .banner-trophy { font-size: 1.3rem; }
+.strip-id-banner .banner-id     { font-size: 2.1rem; letter-spacing: 0.14em; }
+.strip.has-winner .strip-id-banner {
+  display: flex;
+  animation: rowWinPulse 1.1s ease-in-out infinite;
 }
 
 /* Game tabs strip — row of 4 selectors */
@@ -1981,6 +2014,19 @@ function buildPaperForGame(gameKey) {
     stripEl._rows    = [[], [], []];   // ALL 9 cells per row (for highlight classes)
     stripEl._numRows = [[], [], []];   // only number-containing cells (for missing count)
 
+    // Big control-number banner — hidden until a winning row appears.
+    const banner = document.createElement("div");
+    banner.className = "strip-id-banner";
+    const trophyEl = document.createElement("span");
+    trophyEl.className = "banner-trophy";
+    trophyEl.textContent = "🏆";
+    const bannerIdEl = document.createElement("span");
+    bannerIdEl.className = "banner-id";
+    bannerIdEl.textContent = strip.id || "";
+    banner.appendChild(trophyEl);
+    banner.appendChild(bannerIdEl);
+    stripEl.appendChild(banner);
+
     const idEl = document.createElement("div");
     idEl.className = "strip-id";
     idEl.textContent = strip.id || "";
@@ -2630,6 +2676,9 @@ function updateProximityHighlights(gameKey) {
     rowArr.forEach(cells => cells.forEach(c => {
       c.classList.remove("row-warm", "row-hot", "row-winner");
     }));
+    stripEl.classList.remove("has-winner");
+
+    let stripHasWinner = false;
 
     if (rowsNeeded === 1) {
       // Rekke1: highlight every row independently based on its own missing count
@@ -2639,6 +2688,7 @@ function updateProximityHighlights(gameKey) {
         else if (m === 1)             cls = "row-hot";
         else if (m <= warmThreshold)  cls = "row-warm";
         if (cls) rowArr[idx].forEach(c => c.classList.add(cls));
+        if (cls === "row-winner") stripHasWinner = true;
       });
     } else {
       // Rekke2/3: pick the top N rows and evaluate their combined total
@@ -2657,7 +2707,10 @@ function updateProximityHighlights(gameKey) {
       selected.forEach(({ idx }) => {
         rowArr[idx].forEach(c => c.classList.add(cls));
       });
+      if (cls === "row-winner") stripHasWinner = true;
     }
+
+    if (stripHasWinner) stripEl.classList.add("has-winner");
   });
 }
 
