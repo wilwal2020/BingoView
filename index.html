@@ -40,8 +40,9 @@ body {
 header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 14px 18px;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid #222;
   background: #111;
   flex-shrink: 0;
@@ -49,10 +50,15 @@ header {
 
 .hdr-title {
   font-family: var(--display);
-  font-size: 1.4rem;
+  font-size: 1.25rem;
   letter-spacing: 0.08em;
   color: var(--gold);
+  margin-right: 4px;
 }
+
+/* Connection status hugs the right edge so the buttons in between can
+   pack tightly without space-between blowing them apart. */
+header .conn-label { margin-left: auto; }
 
 .conn-dot {
   width: 8px; height: 8px;
@@ -454,6 +460,25 @@ header {
 }
 .strip-id-banner .banner-trophy { font-size: 1.3rem; }
 .strip-id-banner .banner-id     { font-size: 2.1rem; letter-spacing: 0.14em; }
+.strip-id-banner .banner-sep {
+  font-size: 1.4rem;
+  opacity: 0.55;
+  font-weight: 400;
+}
+.strip-id-banner .banner-num-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  opacity: 0.85;
+  margin-right: 2px;
+}
+.strip-id-banner .banner-num {
+  font-size: 2.1rem;
+  letter-spacing: 0.14em;
+  background: rgba(0,0,0,0.22);
+  padding: 0 10px;
+  border-radius: 6px;
+}
 .strip.has-winner .strip-id-banner {
   display: flex;
   animation: rowWinPulse 1.1s ease-in-out infinite;
@@ -2093,6 +2118,7 @@ function buildPaperForGame(gameKey) {
     stripEl._numRows = [[], [], []];   // only number-containing cells (for missing count)
 
     // Big control-number banner — hidden until a winning row appears.
+    // Layout: 🏆 <stripId> · <winningNumber>
     const banner = document.createElement("div");
     banner.className = "strip-id-banner";
     const trophyEl = document.createElement("span");
@@ -2101,8 +2127,21 @@ function buildPaperForGame(gameKey) {
     const bannerIdEl = document.createElement("span");
     bannerIdEl.className = "banner-id";
     bannerIdEl.textContent = strip.id || "";
+    const sepEl = document.createElement("span");
+    sepEl.className = "banner-sep";
+    sepEl.textContent = "·";
+    const numLabel = document.createElement("span");
+    numLabel.className = "banner-num-label";
+    numLabel.textContent = "Tall";
+    const bannerNumEl = document.createElement("span");
+    bannerNumEl.className = "banner-num";
+    bannerNumEl.textContent = "—";
     banner.appendChild(trophyEl);
     banner.appendChild(bannerIdEl);
+    banner.appendChild(sepEl);
+    banner.appendChild(numLabel);
+    banner.appendChild(bannerNumEl);
+    stripEl._bannerNumEl = bannerNumEl;
     stripEl.appendChild(banner);
 
     const idEl = document.createElement("div");
@@ -2793,7 +2832,16 @@ function updateProximityHighlights(gameKey) {
       if (cls === "row-winner") stripHasWinner = true;
     }
 
-    if (stripHasWinner) stripEl.classList.add("has-winner");
+    if (stripHasWinner) {
+      stripEl.classList.add("has-winner");
+      // Show the latest called number for this game alongside the control
+      // number — that's the call that completed the row, what the operator
+      // shouts when announcing the bingo.
+      if (stripEl._bannerNumEl) {
+        const last = gs.called && gs.called.length ? gs.called[gs.called.length - 1] : null;
+        stripEl._bannerNumEl.textContent = last != null ? String(last) : "—";
+      }
+    }
   });
 }
 
