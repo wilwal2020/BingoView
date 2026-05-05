@@ -589,6 +589,74 @@ header .conn-label { margin-left: auto; }
 .user-name-input:focus { border-color: var(--gold); }
 
 /* Game tabs strip — row of 4 selectors */
+/* Block selector row — sits above game tabs */
+.block-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px 2px;
+  background: #0a0a0a;
+  border-bottom: 1px solid #181818;
+  flex-shrink: 0;
+  align-items: center;
+}
+.block-tab {
+  background: #131313;
+  border: 1px solid #252525;
+  border-radius: 6px;
+  padding: 5px 10px;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.block-tab:hover { background: #1a1a1a; color: var(--paper); }
+.block-tab.active {
+  background: #1a1820;
+  border-color: #9b7aff;
+  color: #c4a8ff;
+}
+.block-tab .block-badge {
+  display: inline-block;
+  margin-left: 5px;
+  background: #2a2220;
+  color: #f0a050;
+  font-size: 0.55rem;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 8px;
+  vertical-align: middle;
+}
+.block-tab.active .block-badge { display: none; }
+.block-tab-add {
+  background: transparent;
+  border: 1px dashed #333;
+  color: #555;
+  font-size: 0.75rem;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.block-tab-add:hover { border-color: #9b7aff; color: #9b7aff; }
+.block-tab-remove {
+  position: absolute;
+  top: -4px; right: -4px;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: #2a2a2a;
+  color: #888;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  display: none;
+}
+.block-tab:not(.active) .block-tab-remove { display: block; }
+.block-tab-remove:hover { background: var(--red); color: #fff; }
+
 .game-tabs {
   display: flex;
   gap: 4px;
@@ -1083,7 +1151,6 @@ header .conn-label { margin-left: auto; }
     <div class="hdr-title">PHONE</div>
     <button id="btn-fresh-start">Nytt ark</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
-    <button id="btn-add-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Legg til flere ark (ekstra blokk)">+ Ark</button>
     <button id="btn-bv-settings" class="bv-icon-btn" title="Lyd og vibrasjon" aria-label="Innstillinger">⚙</button>
     <div class="conn-label">
       <div class="conn-dot" id="phone-conn-dot"></div>
@@ -1171,6 +1238,9 @@ header .conn-label { margin-left: auto; }
            maxlength="24" placeholder="Skriv navnet ditt"
            autocomplete="off" autocorrect="off" spellcheck="false">
   </div>
+
+  <!-- Block selector — multiple independent bingo blocks -->
+  <div id="block-tabs" class="block-tabs" style="display:none"></div>
 
   <!-- Game tabs — rendered dynamically -->
   <div id="game-tabs" class="game-tabs" style="display:none"></div>
@@ -1449,12 +1519,31 @@ const COLOR_PALETTE = [
 // Active game list (dynamic — replaced wholesale when entering manual mode)
 let gameList = DEFAULT_GAMES.map(g => ({...g}));
 
-// Per-game state: strips (source data), DOM refs, called numbers, current rekke
-const gameState = {};
+// ── Multi-block architecture ──────────────────────────────────
+// Each "block" is a completely independent bingo paper with its own 4 games.
+// blocks[i] = { gameState: { blue:{...}, yellow:{...}, pink:{...}, grey:{...} } }
+// The active block's gameState is referenced via `gameState` (pointer swapped on block switch).
+const blocks = [];   // array of block objects
+let activeBlockIdx = 0;
+
+function createEmptyBlock() {
+  const gs = {};
+  DEFAULT_GAMES.forEach(g => {
+    gs[g.id] = { strips: null, paperEl: null, cellMap: {}, called: [], rekke: 'Rekke1', hostCalled: [], wrong: [] };
+  });
+  return { gameState: gs };
+}
+
+// Initialize with one block
+blocks.push(createEmptyBlock());
+
+// Per-game state: active pointer (points into blocks[activeBlockIdx].gameState)
+let gameState = blocks[0].gameState;
+
 function ensureGameState(id) {
   if (!gameState[id]) gameState[id] = {
     strips: null, paperEl: null, cellMap: {}, called: [], rekke: 'Rekke1',
-    hostCalled: [], wrong: [],   // manual-play (connected) bookkeeping
+    hostCalled: [], wrong: [],
   };
 }
 function getGameIds()    { return gameList.map(g => g.id); }
@@ -1471,10 +1560,120 @@ let currentGame = null;           // the game the main site (iPad) is on
 let currentRekke = 'Rekke1';      // the rekke the main site is on
 let latestCell = null;            // last "latest"-highlighted cell in the active game
 const pendingPhotos = {};         // gameKey → File queued for processing
-let appendMode = false;           // when true, photo result APPENDS to existing strips
 let resetTs = 0;                  // callLog entries with ts ≤ resetTs are ignored (pre-reset)
 let sessionCode = null;           // code used to connect — key for localStorage
 let phoneId = null;               // assigned in connectPhone — used when publishing papers
+
+// ── Block switching ───────────────────────────────────────────
+function switchBlock(idx) {
+  if (idx < 0 || idx >= blocks.length) return;
+  activeBlockIdx = idx;
+  gameState = blocks[idx].gameState;
+  activeGame = getGameIds().find(g => gameState[g].strips) || 'blue';
+  renderActiveGame();
+  refreshBlockTabs();
+  refreshGameTabs();
+  saveSession();
+}
+
+function addBlock() {
+  blocks.push(createEmptyBlock());
+  switchBlock(blocks.length - 1);
+  // Show upload screen for the new empty block
+  document.getElementById("phone-paper").style.display = "none";
+  document.getElementById("phone-upload").style.display = "flex";
+  updateUploadTitle();
+  toast("Ny blokk lagt til", "ok", 2000);
+}
+
+function removeBlock(idx) {
+  if (blocks.length <= 1) return; // always keep at least 1
+  blocks.splice(idx, 1);
+  if (activeBlockIdx >= blocks.length) activeBlockIdx = blocks.length - 1;
+  gameState = blocks[activeBlockIdx].gameState;
+  activeGame = getGameIds().find(g => gameState[g].strips) || 'blue';
+  renderActiveGame();
+  refreshBlockTabs();
+  refreshGameTabs();
+  saveSession();
+}
+
+// Compute minimum numbers remaining to win for a given block (across all its games/rekke)
+function computeBlockMinRemaining(blockIdx) {
+  const blk = blocks[blockIdx];
+  let globalMin = Infinity;
+  getGameIds().forEach(gId => {
+    const gs = blk.gameState[gId];
+    if (!gs || !gs.strips || !gs.paperEl) return;
+    const proximityBase = (manualPlayMode && gs.hostCalled && gs.hostCalled.length)
+      ? gs.hostCalled : gs.called;
+    const calledSet = new Set(proximityBase.map(String));
+    const rekke = gs.rekke || 'Rekke1';
+    const rowsNeeded = rekke === 'Rekke1' ? 1 : (rekke === 'Rekke2' ? 2 : 3);
+
+    gs.paperEl.querySelectorAll(".strip").forEach(stripEl => {
+      const numRows = stripEl._numRows || [];
+      const missingPerRow = numRows.map(cells =>
+        cells.reduce((acc, c) => acc + (calledSet.has(c.dataset.num) ? 0 : 1), 0)
+      );
+      if (rowsNeeded === 1) {
+        missingPerRow.forEach(m => { if (m < globalMin) globalMin = m; });
+      } else {
+        const sorted = [...missingPerRow].sort((a, b) => a - b);
+        const totalMissing = sorted.slice(0, rowsNeeded).reduce((s, v) => s + v, 0);
+        if (totalMissing < globalMin) globalMin = totalMissing;
+      }
+    });
+  });
+  return globalMin === Infinity ? null : globalMin;
+}
+
+function refreshBlockTabs() {
+  const wrap = document.getElementById("block-tabs");
+  // Show block row when game tabs are visible (papers loaded or manual mode)
+  // Skip in manual mode — blocks are a connected-mode concept
+  const anyLoaded = blocks.some(blk => getGameIds().some(g => blk.gameState[g].strips));
+  if (manualMode || !anyLoaded) { wrap.style.display = "none"; return; }
+  wrap.style.display = "flex";
+  wrap.innerHTML = "";
+
+  // Only render individual block tabs when there are 2+ blocks
+  if (blocks.length > 1) {
+    blocks.forEach((blk, idx) => {
+      const btn = document.createElement("button");
+      btn.className = "block-tab" + (idx === activeBlockIdx ? " active" : "");
+      const label = document.createTextNode("Blokk " + (idx + 1));
+      btn.appendChild(label);
+
+      // Badge for inactive blocks: show numbers remaining
+      if (idx !== activeBlockIdx) {
+        const min = computeBlockMinRemaining(idx);
+        if (min !== null && min <= 5) {
+          const badge = document.createElement("span");
+          badge.className = "block-badge";
+          badge.textContent = min === 0 ? "BINGO!" : min + " igjen";
+          btn.appendChild(badge);
+        }
+        // Remove button on non-active blocks
+        const x = document.createElement("span");
+        x.className = "block-tab-remove";
+        x.textContent = "×";
+        x.addEventListener("click", (e) => { e.stopPropagation(); removeBlock(idx); });
+        btn.appendChild(x);
+      }
+
+      btn.addEventListener("click", () => switchBlock(idx));
+      wrap.appendChild(btn);
+    });
+  }
+
+  // Add button — always visible so user can add a second block
+  const addBtn = document.createElement("button");
+  addBtn.className = "block-tab-add";
+  addBtn.textContent = "+ Legg til";
+  addBtn.addEventListener("click", addBlock);
+  wrap.appendChild(addBtn);
+}
 
 // Publish a game's strips to the host so it can render the paper and
 // highlight close-to-winning numbers in the ball grid. No-op outside
@@ -1492,11 +1691,14 @@ function publishStripsToHost(gameKey) {
   if (!strips) return;
   channelRef.child('phones/' + phoneId + '/papers/' + gameKey).set(strips);
   channelRef.child('papers/' + phoneId + '/' + gameKey).set(strips);
-  // Update meta — list all game keys this phone currently has loaded
-  const allKeys = getGameIds().filter(g => gameState[g] && gameState[g].strips);
+  // Update meta — list all game keys this phone currently has loaded (across all blocks)
+  const allKeys = [];
+  blocks.forEach(blk => {
+    getGameIds().forEach(g => { if (blk.gameState[g] && blk.gameState[g].strips) allKeys.push(g); });
+  });
   channelRef.child('papers_meta/' + phoneId).update({
     lastSeen: Date.now(),
-    gameKeys: allKeys,
+    gameKeys: [...new Set(allKeys)],
   });
 }
 
@@ -1520,9 +1722,14 @@ const MANUAL_KEY = 'bv_paper_manual';
 function saveSession() {
   if (manualMode) return saveManualSession();
   if (!sessionCode) return;
-  const data = {};
-  getGameIds().forEach(g => {
-    data[g] = { strips: gameState[g].strips, called: gameState[g].called, rekke: gameState[g].rekke };
+  // Save all blocks
+  const data = { version: 2, activeBlockIdx, blocks: [] };
+  blocks.forEach(blk => {
+    const blkData = {};
+    getGameIds().forEach(g => {
+      blkData[g] = { strips: blk.gameState[g].strips, called: blk.gameState[g].called, rekke: blk.gameState[g].rekke };
+    });
+    data.blocks.push(blkData);
   });
   try { localStorage.setItem('bv_paper_' + sessionCode, JSON.stringify(data)); } catch(e) {}
 }
@@ -1534,15 +1741,53 @@ function restoreSession() {
   if (!raw) return false;
   const saved = JSON.parse(raw);
   let any = false;
-  getGameIds().forEach(g => {
-    if (!saved[g] || !saved[g].strips) return;
-    gameState[g].strips = saved[g].strips;
-    gameState[g].called = saved[g].called || [];
-    gameState[g].rekke  = saved[g].rekke  || 'Rekke1';
-    buildPaperForGame(g);
-    renderCells(g);
-    any = true;
+
+  // Handle old format (flat single-block object without version field)
+  if (!saved.version) {
+    // Legacy: single block
+    getGameIds().forEach(g => {
+      if (!saved[g] || !saved[g].strips) return;
+      gameState[g].strips = saved[g].strips;
+      gameState[g].called = saved[g].called || [];
+      gameState[g].rekke  = saved[g].rekke  || 'Rekke1';
+      buildPaperForGame(g);
+      renderCells(g);
+      any = true;
+    });
+    return any;
+  }
+
+  // New multi-block format (version 2)
+  if (!Array.isArray(saved.blocks) || !saved.blocks.length) return false;
+  // Reset blocks array to match saved
+  blocks.length = 0;
+  saved.blocks.forEach(blkData => {
+    const blk = createEmptyBlock();
+    getGameIds().forEach(g => {
+      if (!blkData[g] || !blkData[g].strips) return;
+      blk.gameState[g].strips = blkData[g].strips;
+      blk.gameState[g].called = blkData[g].called || [];
+      blk.gameState[g].rekke  = blkData[g].rekke  || 'Rekke1';
+      any = true;
+    });
+    blocks.push(blk);
   });
+  if (!blocks.length) blocks.push(createEmptyBlock());
+  activeBlockIdx = Math.min(saved.activeBlockIdx || 0, blocks.length - 1);
+  gameState = blocks[activeBlockIdx].gameState;
+  // Build DOM for all blocks
+  blocks.forEach(blk => {
+    getGameIds().forEach(g => {
+      if (blk.gameState[g].strips) {
+        const prevGS = gameState;
+        gameState = blk.gameState;
+        buildPaperForGame(g);
+        renderCells(g);
+        gameState = prevGS;
+      }
+    });
+  });
+  activeGame = getGameIds().find(g => gameState[g].strips) || 'blue';
   return any;
 }
 
@@ -1849,15 +2094,6 @@ function initPhone() {
     if (e.target === e.currentTarget) e.currentTarget.style.display = "none";
   });
 
-  // Add-paper button — opens file upload in append mode
-  document.getElementById("btn-add-paper").addEventListener("click", () => {
-    appendMode = true;
-    document.getElementById("phone-paper").style.display = "none";
-    document.getElementById("phone-upload").style.display = "flex";
-    updateUploadTitle();
-    setTimeout(() => document.getElementById("file-input").click(), 120);
-  });
-
   // Generate random bingo paper
   document.getElementById("btn-generate-paper").addEventListener("click", () => {
     try {
@@ -1957,7 +2193,11 @@ function initPhone() {
       } else {
         clearSession();
       }
-      Object.keys(gameState).forEach(k => delete gameState[k]);
+      // Reset to single empty block
+      blocks.length = 0;
+      blocks.push(createEmptyBlock());
+      activeBlockIdx = 0;
+      gameState = blocks[0].gameState;
       gameList.forEach(g => ensureGameState(g.id));
       activeGame = gameList[0].id;
       latestCell = null;
@@ -1965,6 +2205,7 @@ function initPhone() {
       document.getElementById("phone-pending").style.display = "none";
       document.getElementById("phone-paper").style.display   = "none";
       document.getElementById("phone-upload").style.display  = "flex";
+      refreshBlockTabs();
       refreshGameTabs();
       refreshRekkeButtons();
       updateUploadTitle();
@@ -2199,6 +2440,7 @@ async function connectPhone(code) {
   const restored = restoreSession();
   if (restored) {
     showGameTabs();
+    refreshBlockTabs();
     renderActiveGame();
     toast("Ark gjenopprettet", "ok", 3000);
     // Publish all restored papers so the host can render them
@@ -2346,12 +2588,7 @@ Example:
     // Render into the target game slot (captured at call time, not read from global activeGame)
     const resolvedGame = targetGame || activeGame;
     const gs = gameState[resolvedGame];
-    if (appendMode && gs.strips && gs.strips.length) {
-      gs.strips = [...gs.strips, ...parsed];
-    } else {
-      gs.strips = parsed;
-    }
-    appendMode = false;
+    gs.strips = parsed;
     buildPaperForGame(resolvedGame);
     const count = Object.keys(gs.cellMap).length;
 
@@ -2489,7 +2726,6 @@ function renderActiveGame() {
     document.getElementById("phone-upload").style.display = "none";
     document.getElementById("phone-paper").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "block";
-    document.getElementById("btn-add-paper").style.display = "block";
 
     const count = Object.keys(gs.cellMap).length;
     document.getElementById("phone-detected-count").textContent = count ? `${count}/90 detected` : "";
@@ -2500,10 +2736,10 @@ function renderActiveGame() {
     document.getElementById("phone-paper").style.display  = "none";
     document.getElementById("phone-upload").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "none";
-    document.getElementById("btn-add-paper").style.display = "none";
   }
 
   updateRekkeLabel();
+  refreshBlockTabs();
   refreshGameTabs();
   refreshRekkeButtons();
   updateUploadTitle();
@@ -2513,6 +2749,7 @@ function showGameTabs() {
   document.getElementById("game-tabs").style.display = "flex";
   const nameRow = document.getElementById("user-name-row");
   if (nameRow) nameRow.style.display = "flex";
+  refreshBlockTabs();
 }
 
 // Pending remove-confirm timers per game id (manual mode)
@@ -2660,20 +2897,25 @@ function setManualPlayMode(on) {
   if (on) {
     // Take a snapshot of currently-confirmed calls as the host's truth so
     // every existing call shows up as already confirmed (no hint borders).
-    getGameIds().forEach(g => {
-      const gs = gameState[g];
-      if (!Array.isArray(gs.hostCalled) || gs.hostCalled.length < gs.called.length) {
-        gs.hostCalled = gs.called.slice();
-      }
-      gs.wrong = [];
+    // Apply to ALL blocks
+    blocks.forEach(blk => {
+      getGameIds().forEach(g => {
+        const gs = blk.gameState[g];
+        if (!Array.isArray(gs.hostCalled) || gs.hostCalled.length < gs.called.length) {
+          gs.hostCalled = gs.called.slice();
+        }
+        gs.wrong = [];
+      });
     });
     toast('Manuell trykking på — bekreft tall selv', 'ok', 3000);
   } else {
     // Auto-confirm everything the host has called and clear wrong marks
-    getGameIds().forEach(g => {
-      const gs = gameState[g];
-      gs.called = (gs.hostCalled || []).slice();
-      gs.wrong = [];
+    blocks.forEach(blk => {
+      getGameIds().forEach(g => {
+        const gs = blk.gameState[g];
+        gs.called = (gs.hostCalled || []).slice();
+        gs.wrong = [];
+      });
     });
     toast('Manuell trykking av', 'ok', 2000);
   }
@@ -2831,10 +3073,11 @@ function updateUploadTitle() {
   const title = document.getElementById("upload-title");
   const sub   = document.getElementById("upload-sub");
   if (!title || !sub) return;
+  const blockLabel = blocks.length > 1 ? ` (Blokk ${activeBlockIdx + 1})` : '';
   if (gs.strips) {
-    title.textContent = `Scan new paper (${getGameName(activeGame)})`;
+    title.textContent = `Scan new paper (${getGameName(activeGame)}${blockLabel})`;
   } else {
-    title.textContent = `Scan Paper — ${getGameName(activeGame)}`;
+    title.textContent = `Scan Paper — ${getGameName(activeGame)}${blockLabel}`;
   }
   sub.textContent = "Tap to photograph the bingo paper for the active game";
 }
@@ -2905,65 +3148,74 @@ function applyCallToGame(gameKey, number, isLatestEver) {
 function handleCalledNumber(number, game, rekke) {
   // Route to the right game bucket. If no game specified, apply to the main-site current game or the active one.
   const target = (game && getGameIds().includes(game)) ? game : (currentGame || activeGame);
-  const gs = gameState[target];
 
   // Normalise to Number — callLog entries from Firebase can arrive as strings.
   const num = Number(number);
   if (!num) return;
 
-  // Update rekke for that game if provided
+  // Apply to ALL blocks (they all track the same host stream)
+  blocks.forEach((blk, bIdx) => {
+    const gs = blk.gameState[target];
+    if (!gs) return;
+
+    if (rekke && /^Rekke[1-3]$/.test(rekke)) {
+      gs.rekke = rekke;
+    }
+
+    if (!Array.isArray(gs.hostCalled)) gs.hostCalled = [];
+    if (gs.hostCalled[gs.hostCalled.length - 1] !== num) gs.hostCalled.push(num);
+
+    if (Array.isArray(gs.wrong)) {
+      const w = gs.wrong.indexOf(num);
+      if (w !== -1) gs.wrong.splice(w, 1);
+    }
+
+    if (!manualPlayMode) {
+      if (gs.called[gs.called.length - 1] !== num) gs.called.push(num);
+    }
+  });
+
+  // Active block: update rekke global
   if (rekke && /^Rekke[1-3]$/.test(rekke)) {
-    gs.rekke = rekke;
     if (target === (currentGame || activeGame)) currentRekke = rekke;
   }
 
-  // Update hostCalled (always)
-  if (!Array.isArray(gs.hostCalled)) gs.hostCalled = [];
-  if (gs.hostCalled[gs.hostCalled.length - 1] !== num) gs.hostCalled.push(num);
-
-  // If this number was previously wrong-marked, the host has now called it —
-  // drop the wrong mark so it can show as a hint.
-  if (Array.isArray(gs.wrong)) {
-    const w = gs.wrong.indexOf(num);
-    if (w !== -1) gs.wrong.splice(w, 1);
-  }
-
-  // In default mode, auto-confirm the call. In manual play, the user has to tap.
-  if (!manualPlayMode) {
-    if (gs.called[gs.called.length - 1] !== num) gs.called.push(num);
-  }
-
   if (target === activeGame) {
-    // Brief screen flash on every host call regardless of mode
     document.body.style.transition = "background 0.05s";
     document.body.style.background = "rgba(200,40,30,0.15)";
     setTimeout(() => document.body.style.background = "var(--ink)", 150);
   }
 
-  // Haptic + audio feedback on every host call
   vibrateShort();
   playTick();
 
   renderCells(target);
   if (target === activeGame) updateRekkeLabel();
-  // Detect transition to "1 number from rekke" → strong vibration
   checkProximityTransition(target);
+  refreshBlockTabs();
   saveSession();
 }
 
 function handleUncalledNumber(number, game) {
   const target = (game && getGameIds().includes(game)) ? game : (currentGame || activeGame);
+
+  // Apply undo to ALL blocks
+  blocks.forEach(blk => {
+    const gs = blk.gameState[target];
+    if (!gs) return;
+    const idx = gs.called.lastIndexOf(number);
+    if (idx !== -1) gs.called.splice(idx, 1);
+    // Also remove from hostCalled
+    const hIdx = gs.hostCalled.lastIndexOf(number);
+    if (hIdx !== -1) gs.hostCalled.splice(hIdx, 1);
+  });
+
+  // Update DOM for active block only
   const gs = gameState[target];
-
-  // Remove the number from the called list
-  const idx = gs.called.lastIndexOf(number);
-  if (idx !== -1) gs.called.splice(idx, 1);
-
   if (target === activeGame) {
     const cell = gs.cellMap[String(number)];
     if (cell) {
       cell.classList.remove("called", "latest");
-      // If this was the latestCell, clear it and promote the new last
       if (latestCell === cell) {
         latestCell = null;
         if (gs.called.length) {
@@ -2976,7 +3228,6 @@ function handleUncalledNumber(number, game) {
         }
       }
     }
-    // Update last-number display
     const lastNum = gs.called.length ? gs.called[gs.called.length - 1] : "";
     document.getElementById("phone-last-num").textContent = lastNum;
 
@@ -2985,49 +3236,65 @@ function handleUncalledNumber(number, game) {
   } else {
     updateProximityHighlights(target);
   }
+  refreshBlockTabs();
   saveSession();
 }
 
 // Full reconciliation from the authoritative callState broadcast.
 // Replaces hostCalled (always) and adjusts called/wrong for manualPlayMode.
 function reconcileGameState(gameKey, numbers, rekke) {
-  const gs = gameState[gameKey];
+  const list = Array.isArray(numbers) ? numbers.map(Number) : [];
+  let newCallArrived = false;
 
+  // Apply to ALL blocks (they all track the same host stream)
+  blocks.forEach((blk, bIdx) => {
+    const gs = blk.gameState[gameKey];
+    if (!gs) return;
+
+    if (rekke && /^Rekke[1-3]$/.test(rekke)) {
+      gs.rekke = rekke;
+    }
+
+    gs.hostCalled = list;
+
+    // Detect new call (only from active block to avoid double-haptic)
+    if (bIdx === activeBlockIdx) {
+      const prevLen = (gs._prevHostLen != null) ? gs._prevHostLen : list.length;
+      if (list.length > prevLen) newCallArrived = true;
+    }
+    gs._prevHostLen = list.length;
+
+    if (manualPlayMode) {
+      const inList = new Set(list);
+      gs.called = (gs.called || []).filter(n => inList.has(n));
+      gs.wrong  = (gs.wrong  || []).filter(n => !inList.has(n));
+    } else {
+      gs.called = list.slice();
+      gs.wrong  = [];
+    }
+
+    // Only render DOM for active block
+    if (bIdx === activeBlockIdx) {
+      renderCells(gameKey);
+    }
+  });
+
+  // Update current rekke from active block
+  const activeGs = gameState[gameKey];
   if (rekke && /^Rekke[1-3]$/.test(rekke)) {
-    gs.rekke = rekke;
     if (gameKey === (currentGame || activeGame)) currentRekke = rekke;
   }
-
-  const list = Array.isArray(numbers) ? numbers.map(Number) : [];
-  gs.hostCalled = list;
-
-  // Detect newly-added numbers (vs previous state) for haptic feedback.
-  const prevHostCalledLen = (gs._prevHostLen != null) ? gs._prevHostLen : list.length;
-  const newCallArrived = list.length > prevHostCalledLen;
-  gs._prevHostLen = list.length;
-
-  if (manualPlayMode) {
-    // Keep user-confirmed entries that are still in the host list (in user-confirm order)
-    const inList = new Set(list);
-    gs.called = (gs.called || []).filter(n => inList.has(n));
-    // A "wrong" mark is only meaningful for numbers the host hasn't called.
-    // If the host has now called one, drop it from wrong (it'll appear as a hint instead).
-    gs.wrong  = (gs.wrong  || []).filter(n => !inList.has(n));
-  } else {
-    gs.called = list.slice();
-    gs.wrong  = [];
-  }
-
-  renderCells(gameKey);
   if (gameKey === activeGame) updateRekkeLabel();
 
-  // Haptic + tone on a new host call (skip first-load reconcile that just catches up)
+  // Haptic + tone on a new host call
   if (newCallArrived) {
     vibrateShort();
     playTick();
   }
   checkProximityTransition(gameKey);
 
+  // Refresh block badges (non-active blocks may have changed proximity)
+  refreshBlockTabs();
   saveSession();
 }
 
@@ -3054,18 +3321,20 @@ function applyRemoteState(game, rekke) {
 
 function handleRemoteReset(scope, game) {
   resetTs = Date.now();
-  const resetOne = g => {
-    gameState[g].called     = [];
-    gameState[g].hostCalled = [];
-    gameState[g].wrong      = [];
-    gameState[g].rekke      = 'Rekke1';
-    if (gameState[g].strips) buildPaperForGame(g);
+  const resetOneInBlock = (blk, g) => {
+    const gs = blk.gameState[g];
+    gs.called     = [];
+    gs.hostCalled = [];
+    gs.wrong      = [];
+    gs.rekke      = 'Rekke1';
+    // Only rebuild DOM for active block
+    if (blk === blocks[activeBlockIdx] && gs.strips) buildPaperForGame(g);
   };
   if (scope === 'all') {
-    getGameIds().forEach(resetOne);
+    blocks.forEach(blk => getGameIds().forEach(g => resetOneInBlock(blk, g)));
     toast("Alle spill nullstilt", "warn");
   } else if (scope === 'game' && game && getGameIds().includes(game)) {
-    resetOne(game);
+    blocks.forEach(blk => resetOneInBlock(blk, game));
     toast(`${getGameName(game)} nullstilt`, "warn");
   }
   saveSession();
