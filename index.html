@@ -327,10 +327,10 @@ header .conn-label { margin-left: auto; }
 
 .paper-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px 0;
+  padding: 10px 12px 0;
   background: #1a1a1a;
   flex-shrink: 0;
 }
@@ -339,6 +339,58 @@ header .conn-label { margin-left: auto; }
 .paper-toolbar:not(:has(> :not([style*="display:none"]):not([style*="display: none"]))) {
   display: none;
 }
+
+/* Slide-switch styling for the "Manuell trykking" toggle. The same
+   #btn-manual-toggle button is reused; .active drives the on-state so the
+   existing JS click handler still works untouched. */
+.manual-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 999px;
+  padding: 6px 8px 6px 16px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--paper);
+  text-transform: uppercase;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.manual-switch:hover { border-color: var(--gold); }
+.manual-switch.active {
+  background: #201c12;
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.manual-switch-label {
+  user-select: none;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.manual-switch-pill {
+  position: relative;
+  width: 42px;
+  height: 22px;
+  background: #333;
+  border-radius: 999px;
+  transition: background 0.18s;
+  flex-shrink: 0;
+}
+.manual-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: #ddd;
+  border-radius: 50%;
+  transition: transform 0.18s, background 0.18s;
+}
+.manual-switch.active .manual-switch-pill { background: var(--gold); }
+.manual-switch.active .manual-switch-thumb { transform: translateX(20px); background: #1a1208; }
 
 #paper-canvas-wrap {
   flex: 1;
@@ -1116,7 +1168,10 @@ header .conn-label { margin-left: auto; }
     <!-- Step 3: Digital paper with highlights -->
     <div id="phone-paper">
       <div class="paper-toolbar">
-        <button id="btn-manual-toggle" style="display:none" class="hdr-toggle" title="Manuell trykking — bekreft tall selv">Manuell</button>
+        <button id="btn-manual-toggle" class="manual-switch" type="button" role="switch" aria-checked="false" style="display:none" title="Manuell trykking — bekreft tall selv">
+          <span class="manual-switch-label">Manuell trykking</span>
+          <span class="manual-switch-pill"><span class="manual-switch-thumb"></span></span>
+        </button>
       </div>
       <div id="paper-canvas-wrap">
         <div id="digital-paper"></div>
@@ -2372,7 +2427,10 @@ function setManualPlayMode(on) {
   manualPlayMode = on;
 
   const btn = document.getElementById('btn-manual-toggle');
-  if (btn) btn.classList.toggle('active', on);
+  if (btn) {
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-checked', on ? 'true' : 'false');
+  }
 
   const wrap = document.getElementById('digital-paper');
   wrap.classList.toggle('tappable', manualMode || manualPlayMode);
