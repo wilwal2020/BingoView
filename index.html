@@ -2260,7 +2260,7 @@ function renderActiveGame() {
   const gs = gameState[activeGame];
   const wrap = document.getElementById("digital-paper");
   wrap.innerHTML = "";
-  wrap.classList.toggle("tappable", manualMode);
+  wrap.classList.toggle("tappable", manualMode || manualPlayMode);
   const gameColor = getGameColor(activeGame) || '#fff';
   wrap.style.background   = gameColor;
   wrap.style.borderColor  = gameColor;
@@ -2687,6 +2687,10 @@ function handleCalledNumber(number, game, rekke) {
   const target = (game && getGameIds().includes(game)) ? game : (currentGame || activeGame);
   const gs = gameState[target];
 
+  // Normalise to Number — callLog entries from Firebase can arrive as strings.
+  const num = Number(number);
+  if (!num) return;
+
   // Update rekke for that game if provided
   if (rekke && /^Rekke[1-3]$/.test(rekke)) {
     gs.rekke = rekke;
@@ -2695,18 +2699,18 @@ function handleCalledNumber(number, game, rekke) {
 
   // Update hostCalled (always)
   if (!Array.isArray(gs.hostCalled)) gs.hostCalled = [];
-  if (gs.hostCalled[gs.hostCalled.length - 1] !== number) gs.hostCalled.push(number);
+  if (gs.hostCalled[gs.hostCalled.length - 1] !== num) gs.hostCalled.push(num);
 
   // If this number was previously wrong-marked, the host has now called it —
   // drop the wrong mark so it can show as a hint.
   if (Array.isArray(gs.wrong)) {
-    const w = gs.wrong.indexOf(number);
+    const w = gs.wrong.indexOf(num);
     if (w !== -1) gs.wrong.splice(w, 1);
   }
 
   // In default mode, auto-confirm the call. In manual play, the user has to tap.
   if (!manualPlayMode) {
-    if (gs.called[gs.called.length - 1] !== number) gs.called.push(number);
+    if (gs.called[gs.called.length - 1] !== num) gs.called.push(num);
   }
 
   if (target === activeGame) {
@@ -2856,7 +2860,11 @@ function handleRemoteReset(scope, game) {
 function updateProximityHighlights(gameKey) {
   const gs = gameState[gameKey];
   if (!gs.paperEl) return;
-  const calledSet = new Set(gs.called.map(String));
+  // In manualPlayMode use hostCalled (all host-called numbers) for proximity so
+  // the warmth reflects what the host has called, not just what the user confirmed.
+  const proximityBase = (manualPlayMode && gs.hostCalled && gs.hostCalled.length)
+    ? gs.hostCalled : gs.called;
+  const calledSet = new Set(proximityBase.map(String));
   const rekke = gs.rekke || 'Rekke1';
   const rowsNeeded = rekke === 'Rekke1' ? 1 : (rekke === 'Rekke2' ? 2 : 3);
   // missing threshold to START warming
