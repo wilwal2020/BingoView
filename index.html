@@ -630,7 +630,8 @@ header .conn-label { margin-left: auto; }
   border-radius: 8px;
   vertical-align: middle;
 }
-.block-tab.active .block-badge { display: none; }
+.block-tab .block-badge { min-width: 38px; text-align: center; }
+.block-tab.active .block-badge { visibility: hidden; }
 .block-tab-add {
   background: transparent;
   border: 1px dashed #333;
@@ -1588,6 +1589,10 @@ function addBlock() {
 
 function removeBlock(idx) {
   if (blocks.length <= 1) return; // always keep at least 1
+  // Clean up Firebase for the removed block's virtual phone
+  cleanupBlockPhone(idx);
+  // Also clean up the last block's old virtual phone ID (indices shift down)
+  cleanupBlockPhone(blocks.length - 1);
   blocks.splice(idx, 1);
   if (activeBlockIdx >= blocks.length) activeBlockIdx = blocks.length - 1;
   gameState = blocks[activeBlockIdx].gameState;
@@ -1595,6 +1600,8 @@ function removeBlock(idx) {
   renderActiveGame();
   refreshBlockTabs();
   refreshGameTabs();
+  // Re-publish remaining blocks under their correct (shifted) IDs
+  publishAllStripsToHost();
   saveSession();
 }
 
@@ -1645,16 +1652,15 @@ function refreshBlockTabs() {
       const label = document.createTextNode("Blokk " + (idx + 1));
       btn.appendChild(label);
 
-      // Badge for inactive blocks: show numbers remaining
+      // Badge: always show remaining count for consistent button sizing
+      const min = computeBlockMinRemaining(idx);
+      const badge = document.createElement("span");
+      badge.className = "block-badge";
+      badge.textContent = min === null ? "—" : (min === 0 ? "BINGO!" : min + " igjen");
+      btn.appendChild(badge);
+
+      // Remove button on non-active blocks
       if (idx !== activeBlockIdx) {
-        const min = computeBlockMinRemaining(idx);
-        if (min !== null && min <= 5) {
-          const badge = document.createElement("span");
-          badge.className = "block-badge";
-          badge.textContent = min === 0 ? "BINGO!" : min + " igjen";
-          btn.appendChild(badge);
-        }
-        // Remove button on non-active blocks
         const x = document.createElement("span");
         x.className = "block-tab-remove";
         x.textContent = "×";
@@ -1675,31 +1681,69 @@ function refreshBlockTabs() {
   wrap.appendChild(addBtn);
 }
 
-// Publish a game's strips to the host so it can render the paper and
-// highlight close-to-winning numbers in the ball grid. No-op outside
-// connected mode or if the paper isn't loaded yet.
+// Publish strips to the host so it can render the paper and highlight
+// close-to-winning numbers in the ball grid. Each block gets its own
+// virtual phone ID so the host can show highlights for all blocks.
 //
-// Writes to TWO Firebase paths:
-//   * phones/<id>/papers/<game>  — legacy (older host versions)
-//   * papers/<id>/<game>         — persistent (survives disconnect)
-//
-// papers_meta/<id> tracks gameKeys + lastSeen so the host can render
-// offline phones with a meaningful label.
+// Block 0 uses plain phoneId (backward compatible).
+// Block N uses phoneId + '_b' + N.
+function blockPhoneId(bIdx) {
+  return bIdx === 0 ? phoneId : phoneId + '_b' + bIdx;
+}
+
+// Publish a single game's strips for the active block
 function publishStripsToHost(gameKey) {
   if (!channelRef || !phoneId || manualMode) return;
   const strips = gameState[gameKey] && gameState[gameKey].strips;
   if (!strips) return;
-  channelRef.child('phones/' + phoneId + '/papers/' + gameKey).set(strips);
-  channelRef.child('papers/' + phoneId + '/' + gameKey).set(strips);
-  // Update meta — list all game keys this phone currently has loaded (across all blocks)
-  const allKeys = [];
-  blocks.forEach(blk => {
-    getGameIds().forEach(g => { if (blk.gameState[g] && blk.gameState[g].strips) allKeys.push(g); });
+  const pid = blockPhoneId(activeBlockIdx);
+  channelRef.child('phones/' + pid + '/papers/' + gameKey).set(strips);
+  channelRef.child('papers/' + pid + '/' + gameKey).set(strips);
+  updateBlockMeta(activeBlockIdx);
+}
+
+// Publish ALL blocks' strips (called on connect/reconnect)
+function publishAllStripsToHost() {
+  if (!channelRef || !phoneId || manualMode) return;
+  blocks.forEach((blk, bIdx) => {
+    const pid = blockPhoneId(bIdx);
+    let anyStrips = false;
+    getGameIds().forEach(g => {
+      const strips = blk.gameState[g] && blk.gameState[g].strips;
+      if (strips) {
+        channelRef.child('phones/' + pid + '/papers/' + g).set(strips);
+        channelRef.child('papers/' + pid + '/' + g).set(strips);
+        anyStrips = true;
+      }
+    });
+    if (anyStrips) updateBlockMeta(bIdx);
   });
-  channelRef.child('papers_meta/' + phoneId).update({
+}
+
+// Update papers_meta for a single block's virtual phone
+function updateBlockMeta(bIdx) {
+  if (!channelRef || !phoneId) return;
+  const pid = blockPhoneId(bIdx);
+  const blk = blocks[bIdx];
+  const allKeys = getGameIds().filter(g => blk.gameState[g] && blk.gameState[g].strips);
+  const userName = getStoredUserName();
+  const label = blocks.length > 1 && bIdx > 0
+    ? (userName ? userName + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
+    : (userName || null);
+  channelRef.child('papers_meta/' + pid).update({
     lastSeen: Date.now(),
-    gameKeys: [...new Set(allKeys)],
+    gameKeys: allKeys,
+    userName: label,
   });
+}
+
+// Clean up Firebase presence for removed block virtual phones
+function cleanupBlockPhone(bIdx) {
+  if (!channelRef || !phoneId) return;
+  const pid = blockPhoneId(bIdx);
+  channelRef.child('phones/' + pid).remove();
+  channelRef.child('papers/' + pid).remove();
+  channelRef.child('papers_meta/' + pid).remove();
 }
 
 // Publish the locally-stored user name to the host. Live presence path lets
@@ -1713,7 +1757,14 @@ function publishUserName() {
   if (!channelRef || !phoneId) return;
   const name = getStoredUserName();
   channelRef.child('phones/' + phoneId + '/userName').set(name || null);
-  channelRef.child('papers_meta/' + phoneId + '/userName').set(name || null);
+  // Update name across all block virtual phones
+  blocks.forEach((blk, bIdx) => {
+    const pid = blockPhoneId(bIdx);
+    const label = blocks.length > 1 && bIdx > 0
+      ? (name ? name + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
+      : (name || null);
+    channelRef.child('papers_meta/' + pid + '/userName').set(label);
+  });
 }
 
 // ── Session persistence ───────────────────────────────────────
@@ -2193,6 +2244,8 @@ function initPhone() {
       } else {
         clearSession();
       }
+      // Clean up extra block virtual phones from Firebase
+      for (let bi = 1; bi < blocks.length; bi++) cleanupBlockPhone(bi);
       // Reset to single empty block
       blocks.length = 0;
       blocks.push(createEmptyBlock());
@@ -2418,14 +2471,10 @@ async function connectPhone(code) {
     presenceRef.onDisconnect().remove();
     const startName = getStoredUserName();
     presenceRef.set({ ts: Date.now(), userName: startName || null });
-    // Re-publish papers so the host's highlight feature sees them again
-    getGameIds().forEach(g => publishStripsToHost(g));
+    // Re-publish papers for ALL blocks so the host sees them again
+    publishAllStripsToHost();
     // Persist the name in papers_meta so it survives disconnect
     publishUserName();
-    // Update the persisted papers_meta lastSeen
-    channelRef.child('papers_meta/' + phoneId).update({
-      lastSeen: Date.now(),
-    });
   });
 
   // Update UI
@@ -2443,8 +2492,8 @@ async function connectPhone(code) {
     refreshBlockTabs();
     renderActiveGame();
     toast("Ark gjenopprettet", "ok", 3000);
-    // Publish all restored papers so the host can render them
-    getGameIds().forEach(g => publishStripsToHost(g));
+    // Publish all restored papers (all blocks) so the host can render them
+    publishAllStripsToHost();
   } else {
     document.getElementById("phone-upload").style.display = "flex";
   }
@@ -3293,17 +3342,32 @@ function reconcileGameState(gameKey, numbers, rekke) {
   }
   checkProximityTransition(gameKey);
 
+  // Auto-switch to a non-active block that just won
+  if (newCallArrived && blocks.length > 1) {
+    for (let bi = 0; bi < blocks.length; bi++) {
+      if (bi === activeBlockIdx) continue;
+      if (computeBlockMinRemaining(bi) === 0) {
+        switchBlock(bi);
+        toast("BINGO på Blokk " + (bi + 1) + "!", "ok", 4000);
+        break;
+      }
+    }
+  }
+
   // Refresh block badges (non-active blocks may have changed proximity)
   refreshBlockTabs();
   saveSession();
 }
 
+let _lastRemoteGame = null;  // track actual host game changes
 function applyRemoteState(game, rekke) {
   let changed = false;
   if (game && getGameIds().includes(game)) {
     currentGame = game;
-    // auto-follow: if user hasn't pinned a different game, switch view
-    if (activeGame !== game && gameState[game].strips) {
+    // Only auto-follow when the HOST actually changed games (not on re-fire)
+    const hostChanged = (game !== _lastRemoteGame);
+    _lastRemoteGame = game;
+    if (hostChanged && activeGame !== game && gameState[game].strips) {
       activeGame = game;
       changed = true;
     }
