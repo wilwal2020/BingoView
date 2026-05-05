@@ -325,6 +325,21 @@ header .conn-label { margin-left: auto; }
   overflow: hidden;
 }
 
+.paper-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px 0;
+  background: #1a1a1a;
+  flex-shrink: 0;
+}
+/* Hide the toolbar entirely when its only contents are hidden, otherwise
+   it leaves a stray strip of grey above the paper. */
+.paper-toolbar:not(:has(> :not([style*="display:none"]):not([style*="display: none"]))) {
+  display: none;
+}
+
 #paper-canvas-wrap {
   flex: 1;
   overflow: auto;
@@ -955,7 +970,6 @@ header .conn-label { margin-left: auto; }
   <header>
     <div class="hdr-title">PHONE</div>
     <button id="btn-fresh-start">Nytt ark</button>
-    <button id="btn-manual-toggle" style="display:none" class="hdr-toggle" title="Manuell trykking — bekreft tall selv">Manuell</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
     <button id="btn-bv-settings" class="bv-icon-btn" title="Lyd og vibrasjon" aria-label="Innstillinger">⚙</button>
     <div class="conn-label">
@@ -1101,6 +1115,9 @@ header .conn-label { margin-left: auto; }
 
     <!-- Step 3: Digital paper with highlights -->
     <div id="phone-paper">
+      <div class="paper-toolbar">
+        <button id="btn-manual-toggle" style="display:none" class="hdr-toggle" title="Manuell trykking — bekreft tall selv">Manuell</button>
+      </div>
       <div id="paper-canvas-wrap">
         <div id="digital-paper"></div>
       </div>
