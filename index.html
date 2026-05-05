@@ -1013,6 +1013,64 @@ header .conn-label { margin-left: auto; }
   margin-top: 3px;
   font-size: 0.68rem;
 }
+
+/* ── Share Modal ──────────────────────── */
+.share-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.82);
+  z-index: 2000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.share-card {
+  background: #1a1a1a;
+  border: 1px solid #333;
+  border-radius: 14px;
+  padding: 20px;
+  max-width: 360px;
+  width: 100%;
+  text-align: center;
+}
+.share-card h3 {
+  margin: 0 0 14px;
+  font-family: var(--display);
+  font-size: 1.4rem;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+}
+.share-qr {
+  background: #fff;
+  border-radius: 10px;
+  padding: 12px;
+  display: inline-block;
+  margin-bottom: 14px;
+}
+.share-qr img { display: block; width: 200px; height: 200px; image-rendering: pixelated; }
+.share-url-box {
+  background: #111;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.7rem;
+  word-break: break-all;
+  color: var(--dim);
+  max-height: 60px;
+  overflow: auto;
+  margin-bottom: 12px;
+}
+.share-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.share-actions button {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid #444;
+  background: #222;
+  color: #eee;
+  cursor: pointer;
+}
+.share-actions button.primary { background: var(--gold); color: #000; border-color: var(--gold2); font-weight: 600; }
+.share-actions button:active { transform: scale(0.95); }
 </style>
 </head>
 <body>
@@ -1025,6 +1083,7 @@ header .conn-label { margin-left: auto; }
     <div class="hdr-title">PHONE</div>
     <button id="btn-fresh-start">Nytt ark</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
+    <button id="btn-add-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Legg til flere ark (ekstra blokk)">+ Ark</button>
     <button id="btn-bv-settings" class="bv-icon-btn" title="Lyd og vibrasjon" aria-label="Innstillinger">⚙</button>
     <div class="conn-label">
       <div class="conn-dot" id="phone-conn-dot"></div>
@@ -1086,6 +1145,19 @@ header .conn-label { margin-left: auto; }
         <button id="bv-errlog-copy" class="bv-overlay-btn">Kopier</button>
         <button id="bv-errlog-clear" class="bv-overlay-btn bv-overlay-btn-danger">Tøm</button>
         <button id="bv-errlog-close" class="bv-overlay-btn">Lukk</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Share modal — QR code + compact URL -->
+  <div id="share-overlay" class="share-overlay" style="display:none">
+    <div class="share-card">
+      <h3>Del bingo-ark</h3>
+      <div class="share-qr"><img id="share-qr-img" alt="QR-kode"></div>
+      <div id="share-url-box" class="share-url-box"></div>
+      <div class="share-actions">
+        <button id="share-copy-btn" class="primary">Kopier lenke</button>
+        <button id="share-close-btn">Lukk</button>
       </div>
     </div>
   </div>
@@ -1210,6 +1282,7 @@ header .conn-label { margin-left: auto; }
 ══════════════════════════════════════ -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
 <script>
 'use strict';
 
@@ -1398,6 +1471,7 @@ let currentGame = null;           // the game the main site (iPad) is on
 let currentRekke = 'Rekke1';      // the rekke the main site is on
 let latestCell = null;            // last "latest"-highlighted cell in the active game
 const pendingPhotos = {};         // gameKey → File queued for processing
+let appendMode = false;           // when true, photo result APPENDS to existing strips
 let resetTs = 0;                  // callLog entries with ts ≤ resetTs are ignored (pre-reset)
 let sessionCode = null;           // code used to connect — key for localStorage
 let phoneId = null;               // assigned in connectPhone — used when publishing papers
@@ -1584,6 +1658,105 @@ function generateRandomPaper() {
   }));
 }
 
+// ── Compact paper URL encoding (version 3) ─────────────────────
+// Binary layout: [version=3][codeLen][code bytes][gameBitmap][for each game: stripCount + strips]
+// Each strip: 2-byte uint16 id + 15 bytes (5 numbers × 3 rows)
+// Encoded as base64url (URL-safe, no padding).
+const GAME_KEYS = ['blue','yellow','pink','grey'];
+
+function encodeCompactPaper(games, code) {
+  const parts = [];
+  parts.push(3); // version
+  const codeStr = (code || '').slice(0, 10);
+  parts.push(codeStr.length);
+  for (let i = 0; i < codeStr.length; i++) parts.push(codeStr.charCodeAt(i));
+  // Game bitmap: which games have strips
+  let bitmap = 0;
+  GAME_KEYS.forEach((g, i) => { if (games[g]) bitmap |= (1 << i); });
+  parts.push(bitmap);
+  GAME_KEYS.forEach((g, i) => {
+    if (!(bitmap & (1 << i))) return;
+    const strips = games[g];
+    parts.push(strips.length);
+    strips.forEach(strip => {
+      const id = parseInt(strip.id, 10) || 0;
+      parts.push((id >> 8) & 0xFF, id & 0xFF);
+      for (let r = 0; r < 3; r++) {
+        const row = (strip.rows && strip.rows[r]) || [];
+        for (let c = 0; c < 5; c++) parts.push(Number(row[c]) || 0);
+      }
+    });
+  });
+  const bytes = new Uint8Array(parts);
+  // base64url encode (no padding, URL-safe)
+  let b64 = btoa(String.fromCharCode(...bytes));
+  b64 = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return b64;
+}
+
+function decodeCompactPaper(b64) {
+  // Restore standard base64
+  let str = b64.replace(/-/g, '+').replace(/_/g, '/');
+  while (str.length % 4) str += '=';
+  const raw = atob(str);
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+
+  let pos = 0;
+  const version = bytes[pos++];
+  if (version !== 3) return null;
+  const codeLen = bytes[pos++];
+  let code = '';
+  for (let i = 0; i < codeLen; i++) code += String.fromCharCode(bytes[pos++]);
+  const bitmap = bytes[pos++];
+  const games = {};
+  GAME_KEYS.forEach((g, i) => {
+    if (!(bitmap & (1 << i))) return;
+    const stripCount = bytes[pos++];
+    const strips = [];
+    for (let s = 0; s < stripCount; s++) {
+      const id = (bytes[pos] << 8) | bytes[pos + 1]; pos += 2;
+      const rows = [];
+      for (let r = 0; r < 3; r++) {
+        const row = [];
+        for (let c = 0; c < 5; c++) { const v = bytes[pos++]; if (v) row.push(v); }
+        rows.push(row);
+      }
+      strips.push({ id: String(id).padStart(4, '0'), rows });
+    }
+    games[g] = strips;
+  });
+  return { code, games };
+}
+
+function buildCompactShareUrl(games, code) {
+  const encoded = encodeCompactPaper(games, code);
+  let url = location.origin + location.pathname + '?p=' + encoded;
+  if (code) url += '&c=' + encodeURIComponent(code);
+  return url;
+}
+
+function showShareModal(url) {
+  const overlay = document.getElementById('share-overlay');
+  const urlBox  = document.getElementById('share-url-box');
+  const qrImg   = document.getElementById('share-qr-img');
+
+  urlBox.textContent = url;
+  urlBox.dataset.url = url;
+
+  // Generate QR code
+  try {
+    const qr = qrcode(0, 'L'); // auto type, low error correction
+    qr.addData(url);
+    qr.make();
+    qrImg.src = qr.createDataURL(6, 0); // cell size 6px, no margin
+  } catch(e) {
+    qrImg.src = '';
+    qrImg.alt = 'QR feilet — bruk lenken';
+  }
+  overlay.style.display = 'flex';
+}
+
 function initPhone() {
   // Show the code-entry screen first
   document.getElementById("phone-connect").style.display = "flex";
@@ -1646,8 +1819,8 @@ function initPhone() {
     } catch(e) {}
   });
 
-  // Share paper button — encodes ALL loaded games' strips as a URL the recipient opens
-  document.getElementById("btn-share-paper").addEventListener("click", async () => {
+  // Share paper button — compact URL + QR code modal
+  document.getElementById("btn-share-paper").addEventListener("click", () => {
     const games = {};
     let hasAny = false;
     getGameIds().forEach(g => {
@@ -1657,17 +1830,32 @@ function initPhone() {
       }
     });
     if (!hasAny) return;
+    const url = buildCompactShareUrl(games, sessionCode);
+    showShareModal(url);
+  });
+
+  // Share modal controls
+  document.getElementById("share-copy-btn").addEventListener("click", async () => {
+    const urlBox = document.getElementById("share-url-box");
     try {
-      const payload = { version: 2, games };
-      const encoded = btoa(JSON.stringify(payload));
-      const url = location.origin + location.pathname + '?import=' + encodeURIComponent(encoded);
-      if (navigator.share) {
-        await navigator.share({ title: 'Bingo-ark', text: 'Ditt bingo-ark:', url });
-      } else {
-        await navigator.clipboard.writeText(url);
-        toast('Lenke kopiert!', 'ok', 2000);
-      }
-    } catch(e) {}
+      await navigator.clipboard.writeText(urlBox.dataset.url);
+      toast('Lenke kopiert!', 'ok', 2000);
+    } catch(e) { toast('Kunne ikke kopiere', 'err', 2000); }
+  });
+  document.getElementById("share-close-btn").addEventListener("click", () => {
+    document.getElementById("share-overlay").style.display = "none";
+  });
+  document.getElementById("share-overlay").addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.style.display = "none";
+  });
+
+  // Add-paper button — opens file upload in append mode
+  document.getElementById("btn-add-paper").addEventListener("click", () => {
+    appendMode = true;
+    document.getElementById("phone-paper").style.display = "none";
+    document.getElementById("phone-upload").style.display = "flex";
+    updateUploadTitle();
+    setTimeout(() => document.getElementById("file-input").click(), 120);
   });
 
   // Generate random bingo paper
@@ -1686,13 +1874,39 @@ function initPhone() {
     }
   });
 
-  // Import paper from URL — recipient opens a shared link and gets the strips pre-loaded
-  const importParam = new URLSearchParams(location.search).get('import');
-  if (importParam) {
+  // Import paper from URL — supports compact (?p=) and legacy (?import=) formats
+  const urlParams = new URLSearchParams(location.search);
+  const compactParam = urlParams.get('p');
+  const importParam  = urlParams.get('import');
+  const codeParam    = urlParams.get('c');   // session code for auto-connect
+
+  if (compactParam) {
+    try {
+      const result = decodeCompactPaper(compactParam);
+      if (result && result.games) {
+        Object.entries(result.games).forEach(([g, strips]) => {
+          if (gameState[g] && Array.isArray(strips)) {
+            gameState[g].strips = strips;
+            buildPaperForGame(g);
+          }
+        });
+        showGameTabs();
+        renderActiveGame();
+        const count = Object.keys(result.games).length;
+        toast(`${count} ark importert!`, 'ok', 4000);
+        // Auto-connect if session code provided
+        const code = (result.code || codeParam || '').trim().toUpperCase();
+        if (code) {
+          document.getElementById("phone-code-input").value = code;
+          setTimeout(() => connectPhone(code), 300);
+        }
+      }
+    } catch(e) { console.warn('[BV] compact import error', e); }
+    history.replaceState(null, '', location.pathname);
+  } else if (importParam) {
     try {
       const decoded = JSON.parse(atob(decodeURIComponent(importParam)));
       if (decoded && decoded.version === 2 && decoded.games && typeof decoded.games === 'object') {
-        // Multi-game format (version 2): load each game's strips
         Object.entries(decoded.games).forEach(([g, strips]) => {
           if (gameState[g] && Array.isArray(strips)) {
             gameState[g].strips = strips;
@@ -1704,7 +1918,6 @@ function initPhone() {
         const count = Object.keys(decoded.games).length;
         toast(`${count} ark importert — skriv inn koden for å motta tall`, 'ok', 5000);
       } else if (Array.isArray(decoded)) {
-        // Legacy single-game format (version 1)
         gameState[activeGame].strips = decoded;
         buildPaperForGame(activeGame);
         publishStripsToHost(activeGame);
@@ -2133,7 +2346,12 @@ Example:
     // Render into the target game slot (captured at call time, not read from global activeGame)
     const resolvedGame = targetGame || activeGame;
     const gs = gameState[resolvedGame];
-    gs.strips = parsed;
+    if (appendMode && gs.strips && gs.strips.length) {
+      gs.strips = [...gs.strips, ...parsed];
+    } else {
+      gs.strips = parsed;
+    }
+    appendMode = false;
     buildPaperForGame(resolvedGame);
     const count = Object.keys(gs.cellMap).length;
 
@@ -2271,6 +2489,7 @@ function renderActiveGame() {
     document.getElementById("phone-upload").style.display = "none";
     document.getElementById("phone-paper").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "block";
+    document.getElementById("btn-add-paper").style.display = "block";
 
     const count = Object.keys(gs.cellMap).length;
     document.getElementById("phone-detected-count").textContent = count ? `${count}/90 detected` : "";
@@ -2281,6 +2500,7 @@ function renderActiveGame() {
     document.getElementById("phone-paper").style.display  = "none";
     document.getElementById("phone-upload").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "none";
+    document.getElementById("btn-add-paper").style.display = "none";
   }
 
   updateRekkeLabel();
