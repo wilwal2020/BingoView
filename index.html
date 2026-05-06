@@ -632,14 +632,13 @@ header .conn-label { margin-left: auto; }
   max-width: 100%;
 }
 .block-tab .block-badge {
-  background: #2a2220;
-  color: #f0a050;
   font-size: 0.5rem;
   font-weight: 700;
   padding: 1px 5px;
   border-radius: 8px;
   margin-top: 2px;
   white-space: nowrap;
+  transition: background 0.3s, color 0.3s;
 }
 .block-tab-add {
   flex-shrink: 0;
@@ -1676,11 +1675,28 @@ function refreshBlockTabs() {
       label.textContent = "Blokk " + (idx + 1);
       btn.appendChild(label);
 
-      // Badge: always show remaining count for consistent button sizing
+      // Badge: always show remaining count, color-coded by proximity
       const min = computeBlockMinRemaining(idx);
       const badge = document.createElement("span");
       badge.className = "block-badge";
       badge.textContent = min === null ? "—" : (min === 0 ? "BINGO!" : min + " igjen");
+
+      // Color gradient: closer to winning → warmer/brighter
+      if (min === null) {
+        badge.style.background = "#1a1a1a"; badge.style.color = "#555";
+      } else if (min === 0) {
+        badge.style.background = "#2d1a3a"; badge.style.color = "#c4a8ff";
+      } else if (min === 1) {
+        badge.style.background = "#3a1a1a"; badge.style.color = "#ff4444";
+      } else if (min === 2) {
+        badge.style.background = "#3a2218"; badge.style.color = "#ff6b2b";
+      } else if (min === 3) {
+        badge.style.background = "#2e2518"; badge.style.color = "#f0a030";
+      } else if (min <= 5) {
+        badge.style.background = "#26261a"; badge.style.color = "#c8b040";
+      } else {
+        badge.style.background = "#1a2220"; badge.style.color = "#5a8a6a";
+      }
       btn.appendChild(badge);
 
       // Remove button on non-active blocks
