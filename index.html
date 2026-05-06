@@ -1592,6 +1592,8 @@ function switchBlock(idx) {
 
 function addBlock() {
   blocks.push(createEmptyBlock());
+  // Register disconnect handler for the new block's virtual phone
+  registerBlockDisconnect(blocks.length - 1);
   switchBlock(blocks.length - 1);
   // Show upload screen for the new empty block
   document.getElementById("phone-paper").style.display = "none";
@@ -1729,6 +1731,25 @@ function refreshBlockTabs() {
 // Block N uses phoneId + '_b' + N.
 function blockPhoneId(bIdx) {
   return bIdx === 0 ? phoneId : phoneId + '_b' + bIdx;
+}
+
+// Register Firebase onDisconnect handlers for ALL block virtual phones
+// so closing the phone removes every block's presence, not just block 0.
+function registerAllBlockDisconnects() {
+  if (!channelRef || !phoneId) return;
+  blocks.forEach((_, bIdx) => registerBlockDisconnect(bIdx));
+}
+function registerBlockDisconnect(bIdx) {
+  if (!channelRef || !phoneId) return;
+  const pid = blockPhoneId(bIdx);
+  // Block 0's phones/<phoneId> is handled by the main presenceRef,
+  // but we still need to clean up papers/ and papers_meta/ for it,
+  // and everything for blocks 1+.
+  if (bIdx > 0) {
+    channelRef.child('phones/' + pid).onDisconnect().remove();
+  }
+  channelRef.child('papers/' + pid).onDisconnect().remove();
+  channelRef.child('papers_meta/' + pid).onDisconnect().remove();
 }
 
 // Publish a single game's strips for the active block
@@ -2525,6 +2546,8 @@ async function connectPhone(code) {
   db.ref('.info/connected').on('value', (snap) => {
     if (!snap.val()) return;          // offline — nothing to do
     presenceRef.onDisconnect().remove();
+    // Register disconnect handlers for ALL block virtual phones
+    registerAllBlockDisconnects();
     const startName = getStoredUserName();
     presenceRef.set({ ts: Date.now(), userName: startName || null });
     // Re-publish papers for ALL blocks so the host sees them again
@@ -2932,6 +2955,7 @@ function setActiveRekke(rekke) {
   refreshRekkeButtons();
   updateRekkeLabel();
   updateProximityHighlights(activeGame);
+  refreshBlockTabs();
   saveSession();
 }
 
