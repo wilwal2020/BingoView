@@ -598,7 +598,10 @@ header .conn-label { margin-left: auto; }
   border-bottom: 1px solid #181818;
   flex-shrink: 0;
   align-items: center;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
+.block-tab, .block-tab-add { flex-shrink: 0; }
 .block-tab {
   background: #131313;
   border: 1px solid #252525;
@@ -631,7 +634,6 @@ header .conn-label { margin-left: auto; }
   vertical-align: middle;
 }
 .block-tab .block-badge { min-width: 38px; text-align: center; }
-.block-tab.active .block-badge { visibility: hidden; }
 .block-tab-add {
   background: transparent;
   border: 1px dashed #333;
@@ -1532,7 +1534,7 @@ function createEmptyBlock() {
   DEFAULT_GAMES.forEach(g => {
     gs[g.id] = { strips: null, paperEl: null, cellMap: {}, called: [], rekke: 'Rekke1', hostCalled: [], wrong: [] };
   });
-  return { gameState: gs };
+  return { gameState: gs, userName: '' };
 }
 
 // Initialize with one block
@@ -1571,6 +1573,9 @@ function switchBlock(idx) {
   activeBlockIdx = idx;
   gameState = blocks[idx].gameState;
   activeGame = getGameIds().find(g => gameState[g].strips) || 'blue';
+  // Swap name input to this block's name
+  const nameInput = document.getElementById("user-name-input");
+  if (nameInput) nameInput.value = blocks[idx].userName || '';
   renderActiveGame();
   refreshBlockTabs();
   refreshGameTabs();
@@ -1626,9 +1631,17 @@ function computeBlockMinRemaining(blockIdx) {
       if (rowsNeeded === 1) {
         missingPerRow.forEach(m => { if (m < globalMin) globalMin = m; });
       } else {
-        const sorted = [...missingPerRow].sort((a, b) => a - b);
-        const totalMissing = sorted.slice(0, rowsNeeded).reduce((s, v) => s + v, 0);
-        if (totalMissing < globalMin) globalMin = totalMissing;
+        const rowsWithIdx = missingPerRow.map((m, idx) => ({ m, idx }))
+                                         .sort((a, b) => a.m - b.m);
+        const selected = rowsWithIdx.slice(0, rowsNeeded);
+        // Count distinct missing numbers across selected rows
+        const missingNums = new Set();
+        selected.forEach(({ idx }) => {
+          numRows[idx].forEach(c => {
+            if (!calledSet.has(c.dataset.num)) missingNums.add(c.dataset.num);
+          });
+        });
+        if (missingNums.size < globalMin) globalMin = missingNums.size;
       }
     });
   });
@@ -1749,20 +1762,24 @@ function cleanupBlockPhone(bIdx) {
 // Publish the locally-stored user name to the host. Live presence path lets
 // online users be labelled by name; persisted papers_meta path keeps the
 // label visible after disconnect.
-function getStoredUserName() {
+function getStoredUserName(bIdx) {
+  const bi = (bIdx != null) ? bIdx : activeBlockIdx;
+  const blkName = (blocks[bi] && blocks[bi].userName) || '';
+  if (blkName) return blkName.trim().slice(0, 24);
   try { return (localStorage.getItem("bv_userName") || "").trim().slice(0, 24); }
   catch (e) { return ""; }
 }
 function publishUserName() {
   if (!channelRef || !phoneId) return;
-  const name = getStoredUserName();
-  channelRef.child('phones/' + phoneId + '/userName').set(name || null);
-  // Update name across all block virtual phones
+  const mainName = getStoredUserName(0);
+  channelRef.child('phones/' + phoneId + '/userName').set(mainName || null);
+  // Update name across all block virtual phones (each block has its own name)
   blocks.forEach((blk, bIdx) => {
     const pid = blockPhoneId(bIdx);
-    const label = blocks.length > 1 && bIdx > 0
-      ? (name ? name + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
-      : (name || null);
+    const blkName = getStoredUserName(bIdx);
+    const label = blocks.length > 1
+      ? (blkName ? blkName + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
+      : (blkName || null);
     channelRef.child('papers_meta/' + pid + '/userName').set(label);
   });
 }
@@ -1776,7 +1793,7 @@ function saveSession() {
   // Save all blocks
   const data = { version: 2, activeBlockIdx, blocks: [] };
   blocks.forEach(blk => {
-    const blkData = {};
+    const blkData = { _userName: blk.userName || '' };
     getGameIds().forEach(g => {
       blkData[g] = { strips: blk.gameState[g].strips, called: blk.gameState[g].called, rekke: blk.gameState[g].rekke };
     });
@@ -1814,6 +1831,7 @@ function restoreSession() {
   blocks.length = 0;
   saved.blocks.forEach(blkData => {
     const blk = createEmptyBlock();
+    blk.userName = blkData._userName || '';
     getGameIds().forEach(g => {
       if (!blkData[g] || !blkData[g].strips) return;
       blk.gameState[g].strips = blkData[g].strips;
@@ -2058,8 +2076,14 @@ function initPhone() {
   document.getElementById("phone-connect").style.display = "flex";
   document.getElementById("phone-upload").style.display  = "none";
 
-  // Connect button
+  // Connect button — also "unlocks" vibration + audio APIs via user gesture
   document.getElementById("btn-phone-connect").addEventListener("click", () => {
+    // Prime vibration API with a tiny pulse (required on Android before
+    // programmatic vibrations from non-gesture contexts can fire)
+    try { if (navigator.vibrate) navigator.vibrate(1); } catch (e) {}
+    // Prime AudioContext so playTick() works from Firebase callbacks
+    const ctx = getAudioCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume();
     const code = document.getElementById("phone-code-input").value.trim().toUpperCase();
     if (code.length < 4) { toast("Skriv inn koden fra bingo-siden", "warn"); return; }
     connectPhone(code);
@@ -2398,17 +2422,22 @@ function initPhone() {
   const lastCode = localStorage.getItem("bv_last_code");
   if (lastCode) document.getElementById("phone-code-input").value = lastCode;
 
-  // User name input — load any saved name and persist + republish on edit.
+  // User name input — per-block name, persisted and republished on edit.
   // Debounced so rapid keystrokes don't spam Firebase writes.
   const nameInput = document.getElementById("user-name-input");
   if (nameInput) {
-    try { nameInput.value = localStorage.getItem("bv_userName") || ""; } catch (e) {}
+    // Load initial name: per-block name if set, otherwise global fallback
+    const savedGlobal = (() => { try { return localStorage.getItem("bv_userName") || ""; } catch(e) { return ""; } })();
+    blocks[activeBlockIdx].userName = blocks[activeBlockIdx].userName || savedGlobal;
+    nameInput.value = blocks[activeBlockIdx].userName;
     let nameTimer = null;
     nameInput.addEventListener("input", () => {
       const v = nameInput.value.trim().slice(0, 24);
+      blocks[activeBlockIdx].userName = v;
+      // Also keep global fallback in sync for backward compat
       try { localStorage.setItem("bv_userName", v); } catch (e) {}
       if (nameTimer) clearTimeout(nameTimer);
-      nameTimer = setTimeout(publishUserName, 350);
+      nameTimer = setTimeout(() => { publishUserName(); saveSession(); }, 350);
     });
   }
 
@@ -3322,6 +3351,34 @@ function reconcileGameState(gameKey, numbers, rekke) {
       gs.wrong  = [];
     }
 
+    // In manualPlayMode: auto-confirm remaining numbers when a winning
+    // row/rekke is completed by hostCalled. This ensures the banner shows
+    // the correct winning number (the host-called one, not last user-tapped).
+    if (manualPlayMode && gs.strips && gs.paperEl) {
+      const hSet = new Set(list);
+      const cSet = new Set(gs.called);
+      const rekke = gs.rekke || 'Rekke1';
+      const rowsNeeded = rekke === 'Rekke1' ? 1 : (rekke === 'Rekke2' ? 2 : 3);
+      let hasWinner = false;
+      gs.paperEl.querySelectorAll(".strip").forEach(stripEl => {
+        const nr = stripEl._numRows || [];
+        const missingFromHost = nr.map(cells =>
+          cells.reduce((a, c) => a + (hSet.has(Number(c.dataset.num)) ? 0 : 1), 0)
+        );
+        if (rowsNeeded === 1) {
+          if (missingFromHost.some(m => m === 0)) hasWinner = true;
+        } else {
+          const sorted = [...missingFromHost].sort((a, b) => a - b);
+          const totalM = sorted.slice(0, rowsNeeded).reduce((s, v) => s + v, 0);
+          if (totalM === 0) hasWinner = true;
+        }
+      });
+      if (hasWinner) {
+        // Auto-confirm every host-called number that isn't confirmed yet
+        list.forEach(n => { if (!cSet.has(n)) gs.called.push(n); });
+      }
+    }
+
     // Only render DOM for active block
     if (bIdx === activeBlockIdx) {
       renderCells(gameKey);
@@ -3332,6 +3389,12 @@ function reconcileGameState(gameKey, numbers, rekke) {
   const activeGs = gameState[gameKey];
   if (rekke && /^Rekke[1-3]$/.test(rekke)) {
     if (gameKey === (currentGame || activeGame)) currentRekke = rekke;
+  }
+
+  // Auto-switch to the game that received a new call
+  if (newCallArrived && gameKey !== activeGame && gameState[gameKey].strips) {
+    activeGame = gameKey;
+    renderActiveGame();
   }
   if (gameKey === activeGame) updateRekkeLabel();
 
@@ -3451,18 +3514,26 @@ function updateProximityHighlights(gameKey) {
         if (cls === "row-winner") stripHasWinner = true;
       });
     } else {
-      // Rekke2/3: pick the top N rows and evaluate their combined total
+      // Rekke2/3: pick the top N rows and evaluate their combined missing.
+      // Count DISTINCT missing numbers (same number in multiple rows = 1 call).
       const rowsWithIdx = missingPerRow.map((m, idx) => ({ m, idx }))
                                        .sort((a, b) => a.m - b.m);
       const selected = rowsWithIdx.slice(0, rowsNeeded);
-      const totalMissing = selected.reduce((s, r) => s + r.m, 0);
+      // Collect distinct missing numbers across the selected rows
+      const missingNums = new Set();
+      selected.forEach(({ idx }) => {
+        numRows[idx].forEach(c => {
+          if (!calledSet.has(c.dataset.num)) missingNums.add(c.dataset.num);
+        });
+      });
+      const distinctMissing = missingNums.size;
 
-      if (totalMissing > warmThreshold) return;
+      if (distinctMissing > warmThreshold) return;
 
       let cls;
-      if (totalMissing === 0)      cls = "row-winner";
-      else if (totalMissing === 1) cls = "row-hot";
-      else                         cls = "row-warm";
+      if (distinctMissing === 0)      cls = "row-winner";
+      else if (distinctMissing === 1) cls = "row-hot";
+      else                            cls = "row-warm";
 
       selected.forEach(({ idx }) => {
         rowArr[idx].forEach(c => c.classList.add(cls));
