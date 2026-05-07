@@ -1741,15 +1741,13 @@ function registerAllBlockDisconnects() {
 }
 function registerBlockDisconnect(bIdx) {
   if (!channelRef || !phoneId) return;
-  const pid = blockPhoneId(bIdx);
-  // Block 0's phones/<phoneId> is handled by the main presenceRef,
-  // but we still need to clean up papers/ and papers_meta/ for it,
-  // and everything for blocks 1+.
+  // Only remove phones/ on disconnect — papers/ and papers_meta/ must
+  // persist so the host can still show the papers as "disconnected".
+  // Block 0's phones/<phoneId> is already handled by the main presenceRef.
   if (bIdx > 0) {
+    const pid = blockPhoneId(bIdx);
     channelRef.child('phones/' + pid).onDisconnect().remove();
   }
-  channelRef.child('papers/' + pid).onDisconnect().remove();
-  channelRef.child('papers_meta/' + pid).onDisconnect().remove();
 }
 
 // Publish a single game's strips for the active block
@@ -3489,12 +3487,16 @@ function applyRemoteState(game, rekke) {
   if (rekke && /^Rekke[1-3]$/.test(rekke)) {
     currentRekke = rekke;
     const tgt = currentGame || activeGame;
-    gameState[tgt].rekke = rekke;
+    // Apply rekke to ALL blocks, not just active
+    blocks.forEach(blk => {
+      if (blk.gameState[tgt]) blk.gameState[tgt].rekke = rekke;
+    });
     changed = true;
   }
   const pendingVisible = document.getElementById("phone-pending").style.display === "flex";
   if (changed && !pendingVisible) renderActiveGame();
   else { refreshGameTabs(); updateRekkeLabel(); updateProximityHighlights(activeGame); }
+  refreshBlockTabs();
 }
 
 function handleRemoteReset(scope, game) {
