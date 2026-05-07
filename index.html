@@ -1798,8 +1798,8 @@ function updateBlockMeta(bIdx) {
   const pid = blockPhoneId(bIdx);
   const blk = blocks[bIdx];
   const allKeys = getGameIds().filter(g => blk.gameState[g] && blk.gameState[g].strips);
-  const userName = getStoredUserName();
-  const label = blocks.length > 1 && bIdx > 0
+  const userName = getStoredUserName(bIdx);
+  const label = blocks.length > 1
     ? (userName ? userName + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
     : (userName || null);
   channelRef.child('papers_meta/' + pid).update({
@@ -1830,9 +1830,7 @@ function getStoredUserName(bIdx) {
 }
 function publishUserName() {
   if (!channelRef || !phoneId) return;
-  const mainName = getStoredUserName(0);
-  channelRef.child('phones/' + phoneId + '/userName').set(mainName || null);
-  // Update name across all block virtual phones (each block has its own name)
+  // Update name across ALL block phones (including block 0)
   blocks.forEach((blk, bIdx) => {
     const pid = blockPhoneId(bIdx);
     const blkName = getStoredUserName(bIdx);
@@ -1840,10 +1838,7 @@ function publishUserName() {
       ? (blkName ? blkName + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
       : (blkName || null);
     channelRef.child('papers_meta/' + pid + '/userName').set(label);
-    // Also update live presence userName for virtual phones
-    if (bIdx > 0) {
-      channelRef.child('phones/' + pid + '/userName').set(label);
-    }
+    channelRef.child('phones/' + pid + '/userName').set(label);
   });
 }
 
@@ -2563,8 +2558,11 @@ async function connectPhone(code) {
     presenceRef.onDisconnect().remove();
     // Register disconnect handlers for ALL block virtual phones
     registerAllBlockDisconnects();
-    const startName = getStoredUserName();
-    presenceRef.set({ ts: Date.now(), userName: startName || null });
+    const startName = getStoredUserName(0);
+    const startLabel = blocks.length > 1
+      ? (startName ? startName + ' (Blokk 1)' : 'Blokk 1')
+      : (startName || null);
+    presenceRef.set({ ts: Date.now(), userName: startLabel });
     // Re-publish papers for ALL blocks so the host sees them again
     publishAllStripsToHost();
     // Persist the name in papers_meta so it survives disconnect
