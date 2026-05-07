@@ -1592,8 +1592,8 @@ function switchBlock(idx) {
 
 function addBlock() {
   blocks.push(createEmptyBlock());
-  // Register disconnect handler for the new block's virtual phone
-  registerBlockDisconnect(blocks.length - 1);
+  // Register presence + disconnect handler for the new block's virtual phone
+  registerBlockPresence(blocks.length - 1);
   switchBlock(blocks.length - 1);
   // Show upload screen for the new empty block
   document.getElementById("phone-paper").style.display = "none";
@@ -1733,21 +1733,20 @@ function blockPhoneId(bIdx) {
   return bIdx === 0 ? phoneId : phoneId + '_b' + bIdx;
 }
 
-// Register Firebase onDisconnect handlers for ALL block virtual phones
-// so closing the phone removes every block's presence, not just block 0.
+// Register Firebase presence + onDisconnect for virtual block phones.
+// Block 0 is handled by the main presenceRef; blocks 1+ need their own.
+// Called on connect/reconnect and whenever a new block is added.
 function registerAllBlockDisconnects() {
   if (!channelRef || !phoneId) return;
-  blocks.forEach((_, bIdx) => registerBlockDisconnect(bIdx));
+  blocks.forEach((_, bIdx) => registerBlockPresence(bIdx));
 }
-function registerBlockDisconnect(bIdx) {
+function registerBlockPresence(bIdx) {
   if (!channelRef || !phoneId) return;
-  // Only remove phones/ on disconnect — papers/ and papers_meta/ must
-  // persist so the host can still show the papers as "disconnected".
-  // Block 0's phones/<phoneId> is already handled by the main presenceRef.
-  if (bIdx > 0) {
-    const pid = blockPhoneId(bIdx);
-    channelRef.child('phones/' + pid).onDisconnect().remove();
-  }
+  if (bIdx === 0) return; // block 0 uses the main presenceRef
+  const pid = blockPhoneId(bIdx);
+  const ref = channelRef.child('phones/' + pid);
+  ref.onDisconnect().remove();
+  ref.update({ ts: Date.now(), userName: getStoredUserName(bIdx) || null });
 }
 
 // Publish a single game's strips for the active block
@@ -1759,6 +1758,12 @@ function publishStripsToHost(gameKey) {
   channelRef.child('phones/' + pid + '/papers/' + gameKey).set(strips);
   channelRef.child('papers/' + pid + '/' + gameKey).set(strips);
   updateBlockMeta(activeBlockIdx);
+  // Ensure virtual phone presence for non-zero blocks
+  if (activeBlockIdx > 0) {
+    channelRef.child('phones/' + pid).update({
+      ts: Date.now(), userName: getStoredUserName(activeBlockIdx) || null
+    });
+  }
 }
 
 // Publish ALL blocks' strips (called on connect/reconnect)
@@ -1775,7 +1780,15 @@ function publishAllStripsToHost() {
         anyStrips = true;
       }
     });
-    if (anyStrips) updateBlockMeta(bIdx);
+    if (anyStrips) {
+      updateBlockMeta(bIdx);
+      // Ensure virtual phone presence is set so host sees it as online
+      if (bIdx > 0) {
+        channelRef.child('phones/' + pid).update({
+          ts: Date.now(), userName: getStoredUserName(bIdx) || null
+        });
+      }
+    }
   });
 }
 
@@ -1827,6 +1840,10 @@ function publishUserName() {
       ? (blkName ? blkName + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
       : (blkName || null);
     channelRef.child('papers_meta/' + pid + '/userName').set(label);
+    // Also update live presence userName for virtual phones
+    if (bIdx > 0) {
+      channelRef.child('phones/' + pid + '/userName').set(label);
+    }
   });
 }
 
