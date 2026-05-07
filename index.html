@@ -1594,6 +1594,8 @@ function addBlock() {
   blocks.push(createEmptyBlock());
   // Register presence + disconnect handler for the new block's virtual phone
   registerBlockPresence(blocks.length - 1);
+  // Refresh ALL block labels (block 0 now needs "(Blokk 1)" suffix etc.)
+  publishUserName();
   switchBlock(blocks.length - 1);
   // Show upload screen for the new empty block
   document.getElementById("phone-paper").style.display = "none";
@@ -1617,6 +1619,8 @@ function removeBlock(idx) {
   refreshGameTabs();
   // Re-publish remaining blocks under their correct (shifted) IDs
   publishAllStripsToHost();
+  // Refresh labels (may drop "(Blokk N)" if back to 1 block)
+  publishUserName();
   saveSession();
 }
 
@@ -1746,7 +1750,7 @@ function registerBlockPresence(bIdx) {
   const pid = blockPhoneId(bIdx);
   const ref = channelRef.child('phones/' + pid);
   ref.onDisconnect().remove();
-  ref.update({ ts: Date.now(), userName: getStoredUserName(bIdx) || null });
+  ref.update({ ts: Date.now(), userName: getBlockLabel(bIdx) });
 }
 
 // Publish a single game's strips for the active block
@@ -1761,7 +1765,7 @@ function publishStripsToHost(gameKey) {
   // Ensure virtual phone presence for non-zero blocks
   if (activeBlockIdx > 0) {
     channelRef.child('phones/' + pid).update({
-      ts: Date.now(), userName: getStoredUserName(activeBlockIdx) || null
+      ts: Date.now(), userName: getBlockLabel(activeBlockIdx)
     });
   }
 }
@@ -1785,7 +1789,7 @@ function publishAllStripsToHost() {
       // Ensure virtual phone presence is set so host sees it as online
       if (bIdx > 0) {
         channelRef.child('phones/' + pid).update({
-          ts: Date.now(), userName: getStoredUserName(bIdx) || null
+          ts: Date.now(), userName: getBlockLabel(bIdx)
         });
       }
     }
@@ -1798,14 +1802,10 @@ function updateBlockMeta(bIdx) {
   const pid = blockPhoneId(bIdx);
   const blk = blocks[bIdx];
   const allKeys = getGameIds().filter(g => blk.gameState[g] && blk.gameState[g].strips);
-  const userName = getStoredUserName(bIdx);
-  const label = blocks.length > 1
-    ? (userName ? userName + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
-    : (userName || null);
   channelRef.child('papers_meta/' + pid).update({
     lastSeen: Date.now(),
     gameKeys: allKeys,
-    userName: label,
+    userName: getBlockLabel(bIdx),
   });
 }
 
@@ -1828,15 +1828,21 @@ function getStoredUserName(bIdx) {
   try { return (localStorage.getItem("bv_userName") || "").trim().slice(0, 24); }
   catch (e) { return ""; }
 }
+// Full display label for a block, including "(Blokk N)" suffix when
+// multiple blocks exist. Used everywhere we write userName to Firebase.
+function getBlockLabel(bIdx) {
+  const name = getStoredUserName(bIdx);
+  if (blocks.length > 1) {
+    return name ? name + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1);
+  }
+  return name || null;
+}
 function publishUserName() {
   if (!channelRef || !phoneId) return;
   // Update name across ALL block phones (including block 0)
   blocks.forEach((blk, bIdx) => {
     const pid = blockPhoneId(bIdx);
-    const blkName = getStoredUserName(bIdx);
-    const label = blocks.length > 1
-      ? (blkName ? blkName + ' (Blokk ' + (bIdx + 1) + ')' : 'Blokk ' + (bIdx + 1))
-      : (blkName || null);
+    const label = getBlockLabel(bIdx);
     channelRef.child('papers_meta/' + pid + '/userName').set(label);
     channelRef.child('phones/' + pid + '/userName').set(label);
   });
@@ -2558,11 +2564,7 @@ async function connectPhone(code) {
     presenceRef.onDisconnect().remove();
     // Register disconnect handlers for ALL block virtual phones
     registerAllBlockDisconnects();
-    const startName = getStoredUserName(0);
-    const startLabel = blocks.length > 1
-      ? (startName ? startName + ' (Blokk 1)' : 'Blokk 1')
-      : (startName || null);
-    presenceRef.set({ ts: Date.now(), userName: startLabel });
+    presenceRef.set({ ts: Date.now(), userName: getBlockLabel(0) });
     // Re-publish papers for ALL blocks so the host sees them again
     publishAllStripsToHost();
     // Persist the name in papers_meta so it survives disconnect
