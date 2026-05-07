@@ -592,6 +592,7 @@ header .conn-label { margin-left: auto; }
 /* Block selector row — sits above game tabs */
 .block-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   padding: 6px 10px 2px;
   background: #0a0a0a;
@@ -600,8 +601,8 @@ header .conn-label { margin-left: auto; }
   align-items: stretch;
 }
 .block-tab {
-  flex: 1;
-  min-width: 0;
+  flex: 1 1 0;
+  min-width: 60px;
   display: flex;
   flex-direction: column;
   align-items: center;
