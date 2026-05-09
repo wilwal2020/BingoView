@@ -2746,10 +2746,15 @@ Example:
     document.getElementById("phone-processing").style.display = "none";
     document.getElementById("phone-detected-count").textContent = `${count}/90 detected`;
 
-    toast(count >= 85
-      ? `✓ ${count} numbers found`
-      : `⚠ Only ${count} found — try rescanning`,
-      count >= 85 ? "ok" : "warn", 4000);
+    if (count === 90) {
+      toast(`✓ ${count} numbers found`, "ok", 3000);
+    } else {
+      // A valid bingo block ALWAYS has exactly 90 numbers (6 strips × 15).
+      // Anything else means the OCR misread the paper.
+      const diff = count < 90 ? `mangler ${90 - count}` : `${count - 90} for mange`;
+      toast(`⚠ Fant ${count}/90 numre (${diff}) — skann arket på nytt`,
+            "err", 6000);
+    }
 
   } catch(err) {
     console.error(err);
