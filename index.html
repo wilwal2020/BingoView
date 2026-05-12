@@ -2043,12 +2043,17 @@ function generateRandomPaper() {
 // Encoded as base64url (URL-safe, no padding).
 const GAME_KEYS = ['blue','yellow','pink','grey'];
 
-function encodeCompactPaper(games, code) {
+function encodeCompactPaper(games, code, userName) {
   const parts = [];
-  parts.push(3); // version
+  parts.push(4); // version 4 — adds optional userName (UTF-8) after code
   const codeStr = (code || '').slice(0, 10);
   parts.push(codeStr.length);
   for (let i = 0; i < codeStr.length; i++) parts.push(codeStr.charCodeAt(i));
+  // UTF-8 encode the userName (cap at 64 bytes to keep URLs short)
+  const nameStr = (userName || '').slice(0, 32);
+  const nameBytes = new TextEncoder().encode(nameStr).slice(0, 64);
+  parts.push(nameBytes.length);
+  for (let i = 0; i < nameBytes.length; i++) parts.push(nameBytes[i]);
   // Game bitmap: which games have strips
   let bitmap = 0;
   GAME_KEYS.forEach((g, i) => { if (games[g]) bitmap |= (1 << i); });
@@ -2083,10 +2088,20 @@ function decodeCompactPaper(b64) {
 
   let pos = 0;
   const version = bytes[pos++];
-  if (version !== 3) return null;
+  if (version !== 3 && version !== 4) return null;
   const codeLen = bytes[pos++];
   let code = '';
   for (let i = 0; i < codeLen; i++) code += String.fromCharCode(bytes[pos++]);
+  // v4 adds an optional UTF-8 userName after the code
+  let userName = '';
+  if (version >= 4) {
+    const nameLen = bytes[pos++];
+    if (nameLen > 0) {
+      const nameSlice = bytes.slice(pos, pos + nameLen);
+      pos += nameLen;
+      try { userName = new TextDecoder().decode(nameSlice); } catch (e) {}
+    }
+  }
   const bitmap = bytes[pos++];
   const games = {};
   GAME_KEYS.forEach((g, i) => {
@@ -2105,11 +2120,11 @@ function decodeCompactPaper(b64) {
     }
     games[g] = strips;
   });
-  return { code, games };
+  return { code, games, userName };
 }
 
-function buildCompactShareUrl(games, code) {
-  const encoded = encodeCompactPaper(games, code);
+function buildCompactShareUrl(games, code, userName) {
+  const encoded = encodeCompactPaper(games, code, userName);
   let url = location.origin + location.pathname + '?p=' + encoded;
   if (code) url += '&c=' + encodeURIComponent(code);
   return url;
@@ -2215,7 +2230,10 @@ function initPhone() {
       }
     });
     if (!hasAny) return;
-    const url = buildCompactShareUrl(games, sessionCode);
+    // Include the active block's name so the recipient sees the same label.
+    // Use the raw stored name (no "(Blokk N)" suffix — that's host-side noise).
+    const name = getStoredUserName(activeBlockIdx) || '';
+    const url = buildCompactShareUrl(games, sessionCode, name);
     showShareModal(url);
   });
 
@@ -2266,6 +2284,15 @@ function initPhone() {
             buildPaperForGame(g);
           }
         });
+        // Apply shared block name to the current (active) block
+        if (result.userName && result.userName.trim()) {
+          const trimmed = result.userName.trim().slice(0, 24);
+          if (blocks[activeBlockIdx]) {
+            blocks[activeBlockIdx].userName = trimmed;
+          }
+          const nameInput = document.getElementById("user-name-input");
+          if (nameInput) nameInput.value = trimmed;
+        }
         showGameTabs();
         renderActiveGame();
         const count = Object.keys(result.games).length;
