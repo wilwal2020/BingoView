@@ -1579,9 +1579,16 @@ let phoneId = null;               // assigned in connectPhone — used when publ
 // ── Block switching ───────────────────────────────────────────
 function switchBlock(idx) {
   if (idx < 0 || idx >= blocks.length) return;
+  const prevGame = activeGame;
   activeBlockIdx = idx;
   gameState = blocks[idx].gameState;
-  activeGame = getGameIds().find(g => gameState[g].strips) || 'blue';
+  // Prefer the host's current game, then whatever we were on before the
+  // switch, then the first available. This stops blocks from spuriously
+  // jumping back to game 1 when the host is mid-way through game 2+.
+  const candidates = [currentGame, prevGame].filter(Boolean);
+  activeGame = candidates.find(g => gameState[g] && gameState[g].strips)
+            || getGameIds().find(g => gameState[g].strips)
+            || 'blue';
   // Swap name input to this block's name
   const nameInput = document.getElementById("user-name-input");
   if (nameInput) nameInput.value = blocks[idx].userName || '';
@@ -1625,11 +1632,15 @@ function removeBlock(idx) {
   saveSession();
 }
 
-// Compute minimum numbers remaining to win for a given block (across all its games/rekke)
+// Compute minimum numbers remaining to win for a given block.
+// Only considers the CURRENT game (the one the host is actively calling
+// numbers for) so old completed games don't bleed into the badge.
 function computeBlockMinRemaining(blockIdx) {
   const blk = blocks[blockIdx];
   let globalMin = Infinity;
-  getGameIds().forEach(gId => {
+  const targetGame = currentGame || activeGame;
+  const gamesToCheck = targetGame ? [targetGame] : getGameIds();
+  gamesToCheck.forEach(gId => {
     const gs = blk.gameState[gId];
     if (!gs || !gs.strips || !gs.paperEl) return;
     const proximityBase = (manualPlayMode && gs.hostCalled && gs.hostCalled.length)
@@ -1679,7 +1690,9 @@ function refreshBlockTabs() {
       btn.className = "block-tab" + (idx === activeBlockIdx ? " active" : "");
       const label = document.createElement("span");
       label.className = "block-label";
-      label.textContent = "Blokk " + (idx + 1);
+      // Prefer the block's own typed name; fall back to "Blokk N"
+      const blkName = (blk.userName || '').trim();
+      label.textContent = blkName || ("Blokk " + (idx + 1));
       btn.appendChild(label);
 
       // Badge: always show remaining count, color-coded by proximity
@@ -1706,12 +1719,18 @@ function refreshBlockTabs() {
       }
       btn.appendChild(badge);
 
-      // Remove button on non-active blocks
+      // Remove button on non-active blocks (with confirmation)
       if (idx !== activeBlockIdx) {
         const x = document.createElement("span");
         x.className = "block-tab-remove";
         x.textContent = "×";
-        x.addEventListener("click", (e) => { e.stopPropagation(); removeBlock(idx); });
+        x.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const blkName = (blk.userName || '').trim() || ('Blokk ' + (idx + 1));
+          if (confirm('Fjerne ' + blkName + '?')) {
+            removeBlock(idx);
+          }
+        });
         btn.appendChild(x);
       }
 
@@ -2528,6 +2547,8 @@ function initPhone() {
       blocks[activeBlockIdx].userName = v;
       // Also keep global fallback in sync for backward compat
       try { localStorage.setItem("bv_userName", v); } catch (e) {}
+      // Refresh block tab so the label reflects the new name immediately
+      refreshBlockTabs();
       if (nameTimer) clearTimeout(nameTimer);
       nameTimer = setTimeout(() => { publishUserName(); saveSession(); }, 350);
     });
