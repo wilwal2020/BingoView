@@ -250,6 +250,40 @@ header .conn-label { margin-left: auto; }
   text-align: center;
 }
 
+/* Compact corner badge while background scans run.
+   Lets the user add more blocks / take more pictures in parallel. */
+.scan-badge {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(20, 12, 4, 0.95);
+  border: 1px solid var(--gold);
+  border-radius: 18px;
+  padding: 5px 12px 5px 9px;
+  z-index: 1500;
+  pointer-events: none;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+}
+.scan-badge-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.scan-badge-label {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--gold);
+  text-transform: uppercase;
+}
+
 /* Pending / multi-photo queue screen */
 #phone-pending {
   display: none;
@@ -1336,6 +1370,13 @@ header .conn-label { margin-left: auto; }
       <div class="proc-label" id="proc-label">Reading numbers…</div>
     </div>
 
+    <!-- Persistent scan badge shown while background OCR is in progress.
+         Lets the user navigate / add new blocks while scans complete. -->
+    <div id="scan-badge" class="scan-badge" style="display:none">
+      <div class="scan-badge-spinner"></div>
+      <span class="scan-badge-label">Behandler 0 ark…</span>
+    </div>
+
     <!-- Step 2b: Multi-photo queue -->
     <div id="phone-pending">
       <div class="pending-header">
@@ -1803,18 +1844,20 @@ function registerBlockPresence(bIdx) {
 }
 
 // Publish a single game's strips for the active block
-function publishStripsToHost(gameKey) {
+function publishStripsToHost(gameKey, blockIdx) {
   if (!channelRef || !phoneId || manualMode) return;
-  const strips = gameState[gameKey] && gameState[gameKey].strips;
+  // Default to the active block; background scans pass an explicit blockIdx.
+  const bi = (blockIdx != null) ? blockIdx : activeBlockIdx;
+  const gs = blocks[bi] && blocks[bi].gameState[gameKey];
+  const strips = gs && gs.strips;
   if (!strips) return;
-  const pid = blockPhoneId(activeBlockIdx);
+  const pid = blockPhoneId(bi);
   channelRef.child('phones/' + pid + '/papers/' + gameKey).set(strips);
   channelRef.child('papers/' + pid + '/' + gameKey).set(strips);
-  updateBlockMeta(activeBlockIdx);
-  // Ensure virtual phone presence for non-zero blocks
-  if (activeBlockIdx > 0) {
+  updateBlockMeta(bi);
+  if (bi > 0) {
     channelRef.child('phones/' + pid).update({
-      ts: Date.now(), userName: getBlockLabel(activeBlockIdx)
+      ts: Date.now(), userName: getBlockLabel(bi)
     });
   }
 }
@@ -2758,18 +2801,57 @@ function setConnStatus(state, label) {
   });
 }
 
-async function processImage(file, targetGame) {
-  document.getElementById("phone-pending").style.display    = "none";
-  document.getElementById("phone-upload").style.display     = "none";
-  document.getElementById("phone-processing").style.display = "flex";
-  const setLabel = t => document.getElementById("proc-label").textContent = t;
+// Track how many background OCR scans are running so the corner badge
+// can show progress and finished scans don't fight foreground UI.
+let _activeScanCount = 0;
+function updateScanBadge() {
+  const badge = document.getElementById('scan-badge');
+  if (!badge) return;
+  if (_activeScanCount > 0) {
+    badge.style.display = 'flex';
+    badge.querySelector('.scan-badge-label').textContent =
+      _activeScanCount === 1 ? 'Behandler 1 ark…' : `Behandler ${_activeScanCount} ark…`;
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+// processImage(file, targetGame, [targetBlockIdx], [opts])
+// When called WITHOUT targetBlockIdx, runs in legacy foreground mode
+// (shows phone-processing overlay, writes via current gameState pointer).
+// When called WITH targetBlockIdx, runs in BACKGROUND: writes directly
+// to blocks[targetBlockIdx].gameState[targetGame] so the user can keep
+// scanning other blocks in parallel.
+async function processImage(file, targetGame, targetBlockIdx, opts) {
+  const isBackground = (targetBlockIdx != null);
+  if (!isBackground) {
+    document.getElementById("phone-pending").style.display    = "none";
+    document.getElementById("phone-upload").style.display     = "none";
+    document.getElementById("phone-processing").style.display = "flex";
+  } else {
+    _activeScanCount++;
+    updateScanBadge();
+  }
+  const setLabel = t => {
+    if (!isBackground) document.getElementById("proc-label").textContent = t;
+  };
+  // Resolve the target game state up front so async callbacks don't
+  // accidentally touch a different block's state after a switch.
+  const targetGs = isBackground
+    ? blocks[targetBlockIdx].gameState[targetGame]
+    : gameState[targetGame];
 
   // Load and save API key
   const keyInput = document.getElementById("apikey-input");
   const apiKey = keyInput.value.trim() || localStorage.getItem("bv_apikey") || "";
   if (!apiKey) {
-    document.getElementById("phone-upload").style.display = "flex";
-    document.getElementById("phone-processing").style.display = "none";
+    if (!isBackground) {
+      document.getElementById("phone-upload").style.display = "flex";
+      document.getElementById("phone-processing").style.display = "none";
+    } else {
+      _activeScanCount--;
+      updateScanBadge();
+    }
     toast("Enter your Anthropic API key first", "err", 4000);
     return;
   }
@@ -2837,61 +2919,88 @@ Example:
     const parsed = JSON.parse(clean);
     if (!Array.isArray(parsed)) throw new Error("Expected array of strips");
 
-    // Render into the target game slot (captured at call time, not read from global activeGame)
+    // Render into the target game slot. For background scans we write
+    // straight to the captured gs so block-switches don't corrupt anything.
     const resolvedGame = targetGame || activeGame;
-    const gs = gameState[resolvedGame];
+    const gs = targetGs || gameState[resolvedGame];
     gs.strips = parsed;
-    buildPaperForGame(resolvedGame);
+    buildPaperForGame(resolvedGame, isBackground ? targetBlockIdx : null);
     const count = Object.keys(gs.cellMap).length;
 
-    // Replay any already-called numbers for this game onto the new paper
-    renderCells(resolvedGame);
+    // For background scans, only touch live UI if the user is currently
+    // viewing the same block + game; otherwise just publish + save.
+    const isCurrentlyVisible = !isBackground ||
+      (targetBlockIdx === activeBlockIdx && resolvedGame === activeGame);
+
+    if (isCurrentlyVisible) {
+      renderCells(resolvedGame);
+      showGameTabs();
+      renderActiveGame();
+      document.getElementById("phone-processing").style.display = "none";
+      document.getElementById("phone-detected-count").textContent = `${count}/90 detected`;
+    }
 
     saveSession();
-    publishStripsToHost(resolvedGame);
-    showGameTabs();
-    renderActiveGame();
-    document.getElementById("phone-processing").style.display = "none";
-    document.getElementById("phone-detected-count").textContent = `${count}/90 detected`;
+    publishStripsToHost(resolvedGame, isBackground ? targetBlockIdx : null);
+    refreshBlockTabs();
+
+    // Identifying label for toasts when multiple blocks are being scanned
+    const lbl = isBackground && blocks.length > 1
+      ? ` (Blokk ${targetBlockIdx + 1} · ${getGameName(resolvedGame)})`
+      : '';
 
     if (count === 90) {
-      toast(`✓ ${count} numbers found`, "ok", 3000);
+      toast(`✓ ${count} numre funnet${lbl}`, "ok", 3000);
     } else {
       // A valid bingo block ALWAYS has exactly 90 numbers (6 strips × 15).
-      // Anything else means the OCR misread the paper. Show a blocking
-      // confirm so the user can't miss it — losing one or two numbers
-      // mid-game is much worse than rescanning now.
+      // For foreground scans we show a confirm so the user can rescan;
+      // for background scans we just toast a strong warning (the user is
+      // busy with another block — can switch back to verify when ready).
       const diff = count < 90 ? `mangler ${90 - count}` : `${count - 90} for mange`;
-      toast(`⚠ Fant ${count}/90 numre (${diff})`, "err", 4000);
-      setTimeout(() => {
-        const msg = 'Advarsel: arket har bare ' + count + ' av 90 numre (' + diff + ').\n\n' +
-                    'Et gyldig bingoark har alltid nøyaktig 90 numre. Vil du skanne på nytt?';
-        if (confirm(msg)) {
-          // Wipe this game's strips so the user can rescan
-          gs.strips = null;
-          gs.paperEl = null;
-          gs.cellMap = {};
-          // Show upload screen
-          document.getElementById("phone-paper").style.display = "none";
-          document.getElementById("phone-upload").style.display = "flex";
-          updateUploadTitle();
-        }
-      }, 250);
+      toast(`⚠ Fant ${count}/90 numre${lbl} (${diff})`, "err", 6000);
+      if (!isBackground) {
+        setTimeout(() => {
+          const msg = 'Advarsel: arket har bare ' + count + ' av 90 numre (' + diff + ').\n\n' +
+                      'Et gyldig bingoark har alltid nøyaktig 90 numre. Vil du skanne på nytt?';
+          if (confirm(msg)) {
+            gs.strips = null;
+            gs.paperEl = null;
+            gs.cellMap = {};
+            document.getElementById("phone-paper").style.display = "none";
+            document.getElementById("phone-upload").style.display = "flex";
+            updateUploadTitle();
+          }
+        }, 250);
+      }
     }
 
   } catch(err) {
     console.error(err);
-    document.getElementById("phone-processing").style.display = "none";
-    document.getElementById("phone-upload").style.display = "flex";
-    setLabel("Error — try again");
-    toast("Error: " + err.message, "err", 5000);
+    if (!isBackground) {
+      document.getElementById("phone-processing").style.display = "none";
+      document.getElementById("phone-upload").style.display = "flex";
+      setLabel("Error — try again");
+    }
+    const blkLbl = isBackground && blocks.length > 1
+      ? ` (Blokk ${targetBlockIdx + 1})` : '';
+    toast("Error" + blkLbl + ": " + err.message, "err", 6000);
+  } finally {
+    if (isBackground) {
+      _activeScanCount--;
+      updateScanBadge();
+    }
   }
 }
 
 // Build (or rebuild) the paper DOM for one game from its strips data.
-function buildPaperForGame(gameKey) {
-  const gs = gameState[gameKey];
-  if (!gs.strips) return;
+function buildPaperForGame(gameKey, blockIdx) {
+  // If blockIdx is provided, target that specific block's game state
+  // (needed for background scans that finish while the user is on a
+  // different block). Otherwise use the active block's gameState.
+  const gs = (blockIdx != null)
+    ? blocks[blockIdx].gameState[gameKey]
+    : gameState[gameKey];
+  if (!gs || !gs.strips) return;
 
   const paper = document.createElement("div");
   paper.className = "digital-paper-inner";
@@ -3385,13 +3494,47 @@ function showPendingScreen() {
 async function processAllPending() {
   const entries = Object.entries(pendingPhotos);
   if (!entries.length) return;
-  for (const [gameKey, file] of entries) {
-    activeGame = gameKey;
-    refreshGameTabs();
-    delete pendingPhotos[gameKey];
-    // Pass gameKey explicitly so processImage uses the correct game
-    // even if activeGame changes during the async API call
-    await processImage(file, gameKey);
+
+  // Capture the block this batch belongs to so async API calls write to
+  // the right place even after the user moves on to a new block.
+  const targetBlockIdx = activeBlockIdx;
+
+  // Clear the queue immediately so the user can start scanning the next
+  // block. We hold onto the file refs locally for the parallel scans.
+  const scans = entries.map(([gameKey, file]) => ({ gameKey, file }));
+  scans.forEach(s => { delete pendingPhotos[s.gameKey]; });
+
+  // Fire all scans IN PARALLEL — Anthropic API handles concurrent calls
+  // fine, and the user just sees one corner badge with the total count.
+  scans.forEach(s => {
+    processImage(s.file, s.gameKey, targetBlockIdx).catch(() => {});
+  });
+
+  document.getElementById("phone-pending").style.display = "none";
+
+  // If every game on the current block is now either scanned or queued,
+  // auto-advance to a fresh new block so the user can keep scanning.
+  // Otherwise stay on the current block's upload screen so they can scan
+  // the remaining games.
+  const blk = blocks[targetBlockIdx];
+  const queuedGames = new Set(scans.map(s => s.gameKey));
+  const allFilled = getGameIds().every(g =>
+    queuedGames.has(g) || (blk.gameState[g] && blk.gameState[g].strips)
+  );
+  if (allFilled) {
+    addBlock();
+  } else {
+    // Show the upload screen for the remaining games in this block
+    const nextEmpty = getGameIds().find(g =>
+      !queuedGames.has(g) && (!blk.gameState[g] || !blk.gameState[g].strips)
+    );
+    if (nextEmpty) {
+      activeGame = nextEmpty;
+      refreshGameTabs();
+    }
+    document.getElementById("phone-upload").style.display = "flex";
+    document.getElementById("phone-paper").style.display = "none";
+    updateUploadTitle();
   }
 }
 
