@@ -2492,23 +2492,8 @@ function initPhone() {
   // "Markér nye" toggle — numbers called while this is on get a purple
   // marker so the user can quickly catch up on a physical bingo paper.
   // Toggling OFF clears the markers so the paper looks normal again.
-  const awayBtn = document.getElementById("btn-away");
-  awayBtn.addEventListener("click", () => {
-    awayMode = !awayMode;
-    awayBtn.classList.toggle("active", awayMode);
-    awayBtn.setAttribute("aria-checked", awayMode ? "true" : "false");
-    if (awayMode) {
-      toast("Nye tall markeres lilla", "ok", 2500);
-    } else {
-      // Wipe stored markers across every block + game and re-paint
-      blocks.forEach(blk => {
-        getGameIds().forEach(g => {
-          if (blk.gameState[g]) blk.gameState[g].awayCalled = [];
-        });
-      });
-      renderCells(activeGame);
-      toast("Markering av nye tall slått av", "ok", 1500);
-    }
+  document.getElementById("btn-away").addEventListener("click", () => {
+    setAwayMode(!awayMode);
   });
 
   // BV settings overlay (sound / vibrate)
@@ -3278,8 +3263,37 @@ function renderCells(gameKey) {
 }
 
 // ── Manual play (connected mode) ──────────────────────────────
+function setAwayMode(on) {
+  if (awayMode === on) return;
+  // Mutually exclusive with manual-play — turn that off first
+  if (on && manualPlayMode) setManualPlayMode(false);
+
+  awayMode = on;
+
+  const btn = document.getElementById('btn-away');
+  if (btn) {
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-checked', on ? 'true' : 'false');
+  }
+
+  if (on) {
+    toast("Nye tall markeres lilla", "ok", 2500);
+  } else {
+    // Wipe stored markers across every block + game and re-paint
+    blocks.forEach(blk => {
+      getGameIds().forEach(g => {
+        if (blk.gameState[g]) blk.gameState[g].awayCalled = [];
+      });
+    });
+    renderCells(activeGame);
+    toast("Markering av nye tall slått av", "ok", 1500);
+  }
+}
+
 function setManualPlayMode(on) {
   if (manualPlayMode === on) return;
+  // Mutually exclusive with "Markér nye" — turn that off first
+  if (on && awayMode) setAwayMode(false);
   manualPlayMode = on;
 
   const btn = document.getElementById('btn-manual-toggle');
