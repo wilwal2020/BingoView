@@ -2491,6 +2491,7 @@ function initPhone() {
 
   // "Markér nye" toggle — numbers called while this is on get a purple
   // marker so the user can quickly catch up on a physical bingo paper.
+  // Toggling OFF clears the markers so the paper looks normal again.
   const awayBtn = document.getElementById("btn-away");
   awayBtn.addEventListener("click", () => {
     awayMode = !awayMode;
@@ -2499,6 +2500,13 @@ function initPhone() {
     if (awayMode) {
       toast("Nye tall markeres lilla", "ok", 2500);
     } else {
+      // Wipe stored markers across every block + game and re-paint
+      blocks.forEach(blk => {
+        getGameIds().forEach(g => {
+          if (blk.gameState[g]) blk.gameState[g].awayCalled = [];
+        });
+      });
+      renderCells(activeGame);
       toast("Markering av nye tall slått av", "ok", 1500);
     }
   });
