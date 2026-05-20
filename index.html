@@ -453,10 +453,13 @@ header .conn-label { margin-left: auto; }
 .strip {
   display: grid;
   grid-template-columns: 28px 1fr;
-  border: 1.5px solid #222;
-  border-radius: 3px;
+  border: none;
+  border-radius: 6px;
   overflow: hidden;
   background: #fff;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.18),
+    0 1px 0 rgba(0, 0, 0, 0.04);
 }
 
 .strip-id {
@@ -464,7 +467,7 @@ header .conn-label { margin-left: auto; }
   align-items: center;
   justify-content: center;
   background: #f0ede4;
-  border-right: 1.5px solid #222;
+  border-right: 1px solid rgba(0, 0, 0, 0.10);
   font-size: 0.7rem;
   font-weight: 700;
   color: #333;
@@ -483,8 +486,8 @@ header .conn-label { margin-left: auto; }
   display: flex;
   align-items: center;
   justify-content: center;
-  border-right: 1px solid #aaa;
-  border-bottom: 1px solid #aaa;
+  border-right: 1px solid rgba(0, 0, 0, 0.10);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.10);
   font-size: 1.05rem;
   font-weight: 700;
   color: #111;
@@ -1600,15 +1603,15 @@ let channelRef = null;
 // In connected mode the IDs are part of the host protocol; in manual mode
 // they're just labels and games can be added/removed.
 const DEFAULT_GAMES = [
-  { id: 'blue',   name: 'Spill 1', color: '#2e6db4' },
-  { id: 'yellow', name: 'Spill 2', color: '#d4a017' },
-  { id: 'pink',   name: 'Spill 3', color: '#c94f80' },
-  { id: 'grey',   name: 'Spill 4', color: '#7a7a7a' },
+  { id: 'blue',   name: 'Spill 1', color: '#a7c8f6' },
+  { id: 'yellow', name: 'Spill 2', color: '#ffe479' },
+  { id: 'pink',   name: 'Spill 3', color: '#f9adce' },
+  { id: 'grey',   name: 'Spill 4', color: '#d6cad1' },
 ];
 
 // Color palette for additional manual games
 const COLOR_PALETTE = [
-  '#2e6db4','#d4a017','#c94f80','#7a7a7a',
+  '#a7c8f6','#ffe479','#f9adce','#d6cad1',
   '#2e9d8d','#8957d4','#d4711a','#b03a2e',
   '#3d9d4f','#8b5a3c','#c8281e','#1a7a40',
 ];
