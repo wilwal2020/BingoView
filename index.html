@@ -474,16 +474,43 @@ header .conn-label { margin-left: auto; }
   animation: cellPop 0.4s cubic-bezier(0.34,1.56,0.64,1);
   z-index: 2;
 }
+/* Catch-up blink: applied briefly to the latest cell when you return to
+   the app after being away (page hidden). Makes it impossible to miss
+   the most recently called number. */
+.cell.latest.catchup-blink {
+  animation: catchupBlink 0.35s ease-in-out 6;
+}
+@keyframes catchupBlink {
+  0%, 100% { background: var(--red); transform: scale(1); }
+  50%      { background: #ffe14a;    transform: scale(1.18); color: #000; }
+}
+/* Away marker: numbers called while user pressed "Borte". Helps the user
+   catch up on their physical paper. Drawn on top of .called/.latest. */
+.cell.called.away-marked {
+  background: rgba(155,122,255,0.32);
+  color: #c4a8ff;
+}
+.cell.latest.away-marked {
+  background: #6c4fb8;
+  box-shadow: 0 0 14px rgba(155,122,255,0.6);
+  color: #fff;
+}
+/* Header button: visible "away" toggle state */
+#btn-away.away-active {
+  background: #6c4fb8 !important;
+  border-color: #9b7aff !important;
+  color: #fff !important;
+}
 
-/* Proximity-to-win row highlights — applied to every cell in the row
-   including blanks. Called / latest cells keep their normal red styling,
-   so the highlight only tints the empty + uncalled cells. */
-.cell.row-warm:not(.called):not(.latest) {
+/* Proximity-to-win row highlights — applied to every cell in the row.
+   Only the BLANK cells get the tint (no [data-num]). Called/latest keep
+   their red bingo styling, and the still-missing numbers stay default so
+   they stand out as "the numbers you need". */
+.cell.row-warm:not([data-num]) {
   background: rgba(232,160,32,0.24);
 }
-.cell.row-hot:not(.called):not(.latest) {
+.cell.row-hot:not([data-num]) {
   background: rgba(232,160,32,0.44);
-  color: #8a5500;
   animation: rowPulse 1.6s ease-in-out infinite;
 }
 /* Winning row: paint EVERY cell green, including the called/latest ones,
@@ -1162,6 +1189,7 @@ header .conn-label { margin-left: auto; }
   <header>
     <div class="hdr-title">PHONE</div>
     <button id="btn-fresh-start">Nytt ark</button>
+    <button id="btn-away" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Tall som blir kalt mens du er borte markeres lilla">Borte</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
     <button id="btn-bv-settings" class="bv-icon-btn" title="Lyd og vibrasjon" aria-label="Innstillinger">⚙</button>
     <div class="conn-label">
@@ -1541,7 +1569,7 @@ let activeBlockIdx = 0;
 function createEmptyBlock() {
   const gs = {};
   DEFAULT_GAMES.forEach(g => {
-    gs[g.id] = { strips: null, paperEl: null, cellMap: {}, called: [], rekke: 'Rekke1', hostCalled: [], wrong: [] };
+    gs[g.id] = { strips: null, paperEl: null, cellMap: {}, called: [], rekke: 'Rekke1', hostCalled: [], wrong: [], awayCalled: [] };
   });
   return { gameState: gs, userName: '' };
 }
@@ -1555,7 +1583,7 @@ let gameState = blocks[0].gameState;
 function ensureGameState(id) {
   if (!gameState[id]) gameState[id] = {
     strips: null, paperEl: null, cellMap: {}, called: [], rekke: 'Rekke1',
-    hostCalled: [], wrong: [],
+    hostCalled: [], wrong: [], awayCalled: [],
   };
 }
 function getGameIds()    { return gameList.map(g => g.id); }
@@ -1571,6 +1599,7 @@ let activeGame = 'blue';          // currently displayed game on phone
 let currentGame = null;           // the game the main site (iPad) is on
 let currentRekke = 'Rekke1';      // the rekke the main site is on
 let latestCell = null;            // last "latest"-highlighted cell in the active game
+let awayMode = false;             // "Borte" toggle: numbers called now get a purple marker
 const pendingPhotos = {};         // gameKey → File queued for processing
 let resetTs = 0;                  // callLog entries with ts ≤ resetTs are ignored (pre-reset)
 let sessionCode = null;           // code used to connect — key for localStorage
@@ -2175,6 +2204,24 @@ function initPhone() {
   document.getElementById("phone-connect").style.display = "flex";
   document.getElementById("phone-upload").style.display  = "none";
 
+  // Catch-up blink: when the page becomes visible again (user returned
+  // after locking the phone or switching apps), briefly flash the most
+  // recently called number so the user can resync with the host quickly.
+  let _wasHidden = false;
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { _wasHidden = true; return; }
+    if (!_wasHidden) return;
+    _wasHidden = false;
+    if (latestCell && latestCell.classList.contains('latest')) {
+      latestCell.classList.remove('catchup-blink');
+      // Force a reflow so re-adding the class restarts the animation
+      void latestCell.offsetWidth;
+      latestCell.classList.add('catchup-blink');
+      const target = latestCell;
+      setTimeout(() => { target.classList.remove('catchup-blink'); }, 2400);
+    }
+  });
+
   // Connect button — also "unlocks" vibration + audio APIs via user gesture
   document.getElementById("btn-phone-connect").addEventListener("click", () => {
     // Prime vibration API with a tiny pulse (required on Android before
@@ -2398,6 +2445,19 @@ function initPhone() {
       refreshRekkeButtons();
       updateUploadTitle();
       toast("Nytt ark klart", "ok", 2000);
+    }
+  });
+
+  // "Borte" toggle — numbers called while this is on get a purple marker
+  // so the user can quickly catch up on a physical bingo paper.
+  const awayBtn = document.getElementById("btn-away");
+  awayBtn.addEventListener("click", () => {
+    awayMode = !awayMode;
+    awayBtn.classList.toggle("away-active", awayMode);
+    if (awayMode) {
+      toast("Borte – nye tall markeres lilla", "ok", 2500);
+    } else {
+      toast("Tilbake", "ok", 1500);
     }
   });
 
@@ -2798,10 +2858,25 @@ Example:
       toast(`✓ ${count} numbers found`, "ok", 3000);
     } else {
       // A valid bingo block ALWAYS has exactly 90 numbers (6 strips × 15).
-      // Anything else means the OCR misread the paper.
+      // Anything else means the OCR misread the paper. Show a blocking
+      // confirm so the user can't miss it — losing one or two numbers
+      // mid-game is much worse than rescanning now.
       const diff = count < 90 ? `mangler ${90 - count}` : `${count - 90} for mange`;
-      toast(`⚠ Fant ${count}/90 numre (${diff}) — skann arket på nytt`,
-            "err", 6000);
+      toast(`⚠ Fant ${count}/90 numre (${diff})`, "err", 4000);
+      setTimeout(() => {
+        const msg = 'Advarsel: arket har bare ' + count + ' av 90 numre (' + diff + ').\n\n' +
+                    'Et gyldig bingoark har alltid nøyaktig 90 numre. Vil du skanne på nytt?';
+        if (confirm(msg)) {
+          // Wipe this game's strips so the user can rescan
+          gs.strips = null;
+          gs.paperEl = null;
+          gs.cellMap = {};
+          // Show upload screen
+          document.getElementById("phone-paper").style.display = "none";
+          document.getElementById("phone-upload").style.display = "flex";
+          updateUploadTitle();
+        }
+      }, 250);
     }
 
   } catch(err) {
@@ -2923,6 +2998,7 @@ function renderActiveGame() {
     document.getElementById("phone-upload").style.display = "none";
     document.getElementById("phone-paper").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "block";
+    document.getElementById("btn-away").style.display = "block";
 
     const count = Object.keys(gs.cellMap).length;
     document.getElementById("phone-detected-count").textContent = count ? `${count}/90 detected` : "";
@@ -2933,6 +3009,7 @@ function renderActiveGame() {
     document.getElementById("phone-paper").style.display  = "none";
     document.getElementById("phone-upload").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "none";
+    document.getElementById("btn-away").style.display = "none";
   }
 
   updateRekkeLabel();
@@ -3037,9 +3114,10 @@ function renderCells(gameKey) {
   if (!gs || !gs.cellMap) return;
 
   Object.values(gs.cellMap).forEach(c =>
-    c.classList.remove('called','latest','hint-red','hint-yellow','wrong'));
+    c.classList.remove('called','latest','hint-red','hint-yellow','wrong','away-marked'));
   if (gameKey === activeGame) latestCell = null;
 
+  const awaySet = new Set((gs.awayCalled || []).map(Number));
   gs.called.forEach((num, i) => {
     const cell = gs.cellMap[String(num)];
     if (!cell) return;
@@ -3049,6 +3127,7 @@ function renderCells(gameKey) {
     } else {
       cell.classList.add('called');
     }
+    if (awaySet.has(Number(num))) cell.classList.add('away-marked');
   });
 
   if (manualPlayMode && Array.isArray(gs.hostCalled) && gs.hostCalled.length) {
@@ -3328,9 +3407,15 @@ function applyCallToGame(gameKey, number, isLatestEver) {
   if (!gs.cellMap) return;
   const cell = gs.cellMap[String(number)];
   if (!cell) return;
+  // Persist the "away" marker across renders so it survives game switches.
+  if (awayMode) {
+    if (!Array.isArray(gs.awayCalled)) gs.awayCalled = [];
+    if (!gs.awayCalled.includes(Number(number))) gs.awayCalled.push(Number(number));
+  }
   if (gameKey === activeGame) {
     cell.classList.remove("latest");
     cell.classList.add("called");
+    if (awayMode) cell.classList.add("away-marked");
     if (isLatestEver) {
       if (latestCell && latestCell !== cell) {
         latestCell.classList.remove("latest");
