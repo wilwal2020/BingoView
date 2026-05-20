@@ -549,6 +549,15 @@ header .conn-label { margin-left: auto; }
 }
 .cell.row-hot[data-num]:not(.called):not(.latest) {
   box-shadow: inset 0 0 0 4px #ecc080;
+  animation: rowHotMissPulse 1.6s ease-in-out infinite;
+}
+/* Matches the rowPulse timing on the blank cells so the missing-number
+   frame breathes in sync with the surrounding glow. Keeps the 4px frame
+   constant and brightens at the peak. */
+@keyframes rowHotMissPulse {
+  0%, 100% { box-shadow: inset 0 0 0 4px #ecc080; }
+  50%      { box-shadow: inset 0 0 0 4px #ffcf6e,
+                         inset 0 0 14px 2px rgba(232,160,32,0.55); }
 }
 /* Winning row: paint EVERY cell green, including the called/latest ones,
    so the entire winning row reads as one solid bingo line. */
