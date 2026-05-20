@@ -519,12 +519,15 @@ header .conn-label { margin-left: auto; }
   box-shadow: 0 0 14px rgba(155,122,255,0.6);
   color: #fff;
 }
-/* Header button: visible "away" toggle state */
-#btn-away.away-active {
-  background: #6c4fb8 !important;
-  border-color: #9b7aff !important;
-  color: #fff !important;
+/* "Markér nye" toggle — reuses the manual-switch slider style but
+   tinted purple so it's visually distinct from "Manuell trykking". */
+.manual-switch-away.active {
+  background: #1a1426;
+  border-color: #9b7aff;
+  color: #c4a8ff;
 }
+.manual-switch-away.active .manual-switch-pill { background: #9b7aff; }
+.manual-switch-away.active .manual-switch-thumb { background: #160c27; }
 
 /* Proximity-to-win row highlights — applied to every cell in the row.
    Only the BLANK cells get the tint (no [data-num]). Called/latest keep
@@ -1213,7 +1216,6 @@ header .conn-label { margin-left: auto; }
   <header>
     <div class="hdr-title">PHONE</div>
     <button id="btn-fresh-start">Nytt ark</button>
-    <button id="btn-away" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Tall som blir kalt mens du er borte markeres lilla">Borte</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
     <button id="btn-bv-settings" class="bv-icon-btn" title="Lyd og vibrasjon" aria-label="Innstillinger">⚙</button>
     <div class="conn-label">
@@ -1385,6 +1387,10 @@ header .conn-label { margin-left: auto; }
       <div class="paper-toolbar">
         <button id="btn-manual-toggle" class="manual-switch" type="button" role="switch" aria-checked="false" style="display:none" title="Manuell trykking — bekreft tall selv">
           <span class="manual-switch-label">Manuell trykking</span>
+          <span class="manual-switch-pill"><span class="manual-switch-thumb"></span></span>
+        </button>
+        <button id="btn-away" class="manual-switch manual-switch-away" type="button" role="switch" aria-checked="false" style="display:none" title="Tall som kalles fra nå markeres lilla – nyttig for å hente seg inn på et fysisk ark">
+          <span class="manual-switch-label">Markér nye</span>
           <span class="manual-switch-pill"><span class="manual-switch-thumb"></span></span>
         </button>
       </div>
@@ -2463,16 +2469,17 @@ function initPhone() {
     }
   });
 
-  // "Borte" toggle — numbers called while this is on get a purple marker
-  // so the user can quickly catch up on a physical bingo paper.
+  // "Markér nye" toggle — numbers called while this is on get a purple
+  // marker so the user can quickly catch up on a physical bingo paper.
   const awayBtn = document.getElementById("btn-away");
   awayBtn.addEventListener("click", () => {
     awayMode = !awayMode;
-    awayBtn.classList.toggle("away-active", awayMode);
+    awayBtn.classList.toggle("active", awayMode);
+    awayBtn.setAttribute("aria-checked", awayMode ? "true" : "false");
     if (awayMode) {
-      toast("Borte – nye tall markeres lilla", "ok", 2500);
+      toast("Nye tall markeres lilla", "ok", 2500);
     } else {
-      toast("Tilbake", "ok", 1500);
+      toast("Markering av nye tall slått av", "ok", 1500);
     }
   });
 
@@ -2663,6 +2670,7 @@ async function connectPhone(code) {
   document.getElementById("rekke-buttons").style.display = "none";
   document.getElementById("phone-code-display").style.display = "flex";
   document.getElementById("btn-manual-toggle").style.display = "block";
+  document.getElementById("btn-away").style.display = "block";
 
   sessionCode = code;
   try { localStorage.setItem('bv_last_code', code); } catch(e) {}
@@ -3079,7 +3087,6 @@ function renderActiveGame() {
     document.getElementById("phone-upload").style.display = "none";
     document.getElementById("phone-paper").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "block";
-    document.getElementById("btn-away").style.display = "block";
 
     const count = Object.keys(gs.cellMap).length;
     document.getElementById("phone-detected-count").textContent = count ? `${count}/90 detected` : "";
@@ -3090,7 +3097,6 @@ function renderActiveGame() {
     document.getElementById("phone-paper").style.display  = "none";
     document.getElementById("phone-upload").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "none";
-    document.getElementById("btn-away").style.display = "none";
   }
 
   updateRekkeLabel();
@@ -3658,14 +3664,28 @@ function reconcileGameState(gameKey, numbers, rekke) {
       gs.rekke = rekke;
     }
 
+    // Per-block previous length, used both for new-call detection and
+    // for figuring out which numbers are "new" (so awayMode can mark them).
+    const prevLen = (gs._prevHostLen != null) ? gs._prevHostLen : list.length;
+    const newlyCalled = list.slice(prevLen);
     gs.hostCalled = list;
 
     // Detect new call (only from active block to avoid double-haptic)
     if (bIdx === activeBlockIdx) {
-      const prevLen = (gs._prevHostLen != null) ? gs._prevHostLen : list.length;
       if (list.length > prevLen) newCallArrived = true;
     }
     gs._prevHostLen = list.length;
+
+    // "Markér nye" (away/catch-up) mode: any number the host calls now
+    // is recorded so renderCells can paint it purple. Applied to every
+    // block since toggling away applies to the whole device.
+    if (awayMode && newlyCalled.length) {
+      if (!Array.isArray(gs.awayCalled)) gs.awayCalled = [];
+      newlyCalled.forEach(n => {
+        const num = Number(n);
+        if (!gs.awayCalled.includes(num)) gs.awayCalled.push(num);
+      });
+    }
 
     if (manualPlayMode) {
       const inList = new Set(list);
@@ -3779,10 +3799,11 @@ function handleRemoteReset(scope, game) {
   resetTs = Date.now();
   const resetOneInBlock = (blk, g) => {
     const gs = blk.gameState[g];
-    gs.called     = [];
-    gs.hostCalled = [];
-    gs.wrong      = [];
-    gs.rekke      = 'Rekke1';
+    gs.called      = [];
+    gs.hostCalled  = [];
+    gs.wrong       = [];
+    gs.awayCalled  = [];
+    gs.rekke       = 'Rekke1';
     // Only rebuild DOM for active block
     if (blk === blocks[activeBlockIdx] && gs.strips) buildPaperForGame(g);
   };
