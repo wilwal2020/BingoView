@@ -508,16 +508,6 @@ header .conn-label { margin-left: auto; }
   animation: cellPop 0.4s cubic-bezier(0.34,1.56,0.64,1);
   z-index: 2;
 }
-/* Catch-up blink: applied briefly to the latest cell when you return to
-   the app after being away (page hidden). Makes it impossible to miss
-   the most recently called number. */
-.cell.latest.catchup-blink {
-  animation: catchupBlink 0.35s ease-in-out 6;
-}
-@keyframes catchupBlink {
-  0%, 100% { background: var(--red); transform: scale(1); }
-  50%      { background: #ffe14a;    transform: scale(1.18); color: #000; }
-}
 /* Away marker: numbers called while user pressed "Borte". Helps the user
    catch up on their physical paper. Drawn on top of .called/.latest. */
 .cell.called.away-marked {
@@ -2247,24 +2237,6 @@ function initPhone() {
   document.getElementById("phone-connect").style.display = "flex";
   document.getElementById("phone-upload").style.display  = "none";
 
-  // Catch-up blink: when the page becomes visible again (user returned
-  // after locking the phone or switching apps), briefly flash the most
-  // recently called number so the user can resync with the host quickly.
-  let _wasHidden = false;
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { _wasHidden = true; return; }
-    if (!_wasHidden) return;
-    _wasHidden = false;
-    if (latestCell && latestCell.classList.contains('latest')) {
-      latestCell.classList.remove('catchup-blink');
-      // Force a reflow so re-adding the class restarts the animation
-      void latestCell.offsetWidth;
-      latestCell.classList.add('catchup-blink');
-      const target = latestCell;
-      setTimeout(() => { target.classList.remove('catchup-blink'); }, 2400);
-    }
-  });
-
   // Connect button — also "unlocks" vibration + audio APIs via user gesture
   document.getElementById("btn-phone-connect").addEventListener("click", () => {
     // Prime vibration API with a tiny pulse (required on Android before
@@ -3222,42 +3194,47 @@ function renderCells(gameKey) {
   const gs = gameState[gameKey];
   if (!gs || !gs.cellMap) return;
 
-  Object.values(gs.cellMap).forEach(c =>
-    c.classList.remove('called','latest','hint-red','hint-yellow','wrong','away-marked'));
-  if (gameKey === activeGame) latestCell = null;
+  // Compute the desired class set for every cell, then only mutate the
+  // DOM where the state differs. This stops the .latest cellPop animation
+  // from re-firing every time Firebase re-pushes the same callState
+  // (e.g. when the user returns to the page after locking the phone).
+  const calledList = gs.called || [];
+  const lastNum    = calledList.length ? String(calledList[calledList.length - 1]) : null;
+  const calledSet  = new Set(calledList.slice(0, -1).map(String)); // all except last
+  const awaySet    = new Set((gs.awayCalled || []).map(Number));
+  const wrongSet   = new Set((gs.wrong || []).map(String));
 
-  const awaySet = new Set((gs.awayCalled || []).map(Number));
-  gs.called.forEach((num, i) => {
-    const cell = gs.cellMap[String(num)];
-    if (!cell) return;
-    if (i === gs.called.length - 1) {
-      cell.classList.add('latest');
-      if (gameKey === activeGame) latestCell = cell;
-    } else {
-      cell.classList.add('called');
-    }
-    if (awaySet.has(Number(num))) cell.classList.add('away-marked');
-  });
-
+  // Manual-play hint sets
+  let hintRedNum = null;
+  const hintYellowSet = new Set();
   if (manualPlayMode && Array.isArray(gs.hostCalled) && gs.hostCalled.length) {
-    const confirmed = new Set(gs.called);
+    const confirmed = new Set(calledList);
     const unconfirmed = gs.hostCalled.filter(n => !confirmed.has(n));
     if (unconfirmed.length) {
-      // Latest unconfirmed → red (the next one to find);
-      // every earlier unconfirmed → yellow.
-      const latestPending = unconfirmed[unconfirmed.length - 1];
-      unconfirmed.forEach(num => {
-        const cell = gs.cellMap[String(num)];
-        if (!cell) return;
-        cell.classList.add(num === latestPending ? 'hint-red' : 'hint-yellow');
-      });
+      hintRedNum = String(unconfirmed[unconfirmed.length - 1]);
+      unconfirmed.slice(0, -1).forEach(n => hintYellowSet.add(String(n)));
     }
   }
 
-  (gs.wrong || []).forEach(num => {
-    const cell = gs.cellMap[String(num)];
-    if (cell) cell.classList.add('wrong');
+  const setClass = (cell, name, want) => {
+    if (cell.classList.contains(name) !== want) {
+      cell.classList.toggle(name, want);
+    }
+  };
+
+  Object.entries(gs.cellMap).forEach(([numStr, cell]) => {
+    setClass(cell, 'latest',      numStr === lastNum);
+    setClass(cell, 'called',      calledSet.has(numStr));
+    setClass(cell, 'away-marked', awaySet.has(Number(numStr)));
+    setClass(cell, 'hint-red',    numStr === hintRedNum);
+    setClass(cell, 'hint-yellow', hintYellowSet.has(numStr));
+    setClass(cell, 'wrong',       wrongSet.has(numStr));
   });
+
+  // Update the cached latestCell ref for the active game
+  if (gameKey === activeGame) {
+    latestCell = lastNum ? (gs.cellMap[lastNum] || null) : null;
+  }
 
   if (gameKey === activeGame) {
     const last = gs.called.length ? gs.called[gs.called.length - 1] : '—';
