@@ -549,6 +549,14 @@ header .conn-label { margin-left: auto; }
    colour of the blanks, drawn via inset box-shadow so the grid lines
    aren't disturbed. The missing numbers end up framed in the same
    colour as the surrounding blanks, making them pop. */
+.cell.row-warm[data-num]:not(.called):not(.latest),
+.cell.row-hot[data-num]:not(.called):not(.latest) {
+  /* The cell's own hairline grid borders would otherwise show as thin
+     pale lines sandwiched between the beige frame and the next cell.
+     Make them transparent so the frame sits flush against neighbours. */
+  border-right-color: transparent;
+  border-bottom-color: transparent;
+}
 .cell.row-warm[data-num]:not(.called):not(.latest) {
   box-shadow: inset 0 0 0 4px #f3d9a5;
 }
