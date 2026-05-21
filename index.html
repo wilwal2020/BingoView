@@ -549,18 +549,18 @@ header .conn-label { margin-left: auto; }
    colour of the blanks, drawn via inset box-shadow so the grid lines
    aren't disturbed. The missing numbers end up framed in the same
    colour as the surrounding blanks, making them pop. */
-.cell.row-warm[data-num]:not(.called):not(.latest),
-.cell.row-hot[data-num]:not(.called):not(.latest) {
-  /* The cell's own hairline grid borders would otherwise show as thin
-     pale lines sandwiched between the beige frame and the next cell.
-     Make them transparent so the frame sits flush against neighbours. */
-  border-right-color: transparent;
-  border-bottom-color: transparent;
-}
+/* Make the cell's own 1px right + bottom borders match the frame colour
+   so the thin gap between two framed cells reads as part of the frame
+   instead of showing the strip's white background through a transparent
+   border (which is what produced the thin white line). */
 .cell.row-warm[data-num]:not(.called):not(.latest) {
+  border-right-color: #f3d9a5;
+  border-bottom-color: #f3d9a5;
   box-shadow: inset 0 0 0 4px #f3d9a5;
 }
 .cell.row-hot[data-num]:not(.called):not(.latest) {
+  border-right-color: #ecc080;
+  border-bottom-color: #ecc080;
   box-shadow: inset 0 0 0 4px #ecc080;
   animation: rowHotMissPulse 1.6s ease-in-out infinite;
 }
