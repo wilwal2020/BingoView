@@ -466,11 +466,11 @@ header .conn-label { margin-left: auto; }
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f0ede4;
+  background: var(--strip-id-bg, #f0ede4);
   border-right: 1px solid rgba(0, 0, 0, 0.10);
   font-size: 0.7rem;
   font-weight: 700;
-  color: #333;
+  color: var(--strip-id-fg, #333);
   writing-mode: vertical-rl;
   transform: rotate(180deg);
 }
@@ -1603,10 +1603,10 @@ let channelRef = null;
 // In connected mode the IDs are part of the host protocol; in manual mode
 // they're just labels and games can be added/removed.
 const DEFAULT_GAMES = [
-  { id: 'blue',   name: 'Spill 1', color: '#a7c8f6' },
-  { id: 'yellow', name: 'Spill 2', color: '#ffe479' },
-  { id: 'pink',   name: 'Spill 3', color: '#f9adce' },
-  { id: 'grey',   name: 'Spill 4', color: '#d6cad1' },
+  { id: 'blue',   name: 'Spill 1', color: '#a7c8f6', stripIdBg: '#1d2a55', stripIdFg: '#ffd166' },
+  { id: 'yellow', name: 'Spill 2', color: '#ffe479', stripIdBg: '#3b3a14', stripIdFg: '#ffe14a' },
+  { id: 'pink',   name: 'Spill 3', color: '#f9adce', stripIdBg: '#4a1840', stripIdFg: '#ffd1ec' },
+  { id: 'grey',   name: 'Spill 4', color: '#d6cad1', stripIdBg: '#2a2530', stripIdFg: '#ffcd9e' },
 ];
 
 // Color palette for additional manual games
@@ -3093,9 +3093,13 @@ function renderActiveGame() {
   const wrap = document.getElementById("digital-paper");
   wrap.innerHTML = "";
   wrap.classList.toggle("tappable", manualMode || manualPlayMode);
-  const gameColor = getGameColor(activeGame) || '#fff';
+  const game = getGame(activeGame) || {};
+  const gameColor = game.color || '#fff';
   wrap.style.background   = gameColor;
   wrap.style.borderColor  = gameColor;
+  // Strip-id colors follow the game palette (dark accent + gold/accent fg)
+  wrap.style.setProperty('--strip-id-bg', game.stripIdBg || '#f0ede4');
+  wrap.style.setProperty('--strip-id-fg', game.stripIdFg || '#333');
   document.getElementById("phone-pending").style.display = "none";
 
   if (gs.paperEl) {
