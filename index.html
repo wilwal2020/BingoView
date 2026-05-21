@@ -2282,6 +2282,15 @@ function initPhone() {
   document.getElementById("phone-code-input").addEventListener("keydown", e => {
     if (e.key === "Enter") document.getElementById("btn-phone-connect").click();
   });
+  // Auto-select the whole code on click/focus so the user can just tap and
+  // start typing a new one instead of having to clear it manually first.
+  // setTimeout because some mobile browsers re-position the cursor after
+  // the focus event, which would override an immediate select().
+  ['click', 'focus'].forEach(evt => {
+    document.getElementById("phone-code-input").addEventListener(evt, function () {
+      setTimeout(() => this.select(), 0);
+    });
+  });
 
   // File upload — queue photo for active game, then show pending screen
   document.getElementById("file-input").addEventListener("change", (e) => {
