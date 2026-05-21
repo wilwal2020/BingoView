@@ -453,6 +453,7 @@ header .conn-label { margin-left: auto; }
 .strip {
   display: grid;
   grid-template-columns: 28px 1fr;
+  grid-template-rows: 1fr;
   border: none;
   border-radius: 6px;
   overflow: hidden;
@@ -467,12 +468,15 @@ header .conn-label { margin-left: auto; }
   align-items: center;
   justify-content: center;
   background: var(--strip-id-bg, #f0ede4);
-  border-right: 1px solid rgba(0, 0, 0, 0.10);
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-size: 0.8rem;
+  font-weight: 800;
   color: var(--strip-id-fg, #333);
   writing-mode: vertical-rl;
   transform: rotate(180deg);
+  align-self: stretch;
+  height: 100%;
+  width: 100%;
 }
 
 .strip-grid {
