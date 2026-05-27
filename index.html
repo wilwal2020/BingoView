@@ -688,8 +688,10 @@ header .conn-label { margin-left: auto; }
 /* Game tabs strip — row of 4 selectors */
 /* Block selector row — sits above game tabs */
 .block-tabs {
-  display: flex;
-  flex-wrap: wrap;
+  /* Grid (instead of flex) so wrapped rows keep the same column widths
+     as the first row — a lone block on row 2 doesn't stretch to fill. */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
   gap: 4px;
   padding: 6px 10px 2px;
   background: #0a0a0a;
@@ -698,8 +700,7 @@ header .conn-label { margin-left: auto; }
   align-items: stretch;
 }
 .block-tab {
-  flex: 1 1 0;
-  min-width: 60px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -823,6 +824,22 @@ header .conn-label { margin-left: auto; }
   align-items: center;
   justify-content: space-between;
   flex-shrink: 0;
+}
+
+/* Big rekke banner above the bingo paper — replaces the small "Rekke X"
+   text that used to live in the status bar. Easy to see at a glance. */
+#phone-rekke-banner {
+  flex-shrink: 0;
+  text-align: center;
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 1.45rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 8px 12px 6px;
+  color: var(--gold);
+  background: #0e0e0e;
+  border-bottom: 1px solid #181818;
 }
 
 .last-called {
@@ -1257,7 +1274,6 @@ header .conn-label { margin-left: auto; }
 ══════════════════════════════════════ -->
 <div id="screen-phone" class="screen active">
   <header>
-    <div class="hdr-title">PHONE</div>
     <button id="btn-fresh-start">Nytt ark</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
     <button id="btn-bv-settings" class="bv-icon-btn" title="Lyd og vibrasjon" aria-label="Innstillinger">⚙</button>
@@ -1437,14 +1453,11 @@ header .conn-label { margin-left: auto; }
           <span class="manual-switch-pill"><span class="manual-switch-thumb"></span></span>
         </button>
       </div>
+      <div id="phone-rekke-banner">Rekke 1</div>
       <div id="paper-canvas-wrap">
         <div id="digital-paper"></div>
       </div>
       <div id="phone-status-bar">
-        <div class="last-called">
-          <span id="phone-rekke-label">Rekke 1</span>
-          <span id="phone-last-num">—</span>
-        </div>
         <div class="detected-count" id="phone-detected-count"></div>
       </div>
       <div id="phone-code-display">
@@ -3369,10 +3382,6 @@ function renderCells(gameKey) {
     latestCell = lastNum ? (gs.cellMap[lastNum] || null) : null;
   }
 
-  if (gameKey === activeGame) {
-    const last = gs.called.length ? gs.called[gs.called.length - 1] : '—';
-    document.getElementById('phone-last-num').textContent = last;
-  }
   updateProximityHighlights(gameKey);
 }
 
@@ -3526,7 +3535,6 @@ function handleManualTap(number) {
     cell.classList.add("latest");
     gs.called.push(number);
     latestCell = cell;
-    document.getElementById("phone-last-num").textContent = number;
   } else {
     // Toggle off
     gs.called.splice(idx, 1);
@@ -3542,9 +3550,6 @@ function handleManualTap(number) {
           newLastCell.classList.add("latest");
           latestCell = newLastCell;
         }
-        document.getElementById("phone-last-num").textContent = newLast;
-      } else {
-        document.getElementById("phone-last-num").textContent = "—";
       }
     }
   }
@@ -3679,8 +3684,8 @@ async function processAllPending() {
 
 function updateRekkeLabel() {
   const gs = gameState[activeGame];
-  const el = document.getElementById("phone-rekke-label");
-  if (el) el.textContent = gs.rekke.replace("Rekke","Rekke ");
+  const el = document.getElementById("phone-rekke-banner");
+  if (el) el.textContent = (gs.rekke || 'Rekke1').replace("Rekke","Rekke ");
 }
 
 // Apply a called number to a given game's state — updates DOM if that game is active
@@ -3793,9 +3798,6 @@ function handleUncalledNumber(number, game) {
         }
       }
     }
-    const lastNum = gs.called.length ? gs.called[gs.called.length - 1] : "";
-    document.getElementById("phone-last-num").textContent = lastNum;
-
     updateProximityHighlights(activeGame);
     updateRekkeLabel();
   } else {
@@ -4020,31 +4022,64 @@ function updateProximityHighlights(gameKey) {
         if (cls === "row-winner") stripHasWinner = true;
       });
     } else {
-      // Rekke2/3: pick the top N rows and evaluate their combined missing.
-      // Count DISTINCT missing numbers (same number in multiple rows = 1 call).
-      const rowsWithIdx = missingPerRow.map((m, idx) => ({ m, idx }))
-                                       .sort((a, b) => a.m - b.m);
-      const selected = rowsWithIdx.slice(0, rowsNeeded);
-      // Collect distinct missing numbers across the selected rows
-      const missingNums = new Set();
-      selected.forEach(({ idx }) => {
-        numRows[idx].forEach(c => {
-          if (!calledSet.has(c.dataset.num)) missingNums.add(c.dataset.num);
+      // Rekke 2/3: a row should be highlighted if it CAN participate in a
+      // valid winning combo at the current threshold. Brute-force every
+      // combination of `rowsNeeded` rows; mark any row that belongs to a
+      // combo whose distinct missing count ≤ warmThreshold.
+      //
+      // Each row keeps the BEST class it qualifies for across all combos
+      // it appears in (winner > hot > warm).
+      const rowMissingSets = numRows.map(cells => {
+        const set = new Set();
+        cells.forEach(c => {
+          if (!calledSet.has(c.dataset.num)) set.add(c.dataset.num);
         });
+        return set;
       });
-      const distinctMissing = missingNums.size;
 
-      if (distinctMissing > warmThreshold) return;
+      const classRank = { 'row-winner': 3, 'row-hot': 2, 'row-warm': 1 };
+      const bestClassForRow = new Array(numRows.length).fill(null);
 
-      let cls;
-      if (distinctMissing === 0)      cls = "row-winner";
-      else if (distinctMissing === 1) cls = "row-hot";
-      else                            cls = "row-warm";
+      const upgradeRow = (idx, cls) => {
+        const cur = bestClassForRow[idx];
+        if (!cur || (classRank[cls] > classRank[cur])) bestClassForRow[idx] = cls;
+      };
 
-      selected.forEach(({ idx }) => {
+      // Pick all combinations of size `rowsNeeded` from numRows.length rows
+      const combos = (n, k) => {
+        const out = [];
+        const recur = (start, picked) => {
+          if (picked.length === k) { out.push(picked.slice()); return; }
+          for (let i = start; i < n; i++) {
+            picked.push(i);
+            recur(i + 1, picked);
+            picked.pop();
+          }
+        };
+        recur(0, []);
+        return out;
+      };
+
+      combos(numRows.length, rowsNeeded).forEach(idxs => {
+        // Distinct missing numbers across this combo
+        const missing = new Set();
+        idxs.forEach(i => rowMissingSets[i].forEach(n => missing.add(n)));
+        const distinct = missing.size;
+        if (distinct > warmThreshold) return;
+
+        let cls;
+        if      (distinct === 0) cls = "row-winner";
+        else if (distinct === 1) cls = "row-hot";
+        else                     cls = "row-warm";
+
+        idxs.forEach(i => upgradeRow(i, cls));
+      });
+
+      bestClassForRow.forEach((cls, idx) => {
+        if (!cls) return;
         rowArr[idx].forEach(c => c.classList.add(cls));
+        if (cls === "row-winner") stripHasWinner = true;
       });
-      if (cls === "row-winner") stripHasWinner = true;
     }
 
     if (stripHasWinner) {
