@@ -1224,6 +1224,8 @@ header .conn-label { margin-left: auto; }
   max-width: 360px;
   width: 100%;
   text-align: center;
+  max-height: 90vh;
+  overflow-y: auto;
 }
 .share-card h3 {
   margin: 0 0 14px;
@@ -1231,6 +1233,49 @@ header .conn-label { margin-left: auto; }
   font-size: 1.4rem;
   letter-spacing: 0.06em;
   color: var(--gold);
+}
+.share-blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 14px;
+  text-align: left;
+}
+.share-block-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #131313;
+  border: 1px solid #252525;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--paper);
+  letter-spacing: 0.04em;
+  transition: background 0.12s, border-color 0.12s;
+}
+.share-block-row:hover { background: #1a1a1a; border-color: #333; }
+.share-block-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--gold);
+  margin: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.share-block-row.checked {
+  background: #1a1820;
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.share-block-row .share-block-meta {
+  font-size: 0.68rem;
+  color: var(--dim);
+  margin-left: auto;
+  font-family: var(--mono);
 }
 .share-qr {
   background: #fff;
@@ -1341,10 +1386,11 @@ header .conn-label { margin-left: auto; }
     </div>
   </div>
 
-  <!-- Share modal — QR code + compact URL -->
+  <!-- Share modal — QR code + compact URL + block selector -->
   <div id="share-overlay" class="share-overlay" style="display:none">
     <div class="share-card">
       <h3>Del bingo-ark</h3>
+      <div id="share-blocks" class="share-blocks"></div>
       <div class="share-qr"><img id="share-qr-img" alt="QR-kode"></div>
       <div id="share-url-box" class="share-url-box"></div>
       <div class="share-actions">
@@ -2240,6 +2286,43 @@ function encodeCompactPaper(games, code, userName) {
   return b64;
 }
 
+// Encode multiple blocks in a single URL. Bumps to format version 5.
+// Each blockData entry is { games, userName }.
+function encodeCompactPapers(blocksData, code) {
+  const parts = [];
+  parts.push(5); // version 5 — array of blocks
+  const codeStr = (code || '').slice(0, 10);
+  parts.push(codeStr.length);
+  for (let i = 0; i < codeStr.length; i++) parts.push(codeStr.charCodeAt(i));
+  parts.push(blocksData.length);
+  blocksData.forEach(({ games, userName }) => {
+    const nameStr = (userName || '').slice(0, 32);
+    const nameBytes = new TextEncoder().encode(nameStr).slice(0, 64);
+    parts.push(nameBytes.length);
+    for (let i = 0; i < nameBytes.length; i++) parts.push(nameBytes[i]);
+    let bitmap = 0;
+    GAME_KEYS.forEach((g, i) => { if (games[g]) bitmap |= (1 << i); });
+    parts.push(bitmap);
+    GAME_KEYS.forEach((g, i) => {
+      if (!(bitmap & (1 << i))) return;
+      const strips = games[g];
+      parts.push(strips.length);
+      strips.forEach(strip => {
+        const id = parseInt(strip.id, 10) || 0;
+        parts.push((id >> 8) & 0xFF, id & 0xFF);
+        for (let r = 0; r < 3; r++) {
+          const row = (strip.rows && strip.rows[r]) || [];
+          for (let c = 0; c < 5; c++) parts.push(Number(row[c]) || 0);
+        }
+      });
+    });
+  });
+  const bytes = new Uint8Array(parts);
+  let b64 = btoa(String.fromCharCode(...bytes));
+  b64 = b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return b64;
+}
+
 function decodeCompactPaper(b64) {
   // Restore standard base64
   let str = b64.replace(/-/g, '+').replace(/_/g, '/');
@@ -2250,43 +2333,58 @@ function decodeCompactPaper(b64) {
 
   let pos = 0;
   const version = bytes[pos++];
-  if (version !== 3 && version !== 4) return null;
+  if (![3, 4, 5].includes(version)) return null;
   const codeLen = bytes[pos++];
   let code = '';
   for (let i = 0; i < codeLen; i++) code += String.fromCharCode(bytes[pos++]);
-  // v4 adds an optional UTF-8 userName after the code
-  let userName = '';
-  if (version >= 4) {
-    const nameLen = bytes[pos++];
-    if (nameLen > 0) {
-      const nameSlice = bytes.slice(pos, pos + nameLen);
-      pos += nameLen;
-      try { userName = new TextDecoder().decode(nameSlice); } catch (e) {}
-    }
-  }
-  const bitmap = bytes[pos++];
-  const games = {};
-  GAME_KEYS.forEach((g, i) => {
-    if (!(bitmap & (1 << i))) return;
-    const stripCount = bytes[pos++];
-    const strips = [];
-    for (let s = 0; s < stripCount; s++) {
-      const id = (bytes[pos] << 8) | bytes[pos + 1]; pos += 2;
-      const rows = [];
-      for (let r = 0; r < 3; r++) {
-        const row = [];
-        for (let c = 0; c < 5; c++) { const v = bytes[pos++]; if (v) row.push(v); }
-        rows.push(row);
+
+  // Helper: read one block (name + bitmap + strips)
+  const readBlock = (hasName) => {
+    let blockName = '';
+    if (hasName) {
+      const nameLen = bytes[pos++];
+      if (nameLen > 0) {
+        const nameSlice = bytes.slice(pos, pos + nameLen);
+        pos += nameLen;
+        try { blockName = new TextDecoder().decode(nameSlice); } catch (e) {}
       }
-      strips.push({ id: String(id).padStart(4, '0'), rows });
     }
-    games[g] = strips;
-  });
-  return { code, games, userName };
+    const bitmap = bytes[pos++];
+    const games = {};
+    GAME_KEYS.forEach((g, i) => {
+      if (!(bitmap & (1 << i))) return;
+      const stripCount = bytes[pos++];
+      const strips = [];
+      for (let s = 0; s < stripCount; s++) {
+        const id = (bytes[pos] << 8) | bytes[pos + 1]; pos += 2;
+        const rows = [];
+        for (let r = 0; r < 3; r++) {
+          const row = [];
+          for (let c = 0; c < 5; c++) { const v = bytes[pos++]; if (v) row.push(v); }
+          rows.push(row);
+        }
+        strips.push({ id: String(id).padStart(4, '0'), rows });
+      }
+      games[g] = strips;
+    });
+    return { games, userName: blockName };
+  };
+
+  if (version === 5) {
+    const blockCount = bytes[pos++];
+    const blocksData = [];
+    for (let b = 0; b < blockCount; b++) blocksData.push(readBlock(true));
+    return { code, blocks: blocksData };
+  }
+  // v3/v4: single block — return as a one-entry array for unified handling
+  const single = readBlock(version >= 4);
+  return { code, blocks: [single],
+           // Keep legacy fields for any callers still expecting them
+           games: single.games, userName: single.userName };
 }
 
-function buildCompactShareUrl(games, code, userName) {
-  const encoded = encodeCompactPaper(games, code, userName);
+function buildCompactShareUrl(blocksData, code) {
+  const encoded = encodeCompactPapers(blocksData, code);
   let url = location.origin + location.pathname + '?p=' + encoded;
   if (code) url += '&c=' + encodeURIComponent(code);
   return url;
@@ -2400,30 +2498,106 @@ function initPhone() {
   });
 
   // Share paper button — compact URL + QR code modal
-  document.getElementById("btn-share-paper").addEventListener("click", () => {
-    const games = {};
-    let hasAny = false;
-    getGameIds().forEach(g => {
-      if (gameState[g] && gameState[g].strips) {
-        games[g] = gameState[g].strips;
-        hasAny = true;
-      }
-    });
-    if (!hasAny) return;
-    // Mark this block as "shared away" so the receiver becomes the
-    // owner. The sender's name input gets disabled and the host stops
-    // counting the sender's name on the merged display.
-    if (blocks[activeBlockIdx]) {
-      blocks[activeBlockIdx].sharedAway = true;
+  // Track which block indices are currently checked in the share modal.
+  let _shareSelected = new Set();
+
+  function shareableBlockIndices() {
+    // Only blocks that actually have at least one paper can be shared
+    return blocks
+      .map((blk, idx) => ({ blk, idx }))
+      .filter(({ blk }) =>
+        getGameIds().some(g => blk.gameState[g] && blk.gameState[g].strips))
+      .map(({ idx }) => idx);
+  }
+
+  function renderShareBlockList() {
+    const wrap = document.getElementById('share-blocks');
+    wrap.innerHTML = '';
+    const shareable = shareableBlockIndices();
+    if (shareable.length <= 1) {
+      // Only one block worth sharing — hide the selector entirely
+      wrap.style.display = 'none';
+      if (shareable.length === 1) _shareSelected = new Set([shareable[0]]);
+      return;
     }
+    wrap.style.display = '';
+    shareable.forEach(idx => {
+      const blk = blocks[idx];
+      const row = document.createElement('label');
+      row.className = 'share-block-row';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.dataset.idx = idx;
+      cb.checked = _shareSelected.has(idx);
+      if (cb.checked) row.classList.add('checked');
+      cb.addEventListener('change', () => {
+        if (cb.checked) { _shareSelected.add(idx); row.classList.add('checked'); }
+        else            { _shareSelected.delete(idx); row.classList.remove('checked'); }
+        // Keep sharedAway in sync with the selection so the host's name
+        // resolution stays correct as the user toggles boxes.
+        if (blocks[idx]) blocks[idx].sharedAway = cb.checked;
+        syncSharedAwayUI();
+        publishUserName();
+        saveSession();
+        regenerateShareLink();
+      });
+      const name = (blk.userName || '').trim() || ('Blokk ' + (idx + 1));
+      const gameCount = getGameIds().filter(g =>
+        blk.gameState[g] && blk.gameState[g].strips).length;
+      row.appendChild(cb);
+      const lbl = document.createElement('span');
+      lbl.textContent = name;
+      row.appendChild(lbl);
+      const meta = document.createElement('span');
+      meta.className = 'share-block-meta';
+      meta.textContent = gameCount + (gameCount === 1 ? ' ark' : ' ark');
+      row.appendChild(meta);
+      wrap.appendChild(row);
+    });
+  }
+
+  function regenerateShareLink() {
+    const overlay = document.getElementById('share-overlay');
+    if (overlay.style.display === 'none') return;
+    const selected = [..._shareSelected].sort((a, b) => a - b);
+    if (!selected.length) {
+      document.getElementById('share-url-box').textContent = 'Velg minst én blokk';
+      document.getElementById('share-url-box').dataset.url = '';
+      document.getElementById('share-qr-img').src = '';
+      return;
+    }
+    const blocksData = selected.map(idx => {
+      const blk = blocks[idx];
+      const games = {};
+      getGameIds().forEach(g => {
+        if (blk.gameState[g] && blk.gameState[g].strips) {
+          games[g] = blk.gameState[g].strips;
+        }
+      });
+      return { games, userName: (blk.userName || '').trim() };
+    });
+    const url = buildCompactShareUrl(blocksData, sessionCode);
+    showShareModal(url);
+  }
+
+  document.getElementById("btn-share-paper").addEventListener("click", () => {
+    const shareable = shareableBlockIndices();
+    if (!shareable.length) return;
+    // Default selection: the active block (if shareable). Otherwise first.
+    if (shareable.includes(activeBlockIdx)) {
+      _shareSelected = new Set([activeBlockIdx]);
+    } else {
+      _shareSelected = new Set([shareable[0]]);
+    }
+    // Mark every selected block as "shared away" (re-marks on every share)
+    _shareSelected.forEach(idx => {
+      if (blocks[idx]) blocks[idx].sharedAway = true;
+    });
     syncSharedAwayUI();
     publishUserName();
     saveSession();
-    // Include the active block's name so the recipient sees the same label.
-    // Use the raw stored name (no "(Blokk N)" suffix — that's host-side noise).
-    const name = getStoredUserName(activeBlockIdx) || '';
-    const url = buildCompactShareUrl(games, sessionCode, name);
-    showShareModal(url);
+    renderShareBlockList();
+    regenerateShareLink();
   });
 
   // Share modal controls
@@ -2466,46 +2640,58 @@ function initPhone() {
   if (compactParam) {
     try {
       const result = decodeCompactPaper(compactParam);
-      if (result && result.games) {
-        // If the currently-active block already has any paper, spawn a new
-        // block for the import instead of replacing the existing paper.
-        // This lets one person collect multiple shared blocks without
-        // losing earlier ones.
-        const currentHasPapers = getGameIds().some(g =>
-          blocks[activeBlockIdx] &&
-          blocks[activeBlockIdx].gameState[g] &&
-          blocks[activeBlockIdx].gameState[g].strips
-        );
-        if (currentHasPapers) {
-          // Reuse addBlock() logic but skip its toast (we show our own)
-          blocks.push(createEmptyBlock());
-          registerBlockPresence(blocks.length - 1);
-          publishUserName();
-          activeBlockIdx = blocks.length - 1;
-          gameState = blocks[activeBlockIdx].gameState;
-        }
-        Object.entries(result.games).forEach(([g, strips]) => {
-          if (gameState[g] && Array.isArray(strips)) {
-            gameState[g].strips = strips;
-            buildPaperForGame(g);
+      if (result && Array.isArray(result.blocks) && result.blocks.length) {
+        // The share format always exposes a `blocks` array (single-block
+        // v3/v4 are normalised to a one-entry array). Iterate it and
+        // import each as its own block. The first block fills the current
+        // active block if empty; subsequent blocks always get a new slot.
+        let totalArk = 0;
+        result.blocks.forEach((entry, bIdx) => {
+          const games = entry.games || {};
+          const gameCount = Object.keys(games).length;
+          if (!gameCount) return;
+          totalArk += gameCount;
+
+          // First import block: fill active block if empty, else new block.
+          // Later import blocks: always new block.
+          const activeIsEmpty = !getGameIds().some(g =>
+            blocks[activeBlockIdx] &&
+            blocks[activeBlockIdx].gameState[g] &&
+            blocks[activeBlockIdx].gameState[g].strips
+          );
+          if (bIdx === 0 && activeIsEmpty) {
+            // Reuse the current empty active block
+          } else {
+            blocks.push(createEmptyBlock());
+            registerBlockPresence(blocks.length - 1);
+            activeBlockIdx = blocks.length - 1;
+            gameState = blocks[activeBlockIdx].gameState;
+          }
+          Object.entries(games).forEach(([g, strips]) => {
+            if (gameState[g] && Array.isArray(strips)) {
+              gameState[g].strips = strips;
+              buildPaperForGame(g);
+            }
+          });
+          if (entry.userName && entry.userName.trim()) {
+            const trimmed = entry.userName.trim().slice(0, 24);
+            if (blocks[activeBlockIdx]) {
+              blocks[activeBlockIdx].userName = trimmed;
+            }
           }
         });
-        // Apply shared block name to the (new or current) active block
-        if (result.userName && result.userName.trim()) {
-          const trimmed = result.userName.trim().slice(0, 24);
-          if (blocks[activeBlockIdx]) {
-            blocks[activeBlockIdx].userName = trimmed;
-          }
-          const nameInput = document.getElementById("user-name-input");
-          if (nameInput) nameInput.value = trimmed;
-        }
+        // Update name input to show the active block's name
+        const nameInput = document.getElementById("user-name-input");
+        if (nameInput) nameInput.value = blocks[activeBlockIdx].userName || '';
+        publishUserName();
         showGameTabs();
         refreshBlockTabs();
         renderActiveGame();
-        const count = Object.keys(result.games).length;
+        const nBlocks = result.blocks.length;
         toast(
-          (currentHasPapers ? 'Lagt til som ny blokk — ' : '')
-          + `${count} ark importert!`,
+          nBlocks > 1
+            ? `${nBlocks} blokker (${totalArk} ark) importert!`
+            : `${totalArk} ark importert!`,
           'ok', 4000);
         // Auto-connect if session code provided
         const code = (result.code || codeParam || '').trim().toUpperCase();
