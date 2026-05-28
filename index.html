@@ -688,10 +688,12 @@ header .conn-label { margin-left: auto; }
 /* Game tabs strip — row of 4 selectors */
 /* Block selector row — sits above game tabs */
 .block-tabs {
-  /* Grid (instead of flex) so wrapped rows keep the same column widths
-     as the first row — a lone block on row 2 doesn't stretch to fill. */
+  /* Fixed-width grid columns so every block has the SAME size whether it's
+     on row 1 or wrapped to row 2. When row 1 fills up, additional blocks
+     wrap to a new row at the same column width. */
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  grid-template-columns: repeat(auto-fill, 80px);
+  justify-content: start;
   gap: 4px;
   padding: 6px 10px 2px;
   background: #0a0a0a;
@@ -2557,10 +2559,11 @@ function initPhone() {
   }
 
   function regenerateShareLink() {
-    const overlay = document.getElementById('share-overlay');
-    if (overlay.style.display === 'none') return;
     const selected = [..._shareSelected].sort((a, b) => a - b);
     if (!selected.length) {
+      // Still open the modal so the user can see the empty state + list
+      const overlay = document.getElementById('share-overlay');
+      overlay.style.display = 'flex';
       document.getElementById('share-url-box').textContent = 'Velg minst én blokk';
       document.getElementById('share-url-box').dataset.url = '';
       document.getElementById('share-qr-img').src = '';
@@ -4208,13 +4211,13 @@ function updateProximityHighlights(gameKey) {
         if (cls === "row-winner") stripHasWinner = true;
       });
     } else {
-      // Rekke 2/3: a row should be highlighted if it CAN participate in a
-      // valid winning combo at the current threshold. Brute-force every
-      // combination of `rowsNeeded` rows; mark any row that belongs to a
-      // combo whose distinct missing count ≤ warmThreshold.
-      //
-      // Each row keeps the BEST class it qualifies for across all combos
-      // it appears in (winner > hot > warm).
+      // Rekke 2/3: brute-force every combination of `rowsNeeded` rows and
+      // find the BEST distinct-missing count any combo achieves. Highlight
+      // only rows that belong to a combo at that best level — if one combo
+      // is "hot" (1 missing) and another "warm" (2 missing), the warm one
+      // is suppressed so the user's eye stays on the closest path to win.
+      // Multiple combos at the SAME best level still all light up
+      // (e.g. two equally-warm combos both show).
       const rowMissingSets = numRows.map(cells => {
         const set = new Set();
         cells.forEach(c => {
@@ -4223,15 +4226,6 @@ function updateProximityHighlights(gameKey) {
         return set;
       });
 
-      const classRank = { 'row-winner': 3, 'row-hot': 2, 'row-warm': 1 };
-      const bestClassForRow = new Array(numRows.length).fill(null);
-
-      const upgradeRow = (idx, cls) => {
-        const cur = bestClassForRow[idx];
-        if (!cur || (classRank[cls] > classRank[cur])) bestClassForRow[idx] = cls;
-      };
-
-      // Pick all combinations of size `rowsNeeded` from numRows.length rows
       const combos = (n, k) => {
         const out = [];
         const recur = (start, picked) => {
@@ -4246,26 +4240,37 @@ function updateProximityHighlights(gameKey) {
         return out;
       };
 
-      combos(numRows.length, rowsNeeded).forEach(idxs => {
-        // Distinct missing numbers across this combo
+      // Pass 1: find the lowest distinct-missing count (best combo level)
+      let bestDistinct = Infinity;
+      const allCombos = combos(numRows.length, rowsNeeded);
+      allCombos.forEach(idxs => {
         const missing = new Set();
         idxs.forEach(i => rowMissingSets[i].forEach(n => missing.add(n)));
         const distinct = missing.size;
-        if (distinct > warmThreshold) return;
+        if (distinct < bestDistinct) bestDistinct = distinct;
+      });
 
+      if (bestDistinct <= warmThreshold) {
         let cls;
-        if      (distinct === 0) cls = "row-winner";
-        else if (distinct === 1) cls = "row-hot";
-        else                     cls = "row-warm";
+        if      (bestDistinct === 0) cls = "row-winner";
+        else if (bestDistinct === 1) cls = "row-hot";
+        else                         cls = "row-warm";
 
-        idxs.forEach(i => upgradeRow(i, cls));
-      });
+        // Pass 2: collect every row that appears in a combo at the BEST level
+        const rowsToHighlight = new Set();
+        allCombos.forEach(idxs => {
+          const missing = new Set();
+          idxs.forEach(i => rowMissingSets[i].forEach(n => missing.add(n)));
+          if (missing.size === bestDistinct) {
+            idxs.forEach(i => rowsToHighlight.add(i));
+          }
+        });
 
-      bestClassForRow.forEach((cls, idx) => {
-        if (!cls) return;
-        rowArr[idx].forEach(c => c.classList.add(cls));
+        rowsToHighlight.forEach(idx => {
+          rowArr[idx].forEach(c => c.classList.add(cls));
+        });
         if (cls === "row-winner") stripHasWinner = true;
-      });
+      }
     }
 
     if (stripHasWinner) {
