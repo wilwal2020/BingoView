@@ -688,11 +688,13 @@ header .conn-label { margin-left: auto; }
 /* Game tabs strip — row of 4 selectors */
 /* Block selector row — sits above game tabs */
 .block-tabs {
-  /* Always exactly 5 columns. Every block is 1/5 of the row width and a
-     lone block on row 2 stays at 1/5 (its 4 sibling columns are empty).
-     Predictable wrap point: blocks #1-#5 in row 1, #6 wraps to row 2, etc. */
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* Flex wrap with every block locked to a fixed 80px width. No stretching
+     ever — when the row fills up, the next block wraps to a new row at
+     the SAME 80px width. Width is identical whether the block sits on
+     row 1 or row 2+. */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-start;
   gap: 4px;
   padding: 6px 10px 2px;
   background: #0a0a0a;
@@ -701,6 +703,9 @@ header .conn-label { margin-left: auto; }
   align-items: stretch;
 }
 .block-tab {
+  flex: 0 0 80px;
+  width: 80px;
+  box-sizing: border-box;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -741,7 +746,9 @@ header .conn-label { margin-left: auto; }
   transition: background 0.3s, color 0.3s;
 }
 .block-tab-add {
-  flex-shrink: 0;
+  flex: 0 0 80px;
+  width: 80px;
+  box-sizing: border-box;
   background: transparent;
   border: 1px dashed #333;
   color: #555;
