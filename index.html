@@ -688,12 +688,11 @@ header .conn-label { margin-left: auto; }
 /* Game tabs strip — row of 4 selectors */
 /* Block selector row — sits above game tabs */
 .block-tabs {
-  /* Fixed-width grid columns so every block has the SAME size whether it's
-     on row 1 or wrapped to row 2. When row 1 fills up, additional blocks
-     wrap to a new row at the same column width. */
+  /* Always exactly 5 columns. Every block is 1/5 of the row width and a
+     lone block on row 2 stays at 1/5 (its 4 sibling columns are empty).
+     Predictable wrap point: blocks #1-#5 in row 1, #6 wraps to row 2, etc. */
   display: grid;
-  grid-template-columns: repeat(auto-fill, 80px);
-  justify-content: start;
+  grid-template-columns: repeat(5, 1fr);
   gap: 4px;
   padding: 6px 10px 2px;
   background: #0a0a0a;
