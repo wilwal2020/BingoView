@@ -1444,6 +1444,7 @@ header .conn-label { margin-left: auto; }
                autocomplete="off" autocorrect="off" spellcheck="false"
                inputmode="text">
         <button id="btn-phone-connect" class="btn-phone-connect">Koble til</button>
+        <button id="btn-prep-offline" class="btn-manual-play" title="Skann ark nå, koble til bingosiden senere">Forbered uten kode</button>
         <div class="connect-divider">eller</div>
         <button id="btn-manual-play" class="btn-manual-play">Spill manuelt</button>
       </div>
@@ -1516,10 +1517,11 @@ header .conn-label { margin-left: auto; }
       </div>
       <div id="phone-code-display">
         <div>
-          <div class="code-label">Tilkoblet sesjon</div>
+          <div class="code-label" id="phone-code-label">Tilkoblet sesjon</div>
           <div style="display:flex;align-items:center;gap:10px;">
             <div class="code-value" id="phone-code-value">——</div>
             <button id="btn-share-code" title="Del kode" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.06em;padding:4px 9px;cursor:pointer;text-transform:uppercase;">Del</button>
+            <button id="btn-go-connect" title="Skriv inn kode for å koble til" style="display:none;background:var(--gold);color:var(--ink);border:none;border-radius:6px;font-family:var(--display);font-size:0.75rem;letter-spacing:0.06em;padding:5px 11px;cursor:pointer;text-transform:uppercase;">Koble til</button>
           </div>
         </div>
         <div class="conn-label">
@@ -2069,8 +2071,9 @@ const MANUAL_KEY = 'bv_paper_manual';
 
 function saveSession() {
   if (manualMode) return saveManualSession();
-  if (!sessionCode) return;
-  // Save all blocks
+  // Save all blocks. When connected uses bv_paper_<code>; when prepping
+  // without a code yet falls back to bv_paper_offline so a refresh doesn't
+  // wipe the user's scanned blocks.
   const data = { version: 2, activeBlockIdx, blocks: [] };
   blocks.forEach(blk => {
     const blkData = { _userName: blk.userName || '', _sharedAway: !!blk.sharedAway };
@@ -2079,13 +2082,18 @@ function saveSession() {
     });
     data.blocks.push(blkData);
   });
-  try { localStorage.setItem('bv_paper_' + sessionCode, JSON.stringify(data)); } catch(e) {}
+  const key = sessionCode ? ('bv_paper_' + sessionCode) : 'bv_paper_offline';
+  try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
 }
 
 function restoreSession() {
-  if (!sessionCode) return false;
   let raw;
-  try { raw = localStorage.getItem('bv_paper_' + sessionCode); } catch(e) { return false; }
+  try {
+    if (sessionCode) raw = localStorage.getItem('bv_paper_' + sessionCode);
+    // Fall back to the offline-prep cache so a connect-after-prep keeps
+    // the user's scanned blocks
+    if (!raw) raw = localStorage.getItem('bv_paper_offline');
+  } catch(e) { return false; }
   if (!raw) return false;
   const saved = JSON.parse(raw);
   let any = false;
@@ -2419,6 +2427,55 @@ function showShareModal(url) {
   overlay.style.display = 'flex';
 }
 
+// Offline-prep mode: lets the user scan blocks before connecting to the
+// bingo site. The phone-code-display bar is repurposed to show
+// "Ikke tilkoblet — Koble til" until the user enters a code.
+let _offlinePrepMode = false;
+function enterOfflinePrep() {
+  _offlinePrepMode = true;
+  document.getElementById("phone-connect").style.display = "none";
+  // Restore any previously prepped blocks
+  const restored = restoreSession();
+  if (restored) {
+    showGameTabs();
+    refreshBlockTabs();
+    renderActiveGame();
+    syncSharedAwayUI();
+    document.getElementById("phone-paper").style.display = "flex";
+    document.getElementById("phone-upload").style.display = "none";
+  } else {
+    document.getElementById("phone-upload").style.display = "flex";
+    document.getElementById("phone-paper").style.display = "none";
+  }
+  // Repurpose the code-display bar to show the disconnected state +
+  // a "Koble til" button so the user can connect when ready
+  document.getElementById("phone-code-display").style.display = "flex";
+  document.getElementById("phone-code-label").textContent = "Ikke tilkoblet";
+  document.getElementById("phone-code-value").textContent = "—";
+  document.getElementById("btn-share-code").style.display = "none";
+  document.getElementById("btn-go-connect").style.display = "block";
+  setConnStatus("idle", "Forbereder offline");
+  updateUploadTitle();
+  refreshGameTabs();
+}
+function exitOfflinePrep() {
+  _offlinePrepMode = false;
+  // Hide every step except the connect screen and put the user back
+  document.getElementById("phone-upload").style.display = "none";
+  document.getElementById("phone-paper").style.display = "none";
+  document.getElementById("phone-pending").style.display = "none";
+  document.getElementById("phone-code-display").style.display = "none";
+  document.getElementById("phone-connect").style.display = "flex";
+  // Reset the labels back so they don't leak into a real connection
+  document.getElementById("phone-code-label").textContent = "Tilkoblet sesjon";
+  document.getElementById("btn-go-connect").style.display = "none";
+  // Pre-fill any previously-used code so they can just hit Enter
+  try {
+    const lastCode = localStorage.getItem("bv_last_code");
+    if (lastCode) document.getElementById("phone-code-input").value = lastCode;
+  } catch (e) {}
+}
+
 function initPhone() {
   // Show the code-entry screen first
   document.getElementById("phone-connect").style.display = "flex";
@@ -2447,6 +2504,17 @@ function initPhone() {
     document.getElementById("phone-code-input").addEventListener(evt, function () {
       setTimeout(() => this.select(), 0);
     });
+  });
+
+  // "Forbered uten kode" — drop straight into the upload/paper UI so the
+  // user can scan blocks before the host has started the bingo site. When
+  // they're ready to connect they click "Koble til" in the status bar
+  // (which just goes back to the connect screen with their data intact).
+  document.getElementById("btn-prep-offline").addEventListener("click", () => {
+    enterOfflinePrep();
+  });
+  document.getElementById("btn-go-connect").addEventListener("click", () => {
+    exitOfflinePrep();
   });
 
   // File upload — queue photo for active game, then show pending screen.
@@ -3016,11 +3084,19 @@ async function connectPhone(code) {
 
   // Update UI
   document.getElementById("phone-code-value").textContent = code;
+  document.getElementById("phone-code-label").textContent = "Tilkoblet sesjon";
+  document.getElementById("btn-go-connect").style.display = "none";
   document.getElementById("phone-connect").style.display = "none";
   document.getElementById("btn-fresh-start").style.display = "block";
   document.getElementById("btn-share-code").style.display  = "block";
   const _nameRow = document.getElementById("user-name-row");
   if (_nameRow) _nameRow.style.display = "flex";
+  // Reset the offline-prep flag and clear its cache so it doesn't
+  // override a future fresh session on this device.
+  _offlinePrepMode = false;
+  try { localStorage.removeItem('bv_paper_offline'); } catch(e) {}
+  // Save current state under the proper session-coded key
+  saveSession();
 
   // Restore any saved paper data for this session
   const restored = restoreSession();
