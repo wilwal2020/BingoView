@@ -3022,24 +3022,35 @@ function initPhone() {
     document.getElementById("phone-code-input").value = code;
     history.replaceState(null, '', location.pathname);
     connectPhone(code);
+  } else if (lastCode && lastCode.trim().length >= 4
+             && localStorage.getItem('bv_paper_' + lastCode.trim().toUpperCase())) {
+    // Auto-reconnect after a refresh: a last-used code WITH saved paper data
+    // means a session was in progress — reconnect so the blocks reappear
+    // without any taps. Quiet: if the host is gone (bingo night over), just
+    // land on the normal connect screen without error toasts.
+    connectPhone(lastCode.trim().toUpperCase(), { quiet: true });
   }
 
   refreshGameTabs();
   updateUploadTitle();
 }
 
-async function connectPhone(code) {
+// opts.quiet — used by the auto-reconnect on page load: failures show no
+// error toasts (the host simply not running anymore is normal, not an error).
+async function connectPhone(code, opts = {}) {
   setConnStatus("connecting", "Kobler til\u2026");
 
   // Verify the code is valid — an iPad host must be live on this channel
   try {
     const hostSnap = await db.ref('bingoview/' + code + '/host').once('value');
     if (!hostSnap.exists()) {
+      if (opts.quiet) { setConnStatus("idle", "Ikke tilkoblet"); return; }
       setConnStatus("error", "Ugyldig kode");
       toast("Ingen aktiv bingo-sesjon med den koden", "err", 4000);
       return;
     }
   } catch(err) {
+    if (opts.quiet) { setConnStatus("idle", "Ikke tilkoblet"); return; }
     setConnStatus("error", "Tilkoblingsfeil");
     toast("Kunne ikke nå serveren", "err", 4000);
     return;
@@ -3091,14 +3102,20 @@ async function connectPhone(code) {
   document.getElementById("btn-share-code").style.display  = "block";
   const _nameRow = document.getElementById("user-name-row");
   if (_nameRow) _nameRow.style.display = "flex";
-  // Reset the offline-prep flag and clear its cache so it doesn't
-  // override a future fresh session on this device.
   _offlinePrepMode = false;
-  try { localStorage.removeItem('bv_paper_offline'); } catch(e) {}
-  // Save current state under the proper session-coded key
-  saveSession();
 
-  // Restore any saved paper data for this session
+  // If memory holds blocks (the offline-prep flow), persist them under the
+  // session-coded key FIRST so they win over any stale data for this code.
+  // On a plain page refresh memory is empty — skipping the save here is
+  // what keeps the previously stored blocks from being overwritten before
+  // restoreSession() can read them back.
+  const hasInMemoryPaper = blocks.some(blk =>
+    getGameIds().some(g => blk.gameState[g] && blk.gameState[g].strips));
+  if (hasInMemoryPaper) saveSession();
+
+  // Restore saved paper data: bv_paper_<code> first, falling back to the
+  // offline-prep cache (covers prep → refresh → connect, where memory is
+  // empty and nothing has been saved under this code yet).
   const restored = restoreSession();
   if (restored) {
     showGameTabs();
@@ -3110,6 +3127,12 @@ async function connectPhone(code) {
     publishAllStripsToHost();
   } else {
     document.getElementById("phone-upload").style.display = "flex";
+  }
+  // State (if any) now lives under the session-coded key; drop the
+  // offline-prep cache so it can't override a future fresh session.
+  if (restored || hasInMemoryPaper) {
+    saveSession();
+    try { localStorage.removeItem('bv_paper_offline'); } catch(e) {}
   }
   refreshGameTabs();
   updateUploadTitle();
