@@ -535,6 +535,26 @@ header .conn-label { margin-left: auto; }
   box-shadow: 0 0 14px rgba(155,122,255,0.6);
   color: #fff;
 }
+/* Jackpot marker (game 4 only) — a gold ring + ⭐ badge. Deliberately NOT a
+   solid fill so it can't be mistaken for a called/filled-in number. The
+   inset ring + outer glow keep it readable even if the cell is also called. */
+.cell.jackpot {
+  background: #fff;
+  color: #b8860b;
+  box-shadow: inset 0 0 0 3px #f5c518, 0 0 12px rgba(245,197,24,0.75);
+  z-index: 3;
+}
+.cell.jackpot::after {
+  content: "★";
+  position: absolute;
+  top: -6px;
+  right: -4px;
+  font-size: 0.8rem;
+  line-height: 1;
+  color: #f5c518;
+  text-shadow: 0 0 3px rgba(0,0,0,0.5);
+  z-index: 4;
+}
 /* "Markér nye" toggle — reuses the manual-switch slider style but
    tinted purple so it's visually distinct from "Manuell trykking". */
 .manual-switch-away.active {
@@ -1452,6 +1472,10 @@ header .conn-label { margin-left: auto; }
 
     <!-- Step 1: Upload -->
     <div id="phone-upload">
+      <button id="btn-finish-scanning" type="button"
+              style="display:none;width:100%;margin-bottom:12px;background:var(--gold);color:#000;border:none;border-radius:8px;padding:11px;font-size:0.95rem;font-weight:700;cursor:pointer;">
+        ✓ Ferdig — vis arkene mine
+      </button>
       <div class="upload-zone">
         <input type="file" id="file-input" accept="image/*" capture="environment">
         <div class="up-icon">📄</div>
@@ -1751,6 +1775,7 @@ let latestCell = null;            // last "latest"-highlighted cell in the activ
 let awayMode = false;             // "Borte" toggle: numbers called now get a purple marker
 const pendingPhotos = {};         // gameKey → File queued for processing
 let resetTs = 0;                  // callLog entries with ts ≤ resetTs are ignored (pre-reset)
+let jackpotNum = null;            // jackpot number (game 4 / grey), broadcast by the host
 let sessionCode = null;           // code used to connect — key for localStorage
 let phoneId = null;               // assigned in connectPhone — used when publishing papers
 
@@ -2527,6 +2552,7 @@ function initPhone() {
       toast("Vent til den pågående skanningen er ferdig", "warn", 3000);
     }
   });
+  document.getElementById("btn-finish-scanning").addEventListener("click", finishScanning);
   document.getElementById("file-input").addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -2716,6 +2742,20 @@ function initPhone() {
 
   if (compactParam) {
     try {
+      // If the recipient already has a saved session for the target code,
+      // load it FIRST so a shared block is ADDED to their existing blocks
+      // instead of replacing everything. Without this, the import populates
+      // memory with only the new block and connectPhone then saves that over
+      // the stored session, losing the blocks they already had.
+      const targetCode = (codeParam || '').trim().toUpperCase();
+      if (targetCode) {
+        try {
+          if (localStorage.getItem('bv_paper_' + targetCode)) {
+            sessionCode = targetCode;
+            restoreSession();
+          }
+        } catch(e) {}
+      }
       const result = decodeCompactPaper(compactParam);
       if (result && Array.isArray(result.blocks) && result.blocks.length) {
         // The share format always exposes a `blocks` array (single-block
@@ -3169,6 +3209,16 @@ async function connectPhone(code, opts = {}) {
     const data = snap.val();
     if (!data) return;
     applyRemoteState(data.game, data.rekke);
+  });
+
+  // Jackpot number (game 4 / grey) — host broadcasts it; re-paint so the
+  // grey paper shows the marker.
+  channelRef.child('jackpot').on('value', (snap) => {
+    const data = snap.val();
+    const n = data && data.number != null ? Number(data.number) : null;
+    if (n === jackpotNum) return;
+    jackpotNum = n;
+    if (gameState.grey && gameState.grey.cellMap) renderCells('grey');
   });
 
   // Reset events — ignore stale events that predate this connection
@@ -3648,6 +3698,10 @@ function renderCells(gameKey) {
   const prevLatestNum = gs._prevLatestNum;
   const latestChanged = (prevLatestNum !== lastNum);
 
+  // Jackpot only applies to game 4 (grey). It's a marker, not a "called"
+  // number — keep it distinct so it's not mistaken for a filled-in cell.
+  const jackpotStr = (gameKey === 'grey' && jackpotNum != null) ? String(jackpotNum) : null;
+
   Object.entries(gs.cellMap).forEach(([numStr, cell]) => {
     setClass(cell, 'latest',      numStr === lastNum);
     setClass(cell, 'called',      calledSet.has(numStr));
@@ -3655,6 +3709,7 @@ function renderCells(gameKey) {
     setClass(cell, 'hint-red',    numStr === hintRedNum);
     setClass(cell, 'hint-yellow', hintYellowSet.has(numStr));
     setClass(cell, 'wrong',       wrongSet.has(numStr));
+    setClass(cell, 'jackpot',     numStr === jackpotStr);
     // Always strip latest-fresh — only the truly new latest gets it back
     setClass(cell, 'latest-fresh', false);
   });
@@ -3904,6 +3959,34 @@ function updateUploadTitle() {
     title.textContent = `Scan Paper — ${getGameName(activeGame)}${blockLabel}`;
   }
   sub.textContent = "Tap to photograph the bingo paper for the active game";
+
+  // "Ferdig" shortcut — only meaningful once at least one block somewhere
+  // already has a scanned/generated paper, so the user can dismiss the scan
+  // view and jump to their papers without scanning the current empty slot.
+  const finishBtn = document.getElementById("btn-finish-scanning");
+  if (finishBtn) {
+    const anyPaper = blocks.some(blk =>
+      getGameIds().some(g => blk.gameState[g] && blk.gameState[g].strips));
+    finishBtn.style.display = anyPaper ? "block" : "none";
+  }
+}
+
+// Leave the scan view and show the user's papers. If the active block has no
+// paper, switch to the first block that does. switchBlock/renderActiveGame
+// hide the upload view when a paper exists.
+function finishScanning() {
+  const activeHasPaper = getGameIds().some(g =>
+    gameState[g] && gameState[g].strips);
+  if (activeHasPaper) {
+    document.getElementById("phone-upload").style.display = "none";
+    renderActiveGame();
+    return;
+  }
+  const targetBlock = blocks.findIndex(blk =>
+    getGameIds().some(g => blk.gameState[g] && blk.gameState[g].strips));
+  if (targetBlock >= 0) {
+    switchBlock(targetBlock);
+  }
 }
 
 function showPendingScreen() {
