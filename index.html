@@ -1887,8 +1887,9 @@ function refreshBlockTabs() {
   wrap.style.display = "flex";
   wrap.innerHTML = "";
 
-  // Only render individual block tabs when there are 2+ blocks
-  if (blocks.length > 1) {
+  // Render the block tab(s) whenever there's at least one block, so the
+  // block name and remaining-count badge stay visible even with a single block
+  if (blocks.length >= 1) {
     blocks.forEach((blk, idx) => {
       const btn = document.createElement("button");
       btn.className = "block-tab" + (idx === activeBlockIdx ? " active" : "");
