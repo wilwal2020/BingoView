@@ -1480,25 +1480,32 @@ header .conn-label { margin-left: auto; }
       <div class="upload-zone">
         <input type="file" id="file-input" accept="image/*" capture="environment">
         <div class="up-icon">📄</div>
-        <h3 id="upload-title">Scan Paper</h3>
-        <p id="upload-sub">Tap to photograph the bingo paper for the active game</p>
+        <h3 id="upload-title">Skann ark</h3>
+        <p id="upload-sub">Trykk for å ta bilde av bingoarket for det aktive spillet</p>
       </div>
       <div class="upload-or">eller</div>
       <button id="btn-generate-paper" class="pending-btn pending-btn-secondary" style="width:100%;font-size:0.95rem;">
         🎲 Generer tilfeldig ark
       </button>
       <div class="apikey-row">
-        <label class="apikey-label">Anthropic API Key</label>
+        <label class="apikey-label">Anthropic API-nøkkel</label>
         <input type="password" id="apikey-input" class="apikey-input"
                placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
-        <p class="apikey-hint">Stored locally, never sent anywhere except Anthropic</p>
+        <p class="apikey-hint">Lagres kun lokalt på telefonen og sendes bare til Anthropic</p>
+        <label class="apikey-label" style="margin-top:10px;display:block;">Skannemodell</label>
+        <select id="scan-model-select" class="apikey-input" style="cursor:pointer;">
+          <option value="claude-opus-4-8">Opus 4.8 — mest nøyaktig</option>
+          <option value="claude-sonnet-5">Sonnet 5 — rask og nøyaktig</option>
+          <option value="claude-haiku-4-5">Haiku 4.5 — raskest og billigst</option>
+        </select>
+        <p class="apikey-hint">Velg Sonnet 5 for raskere skanning med fortsatt høy treffsikkerhet</p>
       </div>
     </div>
 
     <!-- Step 2: Processing -->
     <div id="phone-processing">
       <div class="spinner"></div>
-      <div class="proc-label" id="proc-label">Reading numbers…</div>
+      <div class="proc-label" id="proc-label">Leser tall…</div>
     </div>
 
     <!-- Persistent scan badge shown while background OCR is in progress.
@@ -1707,6 +1714,14 @@ function toast(msg, type = "", dur = 2500) {
 // SHARED CHANNEL STATE
 // ════════════════════════════════════
 let channelRef = null;
+
+// connectPhone can run more than once (quiet auto-reconnect on load, then a
+// manual connect — or a new code). Firebase stacks .on() handlers, so every
+// listener registers a detach fn here and gets torn down before the next
+// connect; the generation counter guards against handlers that were attached
+// asynchronously and missed the teardown.
+let _channelDetachFns = [];
+let _connGeneration = 0;
 
 
 // ════════════════════════════════════
@@ -2122,7 +2137,9 @@ function restoreSession() {
     if (!raw) raw = localStorage.getItem('bv_paper_offline');
   } catch(e) { return false; }
   if (!raw) return false;
-  const saved = JSON.parse(raw);
+  // A corrupt entry must not break the whole connect flow
+  let saved;
+  try { saved = JSON.parse(raw); } catch(e) { return false; }
   let any = false;
 
   // Handle old format (flat single-block object without version field)
@@ -3036,6 +3053,17 @@ function initPhone() {
   const lastCode = localStorage.getItem("bv_last_code");
   if (lastCode) document.getElementById("phone-code-input").value = lastCode;
 
+  // Scan model picker — persisted so the choice survives reloads
+  const modelSel = document.getElementById("scan-model-select");
+  if (modelSel) {
+    const savedModel = localStorage.getItem("bv_scanModel");
+    if (savedModel) modelSel.value = savedModel;
+    if (!modelSel.value) modelSel.value = "claude-opus-4-8";
+    modelSel.addEventListener("change", () => {
+      try { localStorage.setItem("bv_scanModel", modelSel.value); } catch (e) {}
+    });
+  }
+
   // User name input — per-block name, persisted and republished on edit.
   // Debounced so rapid keystrokes don't spam Firebase writes.
   const nameInput = document.getElementById("user-name-input");
@@ -3098,6 +3126,19 @@ async function connectPhone(code, opts = {}) {
     return;
   }
 
+  // Tear down listeners from any previous connection (see _channelDetachFns)
+  _channelDetachFns.forEach(fn => { try { fn(); } catch(e) {} });
+  _channelDetachFns = [];
+  const gen = ++_connGeneration;
+
+  // Switching to a DIFFERENT code: drop our presence on the old channel so
+  // the old host doesn't keep showing this phone as online.
+  if (channelRef && sessionCode && sessionCode !== code && phoneId) {
+    blocks.forEach((_, bIdx) => {
+      try { channelRef.child('phones/' + blockPhoneId(bIdx)).remove(); } catch(e) {}
+    });
+  }
+
   manualMode = false;
   document.getElementById("rekke-buttons").style.display = "none";
   document.getElementById("phone-code-display").style.display = "flex";
@@ -3123,7 +3164,9 @@ async function connectPhone(code, opts = {}) {
   phoneId = storedPhoneId;
   const presenceRef = channelRef.child('phones/' + phoneId);
 
-  db.ref('.info/connected').on('value', (snap) => {
+  const infoRef = db.ref('.info/connected');
+  const infoHandler = (snap) => {
+    if (gen !== _connGeneration) return;  // stale connection
     if (!snap.val()) return;          // offline — nothing to do
     presenceRef.onDisconnect().remove();
     // Register disconnect handlers for ALL block virtual phones
@@ -3133,7 +3176,9 @@ async function connectPhone(code, opts = {}) {
     publishAllStripsToHost();
     // Persist the name in papers_meta so it survives disconnect
     publishUserName();
-  });
+  };
+  infoRef.on('value', infoHandler);
+  _channelDetachFns.push(() => infoRef.off('value', infoHandler));
 
   // Update UI
   document.getElementById("phone-code-value").textContent = code;
@@ -3185,52 +3230,73 @@ async function connectPhone(code, opts = {}) {
   // Primary real-time sync: full called list per game from main site.
   // Fires immediately on connect (catches up), then on every call/undo.
   getGameIds().forEach(g => {
-    channelRef.child('callState/' + g).on('value', (snap) => {
+    const csRef = channelRef.child('callState/' + g);
+    const csHandler = (snap) => {
+      if (gen !== _connGeneration) return;
       const data = snap.val();
       if (!data || !data.ts) return;
       if (data.ts <= resetTs) return;
       reconcileGameState(g, data.numbers || [], data.rekke);
-    });
+    };
+    csRef.on('value', csHandler);
+    _channelDetachFns.push(() => csRef.off('value', csHandler));
   });
 
   // Legacy callLog — kept so older main-site versions still work.
   // Skipped if callState is already providing data for that game.
   channelRef.child('resetTs').once('value', (snap) => {
+    if (gen !== _connGeneration) return;  // reconnected while waiting
     resetTs = snap.val() || 0;
-    channelRef.child('callLog').on('child_added', (snap) => {
-      const data = snap.val();
+    const clRef = channelRef.child('callLog');
+    const clHandler = (snap2) => {
+      if (gen !== _connGeneration) return;
+      const data = snap2.val();
       if (!data || !data.number || !data.ts) return;
       if (data.ts <= resetTs) return;
       // Only use callLog if callState isn't being used (older main-site build)
       if (!data.undo) handleCalledNumber(data.number, data.game, data.rekke);
-    });
+    };
+    clRef.on('child_added', clHandler);
+    _channelDetachFns.push(() => clRef.off('child_added', clHandler));
   });
 
   // Game/rekke state from main site
-  channelRef.child('state').on('value', (snap) => {
+  const stateRef = channelRef.child('state');
+  const stateHandler = (snap) => {
+    if (gen !== _connGeneration) return;
     const data = snap.val();
     if (!data) return;
     applyRemoteState(data.game, data.rekke);
-  });
+  };
+  stateRef.on('value', stateHandler);
+  _channelDetachFns.push(() => stateRef.off('value', stateHandler));
 
   // Jackpot number (game 4 / grey) — host broadcasts it; re-paint so the
   // grey paper shows the marker.
-  channelRef.child('jackpot').on('value', (snap) => {
+  const jackpotRef = channelRef.child('jackpot');
+  const jackpotHandler = (snap) => {
+    if (gen !== _connGeneration) return;
     const data = snap.val();
     const n = data && data.number != null ? Number(data.number) : null;
     if (n === jackpotNum) return;
     jackpotNum = n;
     if (gameState.grey && gameState.grey.cellMap) renderCells('grey');
-  });
+  };
+  jackpotRef.on('value', jackpotHandler);
+  _channelDetachFns.push(() => jackpotRef.off('value', jackpotHandler));
 
   // Reset events — ignore stale events that predate this connection
   const connectedAt = Date.now();
-  channelRef.child('reset').on('value', (snap) => {
+  const resetRef = channelRef.child('reset');
+  const resetHandler = (snap) => {
+    if (gen !== _connGeneration) return;
     const data = snap.val();
     if (!data || !data.ts) return;
     if (data.ts < connectedAt) return;
     handleRemoteReset(data.scope, data.game);
-  });
+  };
+  resetRef.on('value', resetHandler);
+  _channelDetachFns.push(() => resetRef.off('value', resetHandler));
 }
 
 function setConnStatus(state, label) {
@@ -3295,14 +3361,18 @@ async function processImage(file, targetGame, targetBlockIdx, opts) {
       _activeScanCount--;
       updateScanBadge();
     }
-    toast("Enter your Anthropic API key first", "err", 4000);
+    toast("Legg inn Anthropic API-nøkkel først", "err", 4000);
     return;
   }
   localStorage.setItem("bv_apikey", apiKey);
 
+  // Scan model from the picker (persisted); Opus is the accuracy default,
+  // Sonnet/Haiku are the faster/cheaper options.
+  const scanModel = localStorage.getItem("bv_scanModel") || "claude-opus-4-8";
+
   try {
     // Resize image for API — max 1600px on longest side to keep tokens low
-    setLabel("Preparing image…");
+    setLabel("Forbereder bilde…");
     const bitmap = await createImageBitmap(file);
     const MAX = 1600;
     let sendCanvas = document.createElement("canvas");
@@ -3314,7 +3384,7 @@ async function processImage(file, targetGame, targetBlockIdx, opts) {
     // Convert to base64 JPEG
     const b64 = sendCanvas.toDataURL("image/jpeg", 0.92).split(",")[1];
 
-    setLabel("Sending to Claude…");
+    setLabel("Sender til Claude…");
 
     const prompt = `This is a Norwegian 90-ball bingo ticket (bingoark). It has 6 strips stacked vertically, each identified by a 4-digit number printed in the left margin (e.g. "4201"). Each strip is a 3-row × 9-column grid holding exactly 15 numbers (5 per row); the other 12 cells are blank.
 
@@ -3336,7 +3406,7 @@ Example:
         "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        model: "claude-opus-4-5",
+        model: scanModel,
         max_tokens: 3000,
         messages: [{
           role: "user",
@@ -3353,7 +3423,7 @@ Example:
       throw new Error(err?.error?.message || `API error ${response.status}`);
     }
 
-    setLabel("Parsing result…");
+    setLabel("Tolker resultat…");
     const data = await response.json();
     const raw  = data.content.find(b => b.type === "text")?.text || "";
 
@@ -3380,7 +3450,7 @@ Example:
       showGameTabs();
       renderActiveGame();
       document.getElementById("phone-processing").style.display = "none";
-      document.getElementById("phone-detected-count").textContent = `${count}/90 detected`;
+      document.getElementById("phone-detected-count").textContent = `${count}/90 funnet`;
     }
 
     saveSession();
@@ -3422,11 +3492,11 @@ Example:
     if (!isBackground) {
       document.getElementById("phone-processing").style.display = "none";
       document.getElementById("phone-upload").style.display = "flex";
-      setLabel("Error — try again");
+      setLabel("Feil — prøv igjen");
     }
     const blkLbl = isBackground && blocks.length > 1
       ? ` (Blokk ${targetBlockIdx + 1})` : '';
-    toast("Error" + blkLbl + ": " + err.message, "err", 6000);
+    toast("Feil" + blkLbl + ": " + err.message, "err", 6000);
   } finally {
     if (isBackground) {
       _activeScanCount--;
@@ -3556,7 +3626,7 @@ function renderActiveGame() {
     document.getElementById("btn-share-paper").style.display = "block";
 
     const count = Object.keys(gs.cellMap).length;
-    document.getElementById("phone-detected-count").textContent = count ? `${count}/90 detected` : "";
+    document.getElementById("phone-detected-count").textContent = count ? `${count}/90 funnet` : "";
 
     // Re-paint cells (called/latest + manual-play hints/wrong if applicable)
     renderCells(activeGame);
@@ -3956,11 +4026,11 @@ function updateUploadTitle() {
   if (!title || !sub) return;
   const blockLabel = blocks.length > 1 ? ` (Blokk ${activeBlockIdx + 1})` : '';
   if (gs.strips) {
-    title.textContent = `Scan new paper (${getGameName(activeGame)}${blockLabel})`;
+    title.textContent = `Skann nytt ark (${getGameName(activeGame)}${blockLabel})`;
   } else {
-    title.textContent = `Scan Paper — ${getGameName(activeGame)}${blockLabel}`;
+    title.textContent = `Skann ark — ${getGameName(activeGame)}${blockLabel}`;
   }
-  sub.textContent = "Tap to photograph the bingo paper for the active game";
+  sub.textContent = "Trykk for å ta bilde av bingoarket for det aktive spillet";
 
   // "Ferdig" shortcut — only meaningful once at least one block somewhere
   // already has a scanned/generated paper, so the user can dismiss the scan
@@ -4141,47 +4211,6 @@ function handleCalledNumber(number, game, rekke) {
   renderCells(target);
   if (target === activeGame) updateRekkeLabel();
   checkProximityTransition(target);
-  refreshBlockTabs();
-  saveSession();
-}
-
-function handleUncalledNumber(number, game) {
-  const target = (game && getGameIds().includes(game)) ? game : (currentGame || activeGame);
-
-  // Apply undo to ALL blocks
-  blocks.forEach(blk => {
-    const gs = blk.gameState[target];
-    if (!gs) return;
-    const idx = gs.called.lastIndexOf(number);
-    if (idx !== -1) gs.called.splice(idx, 1);
-    // Also remove from hostCalled
-    const hIdx = gs.hostCalled.lastIndexOf(number);
-    if (hIdx !== -1) gs.hostCalled.splice(hIdx, 1);
-  });
-
-  // Update DOM for active block only
-  const gs = gameState[target];
-  if (target === activeGame) {
-    const cell = gs.cellMap[String(number)];
-    if (cell) {
-      cell.classList.remove("called", "latest");
-      if (latestCell === cell) {
-        latestCell = null;
-        if (gs.called.length) {
-          const newLast = gs.cellMap[String(gs.called[gs.called.length - 1])];
-          if (newLast) {
-            newLast.classList.remove("called");
-            newLast.classList.add("latest");
-            latestCell = newLast;
-          }
-        }
-      }
-    }
-    updateProximityHighlights(activeGame);
-    updateRekkeLabel();
-  } else {
-    updateProximityHighlights(target);
-  }
   refreshBlockTabs();
   saveSession();
 }
