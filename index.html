@@ -1492,13 +1492,6 @@ header .conn-label { margin-left: auto; }
         <input type="password" id="apikey-input" class="apikey-input"
                placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
         <p class="apikey-hint">Lagres kun lokalt på telefonen og sendes bare til Anthropic</p>
-        <label class="apikey-label" style="margin-top:10px;display:block;">Skannemodell</label>
-        <select id="scan-model-select" class="apikey-input" style="cursor:pointer;">
-          <option value="claude-opus-4-8">Opus 4.8 — mest nøyaktig</option>
-          <option value="claude-sonnet-5">Sonnet 5 — rask og nøyaktig</option>
-          <option value="claude-haiku-4-5">Haiku 4.5 — raskest og billigst</option>
-        </select>
-        <p class="apikey-hint">Velg Sonnet 5 for raskere skanning med fortsatt høy treffsikkerhet</p>
       </div>
     </div>
 
@@ -1816,6 +1809,17 @@ function switchBlock(idx) {
   refreshBlockTabs();
   refreshGameTabs();
   saveSession();
+}
+
+// Find a block with no scanned papers and no scans still running, other than
+// `exclude`. Returns -1 if none — used to reuse an empty block instead of
+// always creating a new one after finishing a scan batch.
+function findEmptyBlockIdx(exclude) {
+  return blocks.findIndex((blk, i) =>
+    i !== exclude &&
+    !(blk._scanning > 0) &&
+    getGameIds().every(g => !(blk.gameState[g] && blk.gameState[g].strips))
+  );
 }
 
 function addBlock() {
@@ -2781,21 +2785,57 @@ function initPhone() {
         // v3/v4 are normalised to a one-entry array). Iterate it and
         // import each as its own block. The first block fills the current
         // active block if empty; subsequent blocks always get a new slot.
+        //
+        // Fingerprint a block by its per-game strip IDs so an imported block
+        // that duplicates one the user ALREADY has (e.g. they left the page
+        // and came back via an OLD share link) is skipped instead of being
+        // added as a second identical block that clobbers the current one.
+        const blockFingerprint = (gamesObj) => getGameIds()
+          .filter(g => Array.isArray(gamesObj[g]) && gamesObj[g].length)
+          .map(g => g + ':' + gamesObj[g]
+            .map(s => (s && s.id != null ? String(s.id) : '?')).sort().join(','))
+          .join('|');
+        const existingFingerprints = () => {
+          const set = new Set();
+          blocks.forEach(blk => {
+            const gamesObj = {};
+            getGameIds().forEach(g => {
+              if (blk.gameState[g] && blk.gameState[g].strips)
+                gamesObj[g] = blk.gameState[g].strips;
+            });
+            const fp = blockFingerprint(gamesObj);
+            if (fp) set.add(fp);
+          });
+          return set;
+        };
+
         let totalArk = 0;
+        let importedBlocks = 0;
+        let skippedDupes = 0;
         result.blocks.forEach((entry, bIdx) => {
           const games = entry.games || {};
           const gameCount = Object.keys(games).length;
           if (!gameCount) return;
-          totalArk += gameCount;
 
-          // First import block: fill active block if empty, else new block.
-          // Later import blocks: always new block.
+          // Skip a block we already have (exact strip-ID match). Recomputed
+          // each iteration so duplicates within the same link are caught too.
+          const fp = blockFingerprint(games);
+          if (fp && existingFingerprints().has(fp)) {
+            skippedDupes++;
+            return;
+          }
+
+          totalArk += gameCount;
+          importedBlocks++;
+
+          // First imported block: fill active block if empty, else new block.
+          // Later imported blocks: always new block.
           const activeIsEmpty = !getGameIds().some(g =>
             blocks[activeBlockIdx] &&
             blocks[activeBlockIdx].gameState[g] &&
             blocks[activeBlockIdx].gameState[g].strips
           );
-          if (bIdx === 0 && activeIsEmpty) {
+          if (importedBlocks === 1 && activeIsEmpty) {
             // Reuse the current empty active block
           } else {
             blocks.push(createEmptyBlock());
@@ -2823,12 +2863,17 @@ function initPhone() {
         showGameTabs();
         refreshBlockTabs();
         renderActiveGame();
-        const nBlocks = result.blocks.length;
-        toast(
-          nBlocks > 1
-            ? `${nBlocks} blokker (${totalArk} ark) importert!`
-            : `${totalArk} ark importert!`,
-          'ok', 4000);
+        if (importedBlocks === 0) {
+          toast(
+            skippedDupes ? "Blokken finnes allerede" : "Ingen ark å importere",
+            'ok', 3500);
+        } else {
+          toast(
+            importedBlocks > 1
+              ? `${importedBlocks} blokker (${totalArk} ark) importert!`
+              : `${totalArk} ark importert!`,
+            'ok', 4000);
+        }
         // Auto-connect if session code provided
         const code = (result.code || codeParam || '').trim().toUpperCase();
         if (code) {
@@ -3052,17 +3097,6 @@ function initPhone() {
   if (savedKey) document.getElementById("apikey-input").value = savedKey;
   const lastCode = localStorage.getItem("bv_last_code");
   if (lastCode) document.getElementById("phone-code-input").value = lastCode;
-
-  // Scan model picker — persisted so the choice survives reloads
-  const modelSel = document.getElementById("scan-model-select");
-  if (modelSel) {
-    const savedModel = localStorage.getItem("bv_scanModel");
-    if (savedModel) modelSel.value = savedModel;
-    if (!modelSel.value) modelSel.value = "claude-opus-4-8";
-    modelSel.addEventListener("change", () => {
-      try { localStorage.setItem("bv_scanModel", modelSel.value); } catch (e) {}
-    });
-  }
 
   // User name input — per-block name, persisted and republished on edit.
   // Debounced so rapid keystrokes don't spam Firebase writes.
@@ -3339,6 +3373,10 @@ async function processImage(file, targetGame, targetBlockIdx, opts) {
     document.getElementById("phone-processing").style.display = "flex";
   } else {
     _activeScanCount++;
+    // Per-block in-flight counter (lives on the block object so it survives
+    // block reordering). Lets us tell a genuinely-empty block apart from one
+    // that merely hasn't finished its background scan yet.
+    blocks[targetBlockIdx]._scanning = (blocks[targetBlockIdx]._scanning || 0) + 1;
     updateScanBadge();
   }
   const setLabel = t => {
@@ -3366,9 +3404,9 @@ async function processImage(file, targetGame, targetBlockIdx, opts) {
   }
   localStorage.setItem("bv_apikey", apiKey);
 
-  // Scan model from the picker (persisted); Opus is the accuracy default,
-  // Sonnet/Haiku are the faster/cheaper options.
-  const scanModel = localStorage.getItem("bv_scanModel") || "claude-opus-4-8";
+  // Opus 4.8 is the only model that reads the bingo strips reliably, so it's
+  // hardcoded (the model picker was removed).
+  const scanModel = "claude-opus-4-8";
 
   try {
     // Resize image for API — max 1600px on longest side to keep tokens low
@@ -3500,6 +3538,10 @@ Example:
   } finally {
     if (isBackground) {
       _activeScanCount--;
+      if (blocks[targetBlockIdx]) {
+        blocks[targetBlockIdx]._scanning =
+          Math.max(0, (blocks[targetBlockIdx]._scanning || 1) - 1);
+      }
       updateScanBadge();
     }
   }
@@ -4115,7 +4157,18 @@ async function processAllPending() {
     queuedGames.has(g) || (blk.gameState[g] && blk.gameState[g].strips)
   );
   if (allFilled) {
-    addBlock();
+    // Prefer switching to an already-empty block (one with no papers and no
+    // in-flight scans) instead of spawning yet another new block.
+    const emptyIdx = findEmptyBlockIdx(targetBlockIdx);
+    if (emptyIdx >= 0) {
+      switchBlock(emptyIdx);
+      document.getElementById("phone-paper").style.display = "none";
+      document.getElementById("phone-upload").style.display = "flex";
+      updateUploadTitle();
+      toast("Byttet til tom blokk", "ok", 2000);
+    } else {
+      addBlock();
+    }
   } else {
     // Show the upload screen for the remaining games in this block
     const nextEmpty = getGameIds().find(g =>
