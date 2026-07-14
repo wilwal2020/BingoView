@@ -2043,6 +2043,23 @@ function publishAllStripsToHost() {
   });
 }
 
+// Fingerprint a block by its per-game strip IDs. Two phones holding the same
+// shared paper produce the same fingerprint — used to sync the name from the
+// block's owner to any "shared away" copy of it.
+function blockStripFingerprint(blk) {
+  if (!blk) return '';
+  // Normalise ids numerically so a scanned "421" and a share-decoded "0421"
+  // (zero-padded) still fingerprint identically.
+  const normId = s => {
+    const n = s && s.id != null ? parseInt(s.id, 10) : NaN;
+    return Number.isFinite(n) ? String(n) : '?';
+  };
+  return getGameIds()
+    .filter(g => blk.gameState[g] && blk.gameState[g].strips)
+    .map(g => g + ':' + blk.gameState[g].strips.map(normId).sort().join(','))
+    .join('|');
+}
+
 // Update papers_meta for a single block's virtual phone
 function updateBlockMeta(bIdx) {
   if (!channelRef || !phoneId) return;
@@ -2054,6 +2071,7 @@ function updateBlockMeta(bIdx) {
     gameKeys: allKeys,
     userName: getBlockLabel(bIdx),
     sharedAway: !!blk.sharedAway,
+    fp: blockStripFingerprint(blk),
   });
 }
 
@@ -2073,8 +2091,15 @@ function getStoredUserName(bIdx) {
   const bi = (bIdx != null) ? bIdx : activeBlockIdx;
   const blkName = (blocks[bi] && blocks[bi].userName) || '';
   if (blkName) return blkName.trim().slice(0, 24);
-  try { return (localStorage.getItem("bv_userName") || "").trim().slice(0, 24); }
-  catch (e) { return ""; }
+  // Global-name fallback applies ONLY to the first block. Additional blocks
+  // that haven't been named must stay unnamed ("Blokk N") rather than borrow
+  // block 1's name — otherwise two shared blocks can momentarily publish the
+  // same name (both showing up identically in the host's block bar).
+  if (bi === 0) {
+    try { return (localStorage.getItem("bv_userName") || "").trim().slice(0, 24); }
+    catch (e) { return ""; }
+  }
+  return "";
 }
 // Full display label for a block, including "(Blokk N)" suffix when
 // multiple blocks exist. Used everywhere we write userName to Firebase.
@@ -2109,6 +2134,49 @@ function syncSharedAwayUI() {
     nameInput.title = isShared
       ? "Du har delt dette arket — mottakeren eier navnet nå"
       : "";
+  }
+}
+
+// Latest papers_meta snapshot for the whole channel (all phones' blocks).
+let _remoteMeta = {};
+
+// For every block we've "shared away", adopt the name of its current owner —
+// the other phone holding the same paper that has NOT shared it away. This is
+// what makes a receiver's rename flow back onto the sharer's copy (and keeps
+// the sharer's name input locked to it), instead of the two names diverging.
+function reconcileSharedNames() {
+  if (!channelRef || !phoneId) return;
+  const myPids = new Set(blocks.map((_, i) => blockPhoneId(i)));
+  let changed = false;
+  blocks.forEach((blk) => {
+    if (!blk.sharedAway) return;
+    const myFp = blockStripFingerprint(blk);
+    if (!myFp) return;
+    // Owner = a non-mine, non-sharedAway block with the same fingerprint.
+    // Prefer the most recently seen one if several exist.
+    let ownerName = null, ownerSeen = -1;
+    Object.entries(_remoteMeta).forEach(([pid, meta]) => {
+      if (myPids.has(pid) || !meta || meta.sharedAway) return;
+      if (meta.fp !== myFp) return;
+      const seen = meta.lastSeen || 0;
+      if (seen >= ownerSeen) { ownerSeen = seen; ownerName = (meta.userName || '').toString(); }
+    });
+    if (ownerName == null) return;
+    // Strip the "(Blokk N)" suffix — we want the owner's chosen base name.
+    const baseName = ownerName.replace(/\s*\(Blokk\s*\d+\)\s*$/i, '').trim();
+    if (baseName && baseName !== (blk.userName || '')) {
+      blk.userName = baseName;
+      changed = true;
+    }
+  });
+  if (changed) {
+    const nameInput = document.getElementById("user-name-input");
+    if (nameInput && blocks[activeBlockIdx]) {
+      nameInput.value = blocks[activeBlockIdx].userName || '';
+    }
+    syncSharedAwayUI();
+    refreshBlockTabs();
+    saveSession();
   }
 }
 
@@ -2790,10 +2858,13 @@ function initPhone() {
         // that duplicates one the user ALREADY has (e.g. they left the page
         // and came back via an OLD share link) is skipped instead of being
         // added as a second identical block that clobbers the current one.
+        const normId = s => {
+          const n = s && s.id != null ? parseInt(s.id, 10) : NaN;
+          return Number.isFinite(n) ? String(n) : '?';
+        };
         const blockFingerprint = (gamesObj) => getGameIds()
           .filter(g => Array.isArray(gamesObj[g]) && gamesObj[g].length)
-          .map(g => g + ':' + gamesObj[g]
-            .map(s => (s && s.id != null ? String(s.id) : '?')).sort().join(','))
+          .map(g => g + ':' + gamesObj[g].map(normId).sort().join(','))
           .join('|');
         const existingFingerprints = () => {
           const set = new Set();
@@ -3102,10 +3173,13 @@ function initPhone() {
   // Debounced so rapid keystrokes don't spam Firebase writes.
   const nameInput = document.getElementById("user-name-input");
   if (nameInput) {
-    // Load initial name: per-block name if set, otherwise global fallback
+    // Load initial name: per-block name if set, otherwise the global fallback
+    // — but only for the first block (see getStoredUserName).
     const savedGlobal = (() => { try { return localStorage.getItem("bv_userName") || ""; } catch(e) { return ""; } })();
-    blocks[activeBlockIdx].userName = blocks[activeBlockIdx].userName || savedGlobal;
-    nameInput.value = blocks[activeBlockIdx].userName;
+    if (activeBlockIdx === 0) {
+      blocks[activeBlockIdx].userName = blocks[activeBlockIdx].userName || savedGlobal;
+    }
+    nameInput.value = (blocks[activeBlockIdx] && blocks[activeBlockIdx].userName) || '';
     let nameTimer = null;
     nameInput.addEventListener("input", () => {
       const v = nameInput.value.trim().slice(0, 24);
@@ -3331,6 +3405,17 @@ async function connectPhone(code, opts = {}) {
   };
   resetRef.on('value', resetHandler);
   _channelDetachFns.push(() => resetRef.off('value', resetHandler));
+
+  // Other phones' block metadata — lets a block we've "shared away" adopt its
+  // owner's (the receiver's) name when they rename it.
+  const metaRef = channelRef.child('papers_meta');
+  const metaHandler = (snap) => {
+    if (gen !== _connGeneration) return;
+    _remoteMeta = snap.val() || {};
+    reconcileSharedNames();
+  };
+  metaRef.on('value', metaHandler);
+  _channelDetachFns.push(() => metaRef.off('value', metaHandler));
 }
 
 function setConnStatus(state, label) {
