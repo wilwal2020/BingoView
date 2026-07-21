@@ -3789,8 +3789,13 @@ function refreshGameTabs() {
   const anyLoaded = getGameIds().some(g => gameState[g].strips);
   const visible = (manualMode || anyLoaded);
   tabsWrap.style.display = visible ? "flex" : "none";
+  // Keep the name field available even when the active block has no scanned
+  // arks yet — as long as we're past the connect screen (connected, manual or
+  // offline-prep, all of which hide #phone-connect). Lets a freshly-added or
+  // not-yet-scanned block still be named.
+  const inSession = document.getElementById("phone-connect").style.display === "none";
   const nameRow = document.getElementById("user-name-row");
-  if (nameRow) nameRow.style.display = visible ? "flex" : "none";
+  if (nameRow) nameRow.style.display = (inSession || visible) ? "flex" : "none";
   tabsWrap.innerHTML = "";
 
   gameList.forEach(g => {
