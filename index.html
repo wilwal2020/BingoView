@@ -2658,9 +2658,13 @@ function initPhone() {
     activeGame = nextEmpty;
     refreshGameTabs();
     updateUploadTitle();
-    document.getElementById("phone-pending").style.display = "none";
-    document.getElementById("phone-upload").style.display = "flex";
-    setTimeout(() => document.getElementById("file-input").click(), 120);
+    // Open the camera straight from the pending screen. Previously we swapped
+    // to the "Skann ark" upload screen first (plus a 120ms delay), which
+    // flashed on-screen and made it look like the flow had reset before the
+    // camera appeared. The file-input .click() is still fired inside this
+    // gesture handler, and the change handler returns to the pending screen
+    // once a photo is taken.
+    document.getElementById("file-input").click();
   });
 
   document.getElementById("btn-process-now").addEventListener("click", async () => {
@@ -4181,10 +4185,18 @@ function finishScanning() {
     renderActiveGame();
     return;
   }
+  // The active block has no scanned arks. Drop it so an abandoned empty block
+  // doesn't linger as a blank tab — but only when there's another block to
+  // keep and nothing still queued for OCR.
+  const hasPending = Object.keys(pendingPhotos).length > 0;
+  if (blocks.length > 1 && !hasPending) {
+    removeBlock(activeBlockIdx);
+  }
   const targetBlock = blocks.findIndex(blk =>
     getGameIds().some(g => blk.gameState[g] && blk.gameState[g].strips));
   if (targetBlock >= 0) {
     switchBlock(targetBlock);
+    document.getElementById("phone-upload").style.display = "none";
   }
 }
 
