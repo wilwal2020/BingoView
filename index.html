@@ -1444,9 +1444,27 @@ header,
 .block-tab-add { border-color: var(--nav-line-2); color: var(--nav-dim); }
 .block-tab-add:hover { border-color: var(--gold); color: var(--gold); }
 
-/* Game tabs (active state already brass in the base rules) */
+/* Game tabs — filled brass when active, matching the mockup pills */
 .game-tab { background: var(--nav-panel); border-color: var(--nav-line-2); color: var(--nav-dim); }
 .game-tab:hover { background: var(--nav-panel-2); color: var(--paper); }
+.game-tab.active { background: var(--gold); border-color: var(--gold); color: var(--ink); }
+
+/* Float the white paper as a soft card inside a navy panel — the mockup's
+   signature. The old grey (#1a1a1a) scroll box + hard grey sheet border are
+   what made the redesign still read as "old app, new header". */
+#paper-canvas-wrap {
+  background: var(--nav-panel);
+  margin: 8px 10px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--nav-line);
+}
+#digital-paper {
+  border: none;
+  border-radius: 8px;
+  box-shadow: 0 3px 14px rgba(0,0,0,0.35);
+}
+.paper-toolbar { padding-top: 12px; }
+#phone-rekke-banner { background: transparent; border-bottom: none; padding-bottom: 2px; }
 
 /* Cool the chrome's secondary text so it belongs to the navy world */
 .conn-label, .connect-sub, .proc-label, .pending-sub, .pending-btn-link,
