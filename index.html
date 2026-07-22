@@ -1489,9 +1489,13 @@ header { background: transparent; border-bottom: none; }
 /* Host's current game: subtle brass border when it's not the viewed tab */
 .game-tab.host-current:not(.active) { border-color: rgba(227,165,58,0.45); }
 
-/* "Manuell trykking" / "Markér nye" switches, re-grounded to the design */
-.manual-switch { background: var(--nav-panel); border-color: var(--nav-line-2); }
-.manual-switch .manual-switch-pill { background: #2c3a58; }
+/* "Manuell trykking" / "Markér nye" — plain pill buttons, no slider.
+   The on-state fills the button with its colour: brass for manual
+   confirmation, purple for the away marker. */
+.manual-switch { background: var(--nav-panel); border-color: var(--nav-line-2); border-radius: 8px; padding: 7px 14px; gap: 0; }
+.manual-switch .manual-switch-pill { display: none; }
+.manual-switch.active { background: var(--gold); border-color: var(--gold); color: #1a1205; }
+.manual-switch-away.active { background: #9b7aff; border-color: #9b7aff; color: #160c27; }
 
 /* Float the white paper as a soft card inside a navy panel — the mockup's
    signature. The old grey (#1a1a1a) scroll box + hard grey sheet border are
@@ -1543,10 +1547,10 @@ header { padding: 7px 13px; gap: 5px 7px; }
 }
 
 .block-tabs { padding: 4px 11px 8px; gap: 4px; }
-/* Every pill is exactly one fifth of the row (minus the +-button and gaps),
-   so the size never changes with the block count — one block looks the same
-   as one of five, and five fill the row edge to edge. */
-.block-tab { flex: 0 0 calc((100% - 54px) / 5); width: auto; min-width: 0; padding: 5px 4px; gap: 2px; border-radius: 6px; }
+/* Every pill is exactly one fifth of the row, so the size never changes
+   with the block count and five fill a row edge to edge. The +-button
+   wraps to the next row when a row is full. */
+.block-tab { flex: 0 0 calc((100% - 16px) / 5); width: auto; min-width: 0; padding: 5px 4px; gap: 2px; border-radius: 6px; }
 .block-tab .block-label { font-size: 0.56rem; letter-spacing: 0.03em; }
 .block-tab .block-badge { font-size: 0.48rem; padding: 1px 6px; margin-top: 2px; }
 .block-tab-add { flex: 0 0 34px; width: 34px; padding: 4px; font-size: 0.9rem; border-radius: 6px; }
