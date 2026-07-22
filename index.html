@@ -1406,21 +1406,18 @@ header .conn-label { margin-left: auto; }
 ═══════════════════════════════════════════════════════════ */
 :root {
   --nav-bar:      rgba(13,20,36,0.62);      /* translucent bars over the gradient */
-  --nav-panel:    rgba(255,255,255,0.05);   /* inset inputs / tabs */
+  --nav-panel:    rgba(255,255,255,0.055);  /* inset inputs / tabs (design value) */
   --nav-panel-2:  rgba(255,255,255,0.09);
   --nav-line:     rgba(132,164,216,0.16);
   --nav-line-2:   rgba(132,164,216,0.30);
-  --nav-dim:      #93a0bb;                   /* cool blue-grey secondary text */
+  --nav-dim:      #8b93a6;                   /* the design's cool blue-grey */
 }
 
 /* Frosted navy bars (nothing scrolls behind them, so the blur just
    softens the gradient for a little depth). */
-header {
-  background: var(--nav-bar);
-  border-color: var(--nav-line);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-}
+/* No banded sections: the whole chrome sits directly on the gradient,
+   exactly like the design — no per-row backgrounds or separator lines. */
+header { background: transparent; border-bottom: none; }
 
 /* Footer — the design's "N igjen · Rekke X · mangler …" line */
 #phone-status-bar {
@@ -1446,9 +1443,8 @@ header {
 
 /* Session-code bar — slim, transparent; the code itself in brass */
 #phone-code-display { background: transparent; border-top: 1px solid var(--nav-line); padding: 8px 15px 10px; }
-#phone-rekke-banner { background: rgba(13,20,36,0.5); border-color: var(--nav-line); }
 
-/* Header buttons as quiet ghosts on the navy bar */
+/* Header buttons as quiet ghosts on the gradient */
 #btn-fresh-start, #btn-share-paper, #btn-share-code {
   background: transparent;
   border-color: var(--nav-line-2);
@@ -1457,12 +1453,12 @@ header {
 #btn-fresh-start:hover { border-color: var(--red); color: var(--red); }
 
 /* Screens the mockup didn't show, tuned to the same design */
-.rekke-buttons { background: rgba(10,16,30,0.40); border-bottom-color: var(--nav-line); }
+.rekke-buttons { background: transparent; border-bottom: none; }
 .rekke-btn { background: var(--nav-panel); border-color: var(--nav-line-2); color: var(--nav-dim); border-radius: 8px; }
 .share-card { background: rgba(16,24,42,0.97); border-color: var(--nav-line-2); }
-.block-tabs { background: rgba(10,16,30,0.55); border-bottom-color: var(--nav-line); }
-.game-tabs  { background: rgba(10,16,30,0.40); border-bottom-color: var(--nav-line); }
-.paper-toolbar { background: rgba(13,20,36,0.5); }
+.block-tabs { background: transparent; border-bottom: none; }
+.game-tabs  { background: transparent; border-bottom: none; }
+.paper-toolbar { background: transparent; }
 
 /* Inputs and the scan drop-zone */
 .phone-code-input,
@@ -1498,13 +1494,14 @@ header {
 #digital-paper {
   border: none;
   border-radius: 8px;
+  padding: 5px;   /* tight white frame around the strips, per the design */
   box-shadow: 0 3px 14px rgba(0,0,0,0.35);
 }
 .paper-toolbar { padding-top: 12px; }
 #paper-canvas-wrap { margin-top: 4px; }
 
-/* Rekke banner → the mockup's small two-part card header sitting just above
-   the paper card: "Blokk N · Rekke X" on the left, strip count on the right.
+/* Rekke banner → the design's small two-part card header INSIDE the navy
+   panel, above the paper: "Blokk N · ditt ark" left, strip count right.
    Replaces the heavy centred gold banner, which wasn't in the design. */
 #phone-rekke-banner {
   display: flex;
@@ -1517,10 +1514,10 @@ header {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   text-align: left;
-  color: var(--gold);
+  color: var(--nav-dim);   /* quiet dim header, per the design */
   background: transparent;
   border-bottom: none;
-  padding: 6px 15px 3px;
+  padding: 1px 3px 8px;
 }
 #phone-rekke-banner .rekke-head-r { color: var(--nav-dim); font-weight: 500; }
 
@@ -1769,8 +1766,8 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <span class="manual-switch-pill"><span class="manual-switch-thumb"></span></span>
         </button>
       </div>
-      <div id="phone-rekke-banner">Rekke 1</div>
       <div id="paper-canvas-wrap">
+        <div id="phone-rekke-banner">Rekke 1</div>
         <div id="digital-paper"></div>
       </div>
       <div id="phone-status-bar">
@@ -3997,9 +3994,10 @@ function renderActiveGame() {
   wrap.innerHTML = "";
   wrap.classList.toggle("tappable", manualMode || manualPlayMode);
   const game = getGame(activeGame) || {};
-  const gameColor = game.color || '#fff';
-  wrap.style.background   = gameColor;
-  wrap.style.borderColor  = gameColor;
+  // Design: the paper is always crisp white — game identity lives in the
+  // per-game strip-id rails and the active tab, not a tinted sheet.
+  wrap.style.background   = '#fff';
+  wrap.style.borderColor  = 'transparent';
   // Strip-id colors follow the game palette (dark accent + gold/accent fg)
   wrap.style.setProperty('--strip-id-bg', game.stripIdBg || '#f0ede4');
   wrap.style.setProperty('--strip-id-fg', game.stripIdFg || '#333');
