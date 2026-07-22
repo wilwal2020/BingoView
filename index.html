@@ -1419,26 +1419,16 @@ header .conn-label { margin-left: auto; }
    exactly like the design — no per-row backgrounds or separator lines. */
 header { background: transparent; border-bottom: none; }
 
-/* Footer — the design's "N igjen · Rekke X · mangler …" line */
+/* Footer — a quiet "mangler a · b" line when close to a win */
 #phone-status-bar {
   background: transparent;
   border-top: none;
-  padding: 6px 15px 11px;
-  align-items: baseline;
+  padding: 2px 15px 10px;
+  justify-content: flex-end;
   gap: 10px;
 }
-.foot-igjen { display: flex; align-items: baseline; gap: 5px; text-transform: uppercase; }
-.foot-igjen b {
-  font-family: var(--display);
-  font-size: 1.5rem;
-  line-height: 1;
-  color: var(--gold);
-  letter-spacing: 0.02em;
-}
-.foot-igjen b.foot-bingo { color: #c4a8ff; }
-.foot-igjen > span { font-size: 0.62rem; letter-spacing: 0.1em; color: var(--nav-dim); }
 .foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; }
-#foot-miss { font-size: 0.6rem; letter-spacing: 0.05em; color: var(--nav-dim); }
+#foot-miss { font-size: 0.66rem; letter-spacing: 0.05em; color: var(--nav-dim); }
 #foot-miss b { color: var(--paper); }
 
 /* Session-code bar — slim, transparent; the code itself in brass */
@@ -1465,9 +1455,9 @@ header { background: transparent; border-bottom: none; }
 .apikey-input { background: var(--nav-panel); border-color: var(--nav-line-2); }
 .upload-zone { border-color: var(--nav-line-2); }
 
-/* Block switcher — the design's solid-navy pills, brass when active */
-.block-tab { background: #141a28; border-color: #25304a; color: var(--nav-dim); border-radius: 6px; }
-.block-tab:hover { background: #1a2233; color: var(--paper); }
+/* Block switcher — navy pills (lifted a step brighter), brass when active */
+.block-tab { background: #1b2336; border-color: #2e3d5e; color: var(--nav-dim); border-radius: 6px; }
+.block-tab:hover { background: #232c44; color: var(--paper); }
 .block-tab.active {
   background: #30301f; /* fallback ≈ 16% brass into navy (pre-color-mix iOS) */
   background: color-mix(in srgb, var(--gold) 16%, #0e1422);
@@ -1481,6 +1471,27 @@ header { background: transparent; border-bottom: none; }
 .game-tab { background: var(--nav-panel); border-color: var(--nav-line-2); color: var(--nav-dim); }
 .game-tab:hover { background: var(--nav-panel-2); color: var(--paper); }
 .game-tab.active { background: var(--gold); border-color: var(--gold); color: var(--ink); }
+
+/* Slot dot on every game tab — green when a paper is loaded in that slot */
+.game-tab .game-dot {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.18);
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.game-tab .game-dot.on { background: var(--green); box-shadow: 0 0 5px var(--green); }
+.game-tab.active .game-dot { background: rgba(0,0,0,0.22); }
+.game-tab.active .game-dot.on { background: #0e5e31; box-shadow: none; }
+/* The old absolute top-right dot is replaced by the inline slot dot */
+.game-tab.loaded::after { content: none; }
+/* Host's current game: subtle brass border when it's not the viewed tab */
+.game-tab.host-current:not(.active) { border-color: rgba(227,165,58,0.45); }
+
+/* "Manuell trykking" / "Markér nye" switches, re-grounded to the design */
+.manual-switch { background: var(--nav-panel); border-color: var(--nav-line-2); }
+.manual-switch .manual-switch-pill { background: #2c3a58; }
 
 /* Float the white paper as a soft card inside a navy panel — the mockup's
    signature. The old grey (#1a1a1a) scroll box + hard grey sheet border are
@@ -1500,26 +1511,20 @@ header { background: transparent; border-bottom: none; }
 .paper-toolbar { padding-top: 12px; }
 #paper-canvas-wrap { margin-top: 4px; }
 
-/* Rekke banner → the design's small two-part card header INSIDE the navy
-   panel, above the paper: "Blokk N · ditt ark" left, strip count right.
-   Replaces the heavy centred gold banner, which wasn't in the design. */
+/* Rekke banner — big centred "Rekke X" in the accent colour, inside the
+   navy panel above the paper. */
 #phone-rekke-banner {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-  font-family: var(--mono);
-  font-weight: 600;
-  font-size: 0.62rem;
-  letter-spacing: 0.14em;
+  display: block;
+  text-align: center;
+  font-family: var(--display);
+  font-size: 1.55rem;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  text-align: left;
-  color: var(--nav-dim);   /* quiet dim header, per the design */
+  color: var(--gold);
   background: transparent;
   border-bottom: none;
-  padding: 1px 3px 8px;
+  padding: 1px 0 7px;
 }
-#phone-rekke-banner .rekke-head-r { color: var(--nav-dim); font-weight: 500; }
 
 /* ── Compact chrome GEOMETRY — matches the mockup's proportions, not just
    its colours. This is what makes it read as the new design rather than the
@@ -1529,21 +1534,23 @@ header { padding: 7px 13px; gap: 5px 7px; }
 .hdr-title { font-size: 1.05rem; }
 
 .user-name-row { padding: 3px 13px 7px; gap: 8px; background: transparent; border-bottom: none; }
-.user-name-label { font-family: var(--mono); font-size: 0.54rem; letter-spacing: 0.18em; font-weight: 700; }
+.user-name-label { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.18em; font-weight: 700; }
 .user-name-input {
   background: transparent; border: none;
   border-bottom: 1px dashed var(--nav-line-2); border-radius: 0;
-  padding: 3px 2px; font-size: 0.82rem;
+  padding: 3px 2px; font-size: 0.9rem;
 }
 
 .block-tabs { padding: 4px 11px 8px; gap: 4px; }
-.block-tab { flex: 0 0 58px; width: 58px; padding: 4px 3px; gap: 2px; border-radius: 6px; }
-.block-tab .block-label { font-size: 0.5rem; letter-spacing: 0.03em; }
-.block-tab .block-badge { font-size: 0.44rem; padding: 1px 5px; margin-top: 2px; }
-.block-tab-add { flex: 0 0 34px; width: 34px; padding: 4px; font-size: 0.9rem; border-radius: 7px; }
+/* Pills grow to fill the row — no dead space on the right; 58px is the
+   floor so wrapping still behaves. */
+.block-tab { flex: 1 1 58px; width: auto; min-width: 58px; padding: 5px 4px; gap: 2px; border-radius: 6px; }
+.block-tab .block-label { font-size: 0.56rem; letter-spacing: 0.03em; }
+.block-tab .block-badge { font-size: 0.48rem; padding: 1px 6px; margin-top: 2px; }
+.block-tab-add { flex: 0 0 34px; width: 34px; padding: 4px; font-size: 0.9rem; border-radius: 6px; }
 
 .game-tabs { padding: 2px 11px 10px; gap: 5px; }
-.game-tab { font-size: 0.58rem; padding: 6px 3px; border-radius: 8px; letter-spacing: 0.02em; }
+.game-tab { font-size: 0.66rem; padding: 9px 4px; border-radius: 8px; letter-spacing: 0.02em; }
 
 #paper-canvas-wrap { margin: 4px 11px 11px; padding: 9px; }
 
@@ -1771,7 +1778,6 @@ header { padding: 7px 13px; gap: 5px 7px; }
         <div id="digital-paper"></div>
       </div>
       <div id="phone-status-bar">
-        <div class="foot-igjen"><b id="foot-igjen-n">—</b><span>igjen</span></div>
         <div class="foot-right">
           <span id="foot-miss"></span>
           <div class="detected-count" id="phone-detected-count"></div>
@@ -2204,7 +2210,8 @@ function refreshBlockTabs() {
   // Add button — always visible so user can add a second block
   const addBtn = document.createElement("button");
   addBtn.className = "block-tab-add";
-  addBtn.textContent = "+ Legg til";
+  addBtn.textContent = "+";
+  addBtn.title = "Legg til blokk";
   addBtn.addEventListener("click", addBlock);
   wrap.appendChild(addBtn);
 }
@@ -4058,8 +4065,13 @@ function refreshGameTabs() {
     if (g.id === activeGame) btn.classList.add("active");
     if (gameState[g.id] && gameState[g.id].strips) btn.classList.add("loaded");
 
-    const marker = (g.id === currentGame) ? " •" : "";
-    btn.appendChild(document.createTextNode(g.name + marker));
+    // Host's current game gets a subtle brass border instead of a text dot
+    if (g.id === currentGame) btn.classList.add("host-current");
+    btn.appendChild(document.createTextNode(g.name));
+    // Slot dot on every tab: green when a paper is loaded for this game
+    const slotDot = document.createElement("span");
+    slotDot.className = "game-dot" + ((gameState[g.id] && gameState[g.id].strips) ? " on" : "");
+    btn.appendChild(slotDot);
     btn.addEventListener("click", () => selectActiveGame(g.id));
 
     if (manualMode && gameList.length > 1) {
@@ -4545,20 +4557,8 @@ function updateRekkeLabel() {
   const gs = gameState[activeGame];
   const el = document.getElementById("phone-rekke-banner");
   if (!el) return;
-  const blk = blocks[activeBlockIdx];
-  const blkName = ((blk && blk.userName) || '').trim() || ('Blokk ' + (activeBlockIdx + 1));
-  let n = 0;
-  if (Array.isArray(gs.strips)) n = gs.strips.length;
-  else if (gs.paperEl) n = gs.paperEl.querySelectorAll('.strip').length;
-  el.innerHTML = '';
-  const left = document.createElement('span');
-  left.className = 'rekke-head-l';
-  left.textContent = blkName + ' · ditt ark';
-  const right = document.createElement('span');
-  right.className = 'rekke-head-r';
-  right.textContent = n ? (n + ' ark') : '';
-  el.appendChild(left);
-  el.appendChild(right);
+  // Big centred "Rekke X" in the accent colour, above the paper
+  el.textContent = (gs.rekke || 'Rekke1').replace("Rekke", "Rekke ");
   updateFootStatus();
 }
 
@@ -4591,34 +4591,22 @@ function computeActiveMissing() {
   return { min: best.length, missing: best, rekke };
 }
 
-// Footer: big "N igjen" + "Rekke X · mangler a · b" (numbers listed when close)
+// Footer: just "mangler a · b" when close to a win (≤3 missing); the win
+// itself is already shown green on the paper, and the rekke lives in the
+// big banner above the sheet.
 function updateFootStatus() {
-  const nEl = document.getElementById("foot-igjen-n");
   const mEl = document.getElementById("foot-miss");
-  if (!nEl || !mEl) return;
+  if (!mEl) return;
+  mEl.innerHTML = "";
   const info = computeActiveMissing();
-  if (!info) { nEl.textContent = "—"; nEl.classList.remove("foot-bingo"); mEl.textContent = ""; return; }
-  const rekkeLabel = info.rekke.replace("Rekke", "Rekke ");
-  if (info.min === 0) {
-    nEl.textContent = "BINGO!";
-    nEl.classList.add("foot-bingo");
-    mEl.textContent = rekkeLabel + " fullført";
-    return;
-  }
-  nEl.classList.remove("foot-bingo");
-  nEl.textContent = String(info.min);
-  if (info.min <= 3) {
-    mEl.innerHTML = "";
-    mEl.appendChild(document.createTextNode(rekkeLabel + " · mangler "));
-    info.missing.forEach((num, i) => {
-      if (i > 0) mEl.appendChild(document.createTextNode(" · "));
-      const b = document.createElement("b");
-      b.textContent = num;
-      mEl.appendChild(b);
-    });
-  } else {
-    mEl.textContent = rekkeLabel;
-  }
+  if (!info || info.min === 0 || info.min > 3) return;
+  mEl.appendChild(document.createTextNode("mangler "));
+  info.missing.forEach((num, i) => {
+    if (i > 0) mEl.appendChild(document.createTextNode(" · "));
+    const b = document.createElement("b");
+    b.textContent = num;
+    mEl.appendChild(b);
+  });
 }
 
 // Apply a called number to a given game's state — updates DOM if that game is active
