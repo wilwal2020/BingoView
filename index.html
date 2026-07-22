@@ -1395,6 +1395,68 @@ header .conn-label { margin-left: auto; }
 }
 .share-actions button.primary { background: var(--gold); color: #000; border-color: var(--gold2); font-weight: 600; }
 .share-actions button:active { transform: scale(0.95); }
+
+/* ═══════════════════════════════════════════════════════════
+   KVELDSHALL CHROME
+   Re-tints the app's chrome from flat near-black to translucent
+   navy + brass so it reads as one piece with the gradient backdrop.
+   The white paper block and every semantic state (called / latest /
+   miss, block-badge proximity colours) are deliberately left alone.
+   Placed last so it overrides the base rules above.
+═══════════════════════════════════════════════════════════ */
+:root {
+  --nav-bar:      rgba(13,20,36,0.62);      /* translucent bars over the gradient */
+  --nav-panel:    rgba(255,255,255,0.05);   /* inset inputs / tabs */
+  --nav-panel-2:  rgba(255,255,255,0.09);
+  --nav-line:     rgba(132,164,216,0.16);
+  --nav-line-2:   rgba(132,164,216,0.30);
+  --nav-dim:      #93a0bb;                   /* cool blue-grey secondary text */
+}
+
+/* Frosted navy bars (nothing scrolls behind them, so the blur just
+   softens the gradient for a little depth). */
+header,
+#phone-status-bar {
+  background: var(--nav-bar);
+  border-color: var(--nav-line);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+#phone-code-display,
+#phone-rekke-banner { background: rgba(13,20,36,0.5); border-color: var(--nav-line); }
+.block-tabs { background: rgba(10,16,30,0.55); border-bottom-color: var(--nav-line); }
+.game-tabs  { background: rgba(10,16,30,0.40); border-bottom-color: var(--nav-line); }
+.paper-toolbar { background: rgba(13,20,36,0.5); }
+
+/* Inputs and the scan drop-zone */
+.phone-code-input,
+.apikey-input { background: var(--nav-panel); border-color: var(--nav-line-2); }
+.upload-zone { border-color: var(--nav-line-2); }
+
+/* Block switcher — brass active state instead of the old purple */
+.block-tab { background: var(--nav-panel); border-color: var(--nav-line-2); color: var(--nav-dim); }
+.block-tab:hover { background: var(--nav-panel-2); color: var(--paper); }
+.block-tab.active {
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.block-tab-add { border-color: var(--nav-line-2); color: var(--nav-dim); }
+.block-tab-add:hover { border-color: var(--gold); color: var(--gold); }
+
+/* Game tabs (active state already brass in the base rules) */
+.game-tab { background: var(--nav-panel); border-color: var(--nav-line-2); color: var(--nav-dim); }
+.game-tab:hover { background: var(--nav-panel-2); color: var(--paper); }
+
+/* Cool the chrome's secondary text so it belongs to the navy world */
+.conn-label, .connect-sub, .proc-label, .pending-sub, .pending-btn-link,
+.detected-count, .upload-zone p, .apikey-label, .upload-or { color: var(--nav-dim); }
+
+.spinner { border-color: var(--nav-line-2); border-top-color: var(--gold); }
+
+/* Settings / error-log cards */
+.bv-overlay-card { background: rgba(16,24,42,0.97); border-color: var(--nav-line-2); }
+.bv-icon-btn { border-color: var(--nav-line-2); }
 </style>
 </head>
 <body data-bg="blaa">
