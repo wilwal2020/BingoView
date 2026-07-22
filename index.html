@@ -12,11 +12,11 @@
   --ink:    #0a0a0a;
   --paper:  #f5f0e8;
   --cream:  #ede8dc;
-  --gold:   #e8a020;
-  --gold2:  #c47a10;
+  --gold:   #e3a53a;   /* Kveldshall brass (design accent) */
+  --gold2:  #c8892b;
   --red:    #c8281e;
   --green:  #1a7a40;
-  --dim:    #8a8070;
+  --dim:    #8b93a6;   /* cool blue-grey secondary text */
   --mono:   'IBM Plex Mono', monospace;
   --display:'Bebas Neue', sans-serif;
 }
@@ -1415,15 +1415,51 @@ header .conn-label { margin-left: auto; }
 
 /* Frosted navy bars (nothing scrolls behind them, so the blur just
    softens the gradient for a little depth). */
-header,
-#phone-status-bar {
+header {
   background: var(--nav-bar);
   border-color: var(--nav-line);
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
 }
-#phone-code-display,
+
+/* Footer — the design's "N igjen · Rekke X · mangler …" line */
+#phone-status-bar {
+  background: transparent;
+  border-top: none;
+  padding: 6px 15px 11px;
+  align-items: baseline;
+  gap: 10px;
+}
+.foot-igjen { display: flex; align-items: baseline; gap: 5px; text-transform: uppercase; }
+.foot-igjen b {
+  font-family: var(--display);
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--gold);
+  letter-spacing: 0.02em;
+}
+.foot-igjen b.foot-bingo { color: #c4a8ff; }
+.foot-igjen > span { font-size: 0.62rem; letter-spacing: 0.1em; color: var(--nav-dim); }
+.foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; }
+#foot-miss { font-size: 0.6rem; letter-spacing: 0.05em; color: var(--nav-dim); }
+#foot-miss b { color: var(--paper); }
+
+/* Session-code bar — slim, transparent; the code itself in brass */
+#phone-code-display { background: transparent; border-top: 1px solid var(--nav-line); padding: 8px 15px 10px; }
 #phone-rekke-banner { background: rgba(13,20,36,0.5); border-color: var(--nav-line); }
+
+/* Header buttons as quiet ghosts on the navy bar */
+#btn-fresh-start, #btn-share-paper, #btn-share-code {
+  background: transparent;
+  border-color: var(--nav-line-2);
+  color: var(--nav-dim);
+}
+#btn-fresh-start:hover { border-color: var(--red); color: var(--red); }
+
+/* Screens the mockup didn't show, tuned to the same design */
+.rekke-buttons { background: rgba(10,16,30,0.40); border-bottom-color: var(--nav-line); }
+.rekke-btn { background: var(--nav-panel); border-color: var(--nav-line-2); color: var(--nav-dim); border-radius: 8px; }
+.share-card { background: rgba(16,24,42,0.97); border-color: var(--nav-line-2); }
 .block-tabs { background: rgba(10,16,30,0.55); border-bottom-color: var(--nav-line); }
 .game-tabs  { background: rgba(10,16,30,0.40); border-bottom-color: var(--nav-line); }
 .paper-toolbar { background: rgba(13,20,36,0.5); }
@@ -1433,15 +1469,16 @@ header,
 .apikey-input { background: var(--nav-panel); border-color: var(--nav-line-2); }
 .upload-zone { border-color: var(--nav-line-2); }
 
-/* Block switcher — brass active state instead of the old purple */
-.block-tab { background: var(--nav-panel); border-color: var(--nav-line-2); color: var(--nav-dim); }
-.block-tab:hover { background: var(--nav-panel-2); color: var(--paper); }
+/* Block switcher — the design's solid-navy pills, brass when active */
+.block-tab { background: #141a28; border-color: #25304a; color: var(--nav-dim); border-radius: 6px; }
+.block-tab:hover { background: #1a2233; color: var(--paper); }
 .block-tab.active {
-  background: color-mix(in srgb, var(--gold) 16%, transparent);
+  background: #30301f; /* fallback ≈ 16% brass into navy (pre-color-mix iOS) */
+  background: color-mix(in srgb, var(--gold) 16%, #0e1422);
   border-color: var(--gold);
   color: var(--gold);
 }
-.block-tab-add { border-color: var(--nav-line-2); color: var(--nav-dim); }
+.block-tab-add { border-color: rgba(255,255,255,0.2); color: var(--nav-dim); }
 .block-tab-add:hover { border-color: var(--gold); color: var(--gold); }
 
 /* Game tabs — filled brass when active, matching the mockup pills */
@@ -1503,7 +1540,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
 }
 
 .block-tabs { padding: 4px 11px 8px; gap: 4px; }
-.block-tab { flex: 0 0 58px; width: 58px; padding: 4px 3px; gap: 2px; border-radius: 7px; }
+.block-tab { flex: 0 0 58px; width: 58px; padding: 4px 3px; gap: 2px; border-radius: 6px; }
 .block-tab .block-label { font-size: 0.5rem; letter-spacing: 0.03em; }
 .block-tab .block-badge { font-size: 0.44rem; padding: 1px 5px; margin-top: 2px; }
 .block-tab-add { flex: 0 0 34px; width: 34px; padding: 4px; font-size: 0.9rem; border-radius: 7px; }
@@ -1737,7 +1774,11 @@ header { padding: 7px 13px; gap: 5px 7px; }
         <div id="digital-paper"></div>
       </div>
       <div id="phone-status-bar">
-        <div class="detected-count" id="phone-detected-count"></div>
+        <div class="foot-igjen"><b id="foot-igjen-n">—</b><span>igjen</span></div>
+        <div class="foot-right">
+          <span id="foot-miss"></span>
+          <div class="detected-count" id="phone-detected-count"></div>
+        </div>
       </div>
       <div id="phone-code-display">
         <div>
@@ -4154,6 +4195,7 @@ function renderCells(gameKey) {
   }
 
   updateProximityHighlights(gameKey);
+  if (gameKey === activeGame) { try { updateFootStatus(); } catch (e) {} }
 }
 
 // ── Manual play (connected mode) ──────────────────────────────
@@ -4326,6 +4368,7 @@ function handleManualTap(number) {
   }
 
   updateProximityHighlights(activeGame);
+  try { updateFootStatus(); } catch (e) {}
   saveSession();
 }
 
@@ -4504,7 +4547,6 @@ function updateRekkeLabel() {
   const gs = gameState[activeGame];
   const el = document.getElementById("phone-rekke-banner");
   if (!el) return;
-  const rekke = (gs.rekke || 'Rekke1').replace("Rekke", "Rekke ");
   const blk = blocks[activeBlockIdx];
   const blkName = ((blk && blk.userName) || '').trim() || ('Blokk ' + (activeBlockIdx + 1));
   let n = 0;
@@ -4513,12 +4555,72 @@ function updateRekkeLabel() {
   el.innerHTML = '';
   const left = document.createElement('span');
   left.className = 'rekke-head-l';
-  left.textContent = blkName + ' · ' + rekke;
+  left.textContent = blkName + ' · ditt ark';
   const right = document.createElement('span');
   right.className = 'rekke-head-r';
   right.textContent = n ? (n + ' ark') : '';
   el.appendChild(left);
   el.appendChild(right);
+  updateFootStatus();
+}
+
+// Best remaining-to-win info for the ACTIVE game: fewest missing numbers
+// across strips for the current rekke, plus which numbers they are.
+// Mirrors computeBlockMinRemaining but keeps the winning combo's numbers.
+function computeActiveMissing() {
+  const gs = gameState[activeGame];
+  if (!gs || !gs.paperEl) return null;
+  const proximityBase = (manualPlayMode && gs.hostCalled && gs.hostCalled.length)
+    ? gs.hostCalled : gs.called;
+  const calledSet = new Set((proximityBase || []).map(String));
+  const rekke = gs.rekke || 'Rekke1';
+  const rowsNeeded = rekke === 'Rekke1' ? 1 : (rekke === 'Rekke2' ? 2 : 3);
+  let best = null;
+  gs.paperEl.querySelectorAll(".strip").forEach(stripEl => {
+    const numRows = stripEl._numRows || [];
+    if (!numRows.length) return;
+    const missPerRow = numRows.map(cells =>
+      cells.filter(c => !calledSet.has(c.dataset.num)).map(c => Number(c.dataset.num)));
+    const order = missPerRow.map((arr, idx) => ({ idx, n: arr.length }))
+                            .sort((a, b) => a.n - b.n)
+                            .slice(0, rowsNeeded);
+    if (order.length < rowsNeeded) return;
+    const nums = new Set();
+    order.forEach(o => missPerRow[o.idx].forEach(n => nums.add(n)));
+    if (!best || nums.size < best.length) best = [...nums].sort((a, b) => a - b);
+  });
+  if (!best) return null;
+  return { min: best.length, missing: best, rekke };
+}
+
+// Footer: big "N igjen" + "Rekke X · mangler a · b" (numbers listed when close)
+function updateFootStatus() {
+  const nEl = document.getElementById("foot-igjen-n");
+  const mEl = document.getElementById("foot-miss");
+  if (!nEl || !mEl) return;
+  const info = computeActiveMissing();
+  if (!info) { nEl.textContent = "—"; nEl.classList.remove("foot-bingo"); mEl.textContent = ""; return; }
+  const rekkeLabel = info.rekke.replace("Rekke", "Rekke ");
+  if (info.min === 0) {
+    nEl.textContent = "BINGO!";
+    nEl.classList.add("foot-bingo");
+    mEl.textContent = rekkeLabel + " fullført";
+    return;
+  }
+  nEl.classList.remove("foot-bingo");
+  nEl.textContent = String(info.min);
+  if (info.min <= 3) {
+    mEl.innerHTML = "";
+    mEl.appendChild(document.createTextNode(rekkeLabel + " · mangler "));
+    info.missing.forEach((num, i) => {
+      if (i > 0) mEl.appendChild(document.createTextNode(" · "));
+      const b = document.createElement("b");
+      b.textContent = num;
+      mEl.appendChild(b);
+    });
+  } else {
+    mEl.textContent = rekkeLabel;
+  }
 }
 
 // Apply a called number to a given game's state — updates DOM if that game is active
