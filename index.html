@@ -1419,20 +1419,20 @@ header .conn-label { margin-left: auto; }
    exactly like the design — no per-row backgrounds or separator lines. */
 header { background: transparent; border-bottom: none; }
 
-/* Footer — a quiet "mangler a · b" line when close to a win */
+/* Footer — only the scan quality count remains, right-aligned and quiet */
 #phone-status-bar {
   background: transparent;
   border-top: none;
-  padding: 2px 15px 10px;
+  padding: 2px 15px 8px;
   justify-content: flex-end;
   gap: 10px;
 }
-.foot-right { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; text-align: right; }
-#foot-miss { font-size: 0.66rem; letter-spacing: 0.05em; color: var(--nav-dim); }
-#foot-miss b { color: var(--paper); }
 
-/* Session-code bar — slim, transparent; the code itself in brass */
+/* Session-code bar — slim, transparent; the code itself in brass. The
+   duplicate "Tilkoblet" status is hidden (the header already shows it);
+   CSS-hidden rather than removed because JS still writes to its elements. */
 #phone-code-display { background: transparent; border-top: 1px solid var(--nav-line); padding: 8px 15px 10px; }
+#phone-code-display .conn-label { display: none; }
 
 /* Header buttons as quiet ghosts on the gradient */
 #btn-fresh-start, #btn-share-paper, #btn-share-code {
@@ -1508,8 +1508,9 @@ header { background: transparent; border-bottom: none; }
   padding: 5px;   /* tight white frame around the strips, per the design */
   box-shadow: 0 3px 14px rgba(0,0,0,0.35);
 }
-.paper-toolbar { padding-top: 12px; }
-#paper-canvas-wrap { margin-top: 4px; }
+/* Sit the manual switches evenly between the spill row and the panel */
+.paper-toolbar { padding: 0 12px 10px; }
+#paper-canvas-wrap { margin-top: 0; }
 
 /* Rekke banner — big centred "Rekke X" in the accent colour, inside the
    navy panel above the paper. */
@@ -1542,9 +1543,10 @@ header { padding: 7px 13px; gap: 5px 7px; }
 }
 
 .block-tabs { padding: 4px 11px 8px; gap: 4px; }
-/* Pills grow to fill the row — no dead space on the right; 58px is the
-   floor so wrapping still behaves. */
-.block-tab { flex: 1 1 58px; width: auto; min-width: 58px; padding: 5px 4px; gap: 2px; border-radius: 6px; }
+/* Every pill is exactly one fifth of the row (minus the +-button and gaps),
+   so the size never changes with the block count — one block looks the same
+   as one of five, and five fill the row edge to edge. */
+.block-tab { flex: 0 0 calc((100% - 54px) / 5); width: auto; min-width: 0; padding: 5px 4px; gap: 2px; border-radius: 6px; }
 .block-tab .block-label { font-size: 0.56rem; letter-spacing: 0.03em; }
 .block-tab .block-badge { font-size: 0.48rem; padding: 1px 6px; margin-top: 2px; }
 .block-tab-add { flex: 0 0 34px; width: 34px; padding: 4px; font-size: 0.9rem; border-radius: 6px; }
@@ -1552,7 +1554,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
 .game-tabs { padding: 2px 11px 10px; gap: 5px; }
 .game-tab { font-size: 0.66rem; padding: 9px 4px; border-radius: 8px; letter-spacing: 0.02em; }
 
-#paper-canvas-wrap { margin: 4px 11px 11px; padding: 9px; }
+#paper-canvas-wrap { margin: 0 11px 11px; padding: 9px; }
 
 /* Cool the chrome's secondary text so it belongs to the navy world */
 .conn-label, .connect-sub, .proc-label, .pending-sub, .pending-btn-link,
@@ -1778,10 +1780,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
         <div id="digital-paper"></div>
       </div>
       <div id="phone-status-bar">
-        <div class="foot-right">
-          <span id="foot-miss"></span>
-          <div class="detected-count" id="phone-detected-count"></div>
-        </div>
+        <div class="detected-count" id="phone-detected-count"></div>
       </div>
       <div id="phone-code-display">
         <div>
@@ -4205,7 +4204,6 @@ function renderCells(gameKey) {
   }
 
   updateProximityHighlights(gameKey);
-  if (gameKey === activeGame) { try { updateFootStatus(); } catch (e) {} }
 }
 
 // ── Manual play (connected mode) ──────────────────────────────
@@ -4378,7 +4376,6 @@ function handleManualTap(number) {
   }
 
   updateProximityHighlights(activeGame);
-  try { updateFootStatus(); } catch (e) {}
   saveSession();
 }
 
@@ -4559,55 +4556,8 @@ function updateRekkeLabel() {
   if (!el) return;
   // Big centred "Rekke X" in the accent colour, above the paper
   el.textContent = (gs.rekke || 'Rekke1').replace("Rekke", "Rekke ");
-  updateFootStatus();
 }
 
-// Best remaining-to-win info for the ACTIVE game: fewest missing numbers
-// across strips for the current rekke, plus which numbers they are.
-// Mirrors computeBlockMinRemaining but keeps the winning combo's numbers.
-function computeActiveMissing() {
-  const gs = gameState[activeGame];
-  if (!gs || !gs.paperEl) return null;
-  const proximityBase = (manualPlayMode && gs.hostCalled && gs.hostCalled.length)
-    ? gs.hostCalled : gs.called;
-  const calledSet = new Set((proximityBase || []).map(String));
-  const rekke = gs.rekke || 'Rekke1';
-  const rowsNeeded = rekke === 'Rekke1' ? 1 : (rekke === 'Rekke2' ? 2 : 3);
-  let best = null;
-  gs.paperEl.querySelectorAll(".strip").forEach(stripEl => {
-    const numRows = stripEl._numRows || [];
-    if (!numRows.length) return;
-    const missPerRow = numRows.map(cells =>
-      cells.filter(c => !calledSet.has(c.dataset.num)).map(c => Number(c.dataset.num)));
-    const order = missPerRow.map((arr, idx) => ({ idx, n: arr.length }))
-                            .sort((a, b) => a.n - b.n)
-                            .slice(0, rowsNeeded);
-    if (order.length < rowsNeeded) return;
-    const nums = new Set();
-    order.forEach(o => missPerRow[o.idx].forEach(n => nums.add(n)));
-    if (!best || nums.size < best.length) best = [...nums].sort((a, b) => a - b);
-  });
-  if (!best) return null;
-  return { min: best.length, missing: best, rekke };
-}
-
-// Footer: just "mangler a · b" when close to a win (≤3 missing); the win
-// itself is already shown green on the paper, and the rekke lives in the
-// big banner above the sheet.
-function updateFootStatus() {
-  const mEl = document.getElementById("foot-miss");
-  if (!mEl) return;
-  mEl.innerHTML = "";
-  const info = computeActiveMissing();
-  if (!info || info.min === 0 || info.min > 3) return;
-  mEl.appendChild(document.createTextNode("mangler "));
-  info.missing.forEach((num, i) => {
-    if (i > 0) mEl.appendChild(document.createTextNode(" · "));
-    const b = document.createElement("b");
-    b.textContent = num;
-    mEl.appendChild(b);
-  });
-}
 
 // Apply a called number to a given game's state — updates DOM if that game is active
 function applyCallToGame(gameKey, number, isLatestEver) {
