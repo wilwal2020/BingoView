@@ -24,12 +24,34 @@
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
 body {
-  background: var(--ink);
+  background: #0a1020;
   color: var(--paper);
   font-family: var(--mono);
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+
+/* App backdrop — a fixed gradient behind all content. Switchable from the
+   settings overlay; the choice persists in localStorage ('bv_bg').
+   Default is "Kjølig blå"; body[data-bg] selects the others. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 55% at 50% -10%, rgba(86,140,220,0.20), transparent 62%),
+    linear-gradient(180deg, #101a2e, #0a1020);
+}
+body[data-bg="natt"]::before {
+  background: linear-gradient(180deg, #17243f, #0a0f1c);
+}
+body[data-bg="teal"]::before {
+  background:
+    radial-gradient(120% 55% at 50% -10%, rgba(52,176,182,0.18), transparent 62%),
+    linear-gradient(180deg, #0d2028, #07151a);
 }
 
 /* ═══════════════════════════════════
@@ -1199,6 +1221,40 @@ header .conn-label { margin-left: auto; }
   cursor: pointer;
 }
 .bv-overlay-btn:hover { border-color: var(--gold); color: var(--gold); }
+/* Background picker — a small segmented control in the settings overlay */
+.bv-bg-seg {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  background: #0e0e0e;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 3px;
+}
+.bv-bg-seg button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 5px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.bv-bg-seg button .sw {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.2);
+}
+.bv-bg-seg button.on {
+  background: #242424;
+  color: var(--paper);
+  box-shadow: inset 0 0 0 1px var(--gold);
+}
 .bv-overlay-btn-danger { border-color: var(--red); color: var(--red); }
 .bv-overlay-btn-danger:hover { background: var(--red); color: #fff; }
 .bv-errlog-list {
@@ -1341,7 +1397,12 @@ header .conn-label { margin-left: auto; }
 .share-actions button:active { transform: scale(0.95); }
 </style>
 </head>
-<body>
+<body data-bg="blaa">
+<script>
+  // Apply the saved backdrop before first paint so there's no flash of the
+  // default when the user has picked another. Full wiring is set up on load.
+  try { var _bg = localStorage.getItem("bv_bg"); if (_bg === "natt" || _bg === "teal") document.body.dataset.bg = _bg; } catch (e) {}
+</script>
 
 <!-- ══════════════════════════════════════
      PHONE SCREEN
@@ -1350,7 +1411,7 @@ header .conn-label { margin-left: auto; }
   <header>
     <button id="btn-fresh-start">Nytt ark</button>
     <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
-    <button id="btn-bv-settings" class="bv-icon-btn" title="Lyd og vibrasjon" aria-label="Innstillinger">⚙</button>
+    <button id="btn-bv-settings" class="bv-icon-btn" title="Innstillinger" aria-label="Innstillinger">⚙</button>
     <div class="conn-label">
       <div class="conn-dot" id="phone-conn-dot"></div>
       <span id="phone-conn-label">Waiting</span>
@@ -1360,7 +1421,7 @@ header .conn-label { margin-left: auto; }
   <!-- BV settings overlay -->
   <div id="bv-settings-overlay" class="bv-overlay" style="display:none">
     <div class="bv-overlay-card">
-      <div class="bv-overlay-title">Lyd & vibrasjon</div>
+      <div class="bv-overlay-title">Innstillinger</div>
       <div class="bv-row">
         <div class="bv-row-label">
           <span>Vibrer ved nytt tall</span>
@@ -1390,6 +1451,17 @@ header .conn-label { margin-left: auto; }
           <input type="checkbox" id="bv-strong-vibrate-on">
           <span class="bv-toggle-track"></span>
         </label>
+      </div>
+      <div class="bv-row">
+        <div class="bv-row-label">
+          <span>Bakgrunn</span>
+          <span class="bv-row-desc">Farge bak arket</span>
+        </div>
+        <div class="bv-bg-seg" id="bv-bg-seg">
+          <button type="button" data-bg="blaa"><span class="sw" style="background:linear-gradient(135deg,#5a8cdc,#101a2e)"></span>Blå</button>
+          <button type="button" data-bg="natt"><span class="sw" style="background:#17243f"></span>Natt</button>
+          <button type="button" data-bg="teal"><span class="sw" style="background:linear-gradient(135deg,#34b0b6,#0d2028)"></span>Teal</button>
+        </div>
       </div>
       <div class="bv-row">
         <div class="bv-row-label"><span>Feil-logg</span><span class="bv-row-desc">Se loggede JS-feil</span></div>
@@ -3060,6 +3132,21 @@ function initPhone() {
   document.getElementById("bv-settings-close").addEventListener("click", () => {
     settingsOverlay.style.display = "none";
   });
+
+  // Background picker (Kjølig blå / Ren natt / Teal) — persists in localStorage
+  const bgSeg = document.getElementById("bv-bg-seg");
+  if (bgSeg) {
+    const VALID = ["blaa", "natt", "teal"];
+    const applyBg = (v) => {
+      if (!VALID.includes(v)) v = "blaa";
+      document.body.dataset.bg = v;
+      bgSeg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.bg === v));
+      try { localStorage.setItem("bv_bg", v); } catch (e) {}
+    };
+    applyBg(document.body.dataset.bg || "blaa");
+    bgSeg.querySelectorAll("button").forEach(b =>
+      b.addEventListener("click", () => applyBg(b.dataset.bg)));
+  }
   settingsOverlay.addEventListener("click", e => {
     if (e.target === settingsOverlay) settingsOverlay.style.display = "none";
   });
