@@ -1487,6 +1487,32 @@ header,
 }
 #phone-rekke-banner .rekke-head-r { color: var(--nav-dim); font-weight: 500; }
 
+/* ── Compact chrome GEOMETRY — matches the mockup's proportions, not just
+   its colours. This is what makes it read as the new design rather than the
+   old app re-skinned: slimmer bars, 58px block pills, smaller game pills,
+   a dashed-underline name field. ── */
+header { padding: 7px 13px; gap: 5px 7px; }
+.hdr-title { font-size: 1.05rem; }
+
+.user-name-row { padding: 3px 13px 7px; gap: 8px; background: transparent; border-bottom: none; }
+.user-name-label { font-family: var(--mono); font-size: 0.54rem; letter-spacing: 0.18em; font-weight: 700; }
+.user-name-input {
+  background: transparent; border: none;
+  border-bottom: 1px dashed var(--nav-line-2); border-radius: 0;
+  padding: 3px 2px; font-size: 0.82rem;
+}
+
+.block-tabs { padding: 4px 11px 8px; gap: 4px; }
+.block-tab { flex: 0 0 58px; width: 58px; padding: 4px 3px; gap: 2px; border-radius: 7px; }
+.block-tab .block-label { font-size: 0.5rem; letter-spacing: 0.03em; }
+.block-tab .block-badge { font-size: 0.44rem; padding: 1px 5px; margin-top: 2px; }
+.block-tab-add { flex: 0 0 34px; width: 34px; padding: 4px; font-size: 0.9rem; border-radius: 7px; }
+
+.game-tabs { padding: 2px 11px 10px; gap: 5px; }
+.game-tab { font-size: 0.58rem; padding: 6px 3px; border-radius: 8px; letter-spacing: 0.02em; }
+
+#paper-canvas-wrap { margin: 4px 11px 11px; padding: 9px; }
+
 /* Cool the chrome's secondary text so it belongs to the navy world */
 .conn-label, .connect-sub, .proc-label, .pending-sub, .pending-btn-link,
 .detected-count, .upload-zone p, .apikey-label, .upload-or { color: var(--nav-dim); }
