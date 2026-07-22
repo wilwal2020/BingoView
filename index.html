@@ -1489,13 +1489,22 @@ header { background: transparent; border-bottom: none; }
 /* Host's current game: subtle brass border when it's not the viewed tab */
 .game-tab.host-current:not(.active) { border-color: rgba(227,165,58,0.45); }
 
-/* "Manuell trykking" / "Markér nye" — plain pill buttons, no slider.
+/* "Manuell trykking" / "Markér nye" — plain rounded buttons, no slider.
    The on-state fills the button with its colour: brass for manual
    confirmation, purple for the away marker. */
-.manual-switch { background: var(--nav-panel); border-color: var(--nav-line-2); border-radius: 8px; padding: 7px 14px; gap: 0; }
+.manual-switch { background: var(--nav-panel); border-color: var(--nav-line-2); border-radius: 16px; padding: 8px 18px; gap: 0; outline: none; }
 .manual-switch .manual-switch-pill { display: none; }
 .manual-switch.active { background: var(--gold); border-color: var(--gold); color: #1a1205; }
 .manual-switch-away.active { background: #9b7aff; border-color: #9b7aff; color: #160c27; }
+/* No lingering focus ring after a tap — only show one for keyboard users */
+.manual-switch:focus { outline: none; }
+.manual-switch:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+/* On touch, don't let the gold hover border stick after a tap */
+@media (hover: none) {
+  .manual-switch:hover { border-color: var(--nav-line-2); }
+  .manual-switch.active:hover { border-color: var(--gold); }
+  .manual-switch-away.active:hover { border-color: #9b7aff; }
+}
 
 /* Float the white paper as a soft card inside a navy panel — the mockup's
    signature. The old grey (#1a1a1a) scroll box + hard grey sheet border are
@@ -1512,8 +1521,9 @@ header { background: transparent; border-bottom: none; }
   padding: 5px;   /* tight white frame around the strips, per the design */
   box-shadow: 0 3px 14px rgba(0,0,0,0.35);
 }
-/* Sit the manual switches evenly between the spill row and the panel */
-.paper-toolbar { padding: 0 12px 10px; }
+/* Sit the manual switches evenly between the spill row and the panel,
+   centred as a pair with room to breathe between them */
+.paper-toolbar { padding: 0 12px 10px; gap: 18px; }
 #paper-canvas-wrap { margin-top: 0; }
 
 /* Rekke banner — big centred "Rekke X" in the accent colour, inside the
