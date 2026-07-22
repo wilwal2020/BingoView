@@ -1464,7 +1464,28 @@ header,
   box-shadow: 0 3px 14px rgba(0,0,0,0.35);
 }
 .paper-toolbar { padding-top: 12px; }
-#phone-rekke-banner { background: transparent; border-bottom: none; padding-bottom: 2px; }
+#paper-canvas-wrap { margin-top: 4px; }
+
+/* Rekke banner → the mockup's small two-part card header sitting just above
+   the paper card: "Blokk N · Rekke X" on the left, strip count on the right.
+   Replaces the heavy centred gold banner, which wasn't in the design. */
+#phone-rekke-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--gold);
+  background: transparent;
+  border-bottom: none;
+  padding: 6px 15px 3px;
+}
+#phone-rekke-banner .rekke-head-r { color: var(--nav-dim); font-weight: 500; }
 
 /* Cool the chrome's secondary text so it belongs to the navy world */
 .conn-label, .connect-sub, .proc-label, .pending-sub, .pending-btn-link,
@@ -4456,7 +4477,22 @@ async function processAllPending() {
 function updateRekkeLabel() {
   const gs = gameState[activeGame];
   const el = document.getElementById("phone-rekke-banner");
-  if (el) el.textContent = (gs.rekke || 'Rekke1').replace("Rekke","Rekke ");
+  if (!el) return;
+  const rekke = (gs.rekke || 'Rekke1').replace("Rekke", "Rekke ");
+  const blk = blocks[activeBlockIdx];
+  const blkName = ((blk && blk.userName) || '').trim() || ('Blokk ' + (activeBlockIdx + 1));
+  let n = 0;
+  if (Array.isArray(gs.strips)) n = gs.strips.length;
+  else if (gs.paperEl) n = gs.paperEl.querySelectorAll('.strip').length;
+  el.innerHTML = '';
+  const left = document.createElement('span');
+  left.className = 'rekke-head-l';
+  left.textContent = blkName + ' · ' + rekke;
+  const right = document.createElement('span');
+  right.className = 'rekke-head-r';
+  right.textContent = n ? (n + ' ark') : '';
+  el.appendChild(left);
+  el.appendChild(right);
 }
 
 // Apply a called number to a given game's state — updates DOM if that game is active
