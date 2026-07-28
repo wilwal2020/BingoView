@@ -901,6 +901,13 @@ body.fx-on .strip.has-winner.fx-slam .strip-id-banner {
   transition: border-color 0.2s;
 }
 .user-name-input:focus { border-color: var(--gold); }
+/* Shared away: the receiver owns the name. Reads as locked, but it's tappable
+   — the tap offers to take the block back. */
+.user-name-input.is-shared-away {
+  color: var(--dim);
+  border-style: dashed;
+  cursor: pointer;
+}
 
 /* Game tabs strip — row of 4 selectors */
 /* Block selector row — sits above game tabs */
@@ -1125,21 +1132,49 @@ body.fx-on .strip.has-winner.fx-slam .strip-id-banner {
 #toast.err { border-color: var(--red);   color: var(--red); }
 #toast.warn{ border-color: var(--gold);  color: var(--gold); }
 
-#btn-fresh-start {
+/* Paper-toolbar buttons. These two sit side by side and do opposite things,
+   so they are deliberately NOT styled alike: sharing is a safe, everyday
+   action in the brass accent, resetting is destructive and reads red. They
+   used to be near-identical grey ghosts, which is how "Del" (share) got read
+   as "delete" and "Nytt ark" got read as "add a block". */
+#btn-fresh-start, #btn-share-paper {
   display: none;
   background: transparent;
   border: 1px solid #333;
   border-radius: 6px;
-  color: var(--dim);
   font-family: var(--mono);
   font-size: 0.65rem;
   letter-spacing: 0.08em;
   padding: 5px 10px;
   cursor: pointer;
   text-transform: uppercase;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
-#btn-fresh-start:hover { border-color: var(--red); color: var(--red); }
+
+/* Share — brass accent + an outbound arrow so it reads as "send this on". */
+#btn-share-paper {
+  color: var(--gold);
+  border-color: rgba(227,165,58,0.45);
+  align-items: center;
+  gap: 5px;
+}
+#btn-share-paper .btn-ico { font-size: 0.8rem; line-height: 1; }
+#btn-share-paper:hover {
+  color: var(--gold);
+  border-color: var(--gold);
+  background: rgba(227,165,58,0.10);
+}
+
+/* Reset — muted red at rest so it never looks like an "add" action. */
+#btn-fresh-start {
+  color: #b06a63;
+  border-color: rgba(200,40,30,0.40);
+}
+#btn-fresh-start:hover {
+  border-color: var(--red);
+  color: var(--red);
+  background: rgba(200,40,30,0.10);
+}
 
 /* Manual play button on connect screen */
 .connect-divider {
@@ -1628,13 +1663,14 @@ header { background: transparent; border-bottom: none; }
 #phone-code-display { background: transparent; border-top: 1px solid var(--nav-line); padding: 8px 15px 10px; }
 #phone-code-display .conn-label { display: none; }
 
-/* Header buttons as quiet ghosts on the gradient */
-#btn-fresh-start, #btn-share-paper, #btn-share-code {
+/* Header buttons as quiet ghosts on the gradient. The paper-toolbar pair
+   (share / reset) is intentionally excluded — they carry their own accent
+   colours so the two can't be mistaken for each other. */
+#btn-share-code {
   background: transparent;
   border-color: var(--nav-line-2);
   color: var(--nav-dim);
 }
-#btn-fresh-start:hover { border-color: var(--red); color: var(--red); }
 
 /* Screens the mockup didn't show, tuned to the same design */
 .rekke-buttons { background: transparent; border-bottom: none; }
@@ -1789,8 +1825,8 @@ header { padding: 7px 13px; gap: 5px 7px; }
 ══════════════════════════════════════ -->
 <div id="screen-phone" class="screen active">
   <header>
-    <button id="btn-fresh-start">Nytt ark</button>
-    <button id="btn-share-paper" style="display:none;background:transparent;border:1px solid #333;border-radius:6px;color:var(--dim);font-family:var(--mono);font-size:0.65rem;letter-spacing:0.08em;padding:5px 10px;cursor:pointer;text-transform:uppercase;" title="Del dette arket som lenke">Del ark</button>
+    <button id="btn-fresh-start" title="Sletter alle blokker og starter tomt">Nullstill alt</button>
+    <button id="btn-share-paper" title="Del dette arket som lenke"><span class="btn-ico" aria-hidden="true">↗</span>Del ark</button>
     <button id="btn-bv-settings" class="bv-icon-btn" title="Innstillinger" aria-label="Innstillinger">⚙</button>
     <div class="conn-label">
       <div class="conn-dot" id="phone-conn-dot"></div>
@@ -2769,11 +2805,33 @@ function syncSharedAwayUI() {
   const isShared = !!(blk && blk.sharedAway);
   const nameInput = document.getElementById("user-name-input");
   if (nameInput) {
-    nameInput.disabled = isShared;
+    // readOnly rather than disabled: a disabled input swallows clicks, which
+    // left a wrongly-flagged block permanently unnameable with no way out.
+    // readOnly still blocks typing but lets the tap through to the reclaim
+    // handler wired up in initPhone.
+    nameInput.readOnly = isShared;
+    nameInput.classList.toggle('is-shared-away', isShared);
     nameInput.title = isShared
-      ? "Du har delt dette arket — mottakeren eier navnet nå"
+      ? "Du har delt dette arket — mottakeren eier navnet nå. Trykk for å ta det tilbake."
       : "";
   }
+}
+
+// Take back a block the user shared (or thought better of sharing). Clearing
+// the flag re-enables the name field and stops reconcileSharedNames pulling
+// the receiver's name back over theirs.
+function reclaimSharedBlock() {
+  const blk = blocks[activeBlockIdx];
+  if (!blk || !blk.sharedAway) return;
+  if (!confirm("Ta tilbake dette arket? Du kan endre navnet igjen.")) return;
+  blk.sharedAway = false;
+  syncSharedAwayUI();
+  publishUserName();
+  saveSession();
+  refreshBlockTabs();
+  const nameInput = document.getElementById("user-name-input");
+  if (nameInput) nameInput.focus();
+  toast("Arket er ditt igjen", "ok", 2500);
 }
 
 // Latest papers_meta snapshot for the whole channel (all phones' blocks).
@@ -2839,13 +2897,20 @@ function saveSession() {
   try { localStorage.setItem(key, JSON.stringify(data)); } catch(e) {}
 }
 
-function restoreSession() {
+// opts.anySession — accept the most recent real session's blocks as a last
+// resort. Used by offline prep, which has no sessionCode of its own but should
+// still bring back the blocks the user already has rather than starting blank.
+function restoreSession(opts = {}) {
   let raw;
   try {
     if (sessionCode) raw = localStorage.getItem('bv_paper_' + sessionCode);
     // Fall back to the offline-prep cache so a connect-after-prep keeps
     // the user's scanned blocks
     if (!raw) raw = localStorage.getItem('bv_paper_offline');
+    if (!raw && opts.anySession) {
+      const lastCode = (localStorage.getItem('bv_last_code') || '').trim().toUpperCase();
+      if (lastCode) raw = localStorage.getItem('bv_paper_' + lastCode);
+    }
   } catch(e) { return false; }
   if (!raw) return false;
   // A corrupt entry must not break the whole connect flow
@@ -3365,9 +3430,14 @@ let _offlinePrepMode = false;
 function enterOfflinePrep() {
   _offlinePrepMode = true;
   document.getElementById("phone-connect").style.display = "none";
-  // Restore any previously prepped blocks
-  const restored = restoreSession();
+  // Bring back whatever the user already has: blocks prepped offline before,
+  // or failing that the blocks from their last real session. Starting this
+  // screen empty when the phone plainly has papers reads as data loss.
+  const restored = restoreSession({ anySession: true });
   if (restored) {
+    // Persist under the offline key straight away so the blocks survive a
+    // refresh in this mode (saveSession targets bv_paper_offline with no code).
+    saveSession();
     showGameTabs();
     refreshBlockTabs();
     renderActiveGame();
@@ -3378,6 +3448,8 @@ function enterOfflinePrep() {
     document.getElementById("phone-upload").style.display = "flex";
     document.getElementById("phone-paper").style.display = "none";
   }
+  // Available here too — this mode can accumulate blocks like any other.
+  document.getElementById("btn-fresh-start").style.display = "block";
   // Repurpose the code-display bar to show the disconnected state +
   // a "Koble til" button so the user can connect when ready
   document.getElementById("phone-code-display").style.display = "flex";
@@ -3522,16 +3594,23 @@ function initPhone() {
       .map(({ idx }) => idx);
   }
 
-  // Sync every shareable block's sharedAway flag to the current selection,
-  // then publish / persist / rebuild the link. Used by both selection paths.
+  // Selection changed — just rebuild the link. Deliberately does NOT touch
+  // sharedAway: browsing the share sheet is not the same as sharing, and
+  // marking blocks here used to lock their name the moment the modal opened.
+  // commitShareOwnership() below is what records an actual share.
   function applyShareSelection() {
-    shareableBlockIndices().forEach(i => {
-      if (blocks[i]) blocks[i].sharedAway = _shareSelected.has(i);
+    regenerateShareLink();
+  }
+
+  // Called when the user really shares (copies the link). Only now do the
+  // selected blocks count as "given away", handing the name to the receiver.
+  function commitShareOwnership() {
+    _shareSelected.forEach(idx => {
+      if (blocks[idx]) blocks[idx].sharedAway = true;
     });
     syncSharedAwayUI();
     publishUserName();
     saveSession();
-    regenerateShareLink();
   }
 
   function renderShareBlockList() {
@@ -3638,13 +3717,7 @@ function initPhone() {
     } else {
       _shareSelected = new Set([shareable[0]]);
     }
-    // Mark every selected block as "shared away" (re-marks on every share)
-    _shareSelected.forEach(idx => {
-      if (blocks[idx]) blocks[idx].sharedAway = true;
-    });
-    syncSharedAwayUI();
-    publishUserName();
-    saveSession();
+    // NB: no sharedAway marking here — opening the sheet is not sharing.
     renderShareBlockList();
     regenerateShareLink();
   });
@@ -3655,6 +3728,9 @@ function initPhone() {
     if (!urlBox.dataset.url) { toast('Lenken er ikke klar ennå', 'warn', 2000); return; }
     try {
       await navigator.clipboard.writeText(urlBox.dataset.url);
+      // The link is now out of the user's hands — this is the point the
+      // selected blocks actually change owner.
+      commitShareOwnership();
       toast('Lenke kopiert!', 'ok', 2000);
     } catch(e) { toast('Kunne ikke kopiere', 'err', 2000); }
   });
@@ -3737,19 +3813,22 @@ function initPhone() {
     history.replaceState(null, '', location.pathname);
   }
 
-  // Fresh-start button — two-tap confirm to avoid accidental resets
+  // Reset button — two-tap confirm to avoid accidental wipes. Single source
+  // for the resting label so the confirm states can't drift from the markup.
   const freshBtn = document.getElementById("btn-fresh-start");
+  const FRESH_BTN_LABEL = freshBtn.textContent;
   let freshConfirmTimeout = null;
   freshBtn.addEventListener("click", () => {
     if (freshBtn.dataset.confirming !== "1") {
-      // First tap — ask for confirmation
+      // First tap — ask for confirmation. Spell out that this clears
+      // everything; "Nytt ark" used to read as "add another block".
       freshBtn.dataset.confirming = "1";
-      freshBtn.textContent = "Bekreft?";
+      freshBtn.textContent = "Slett alt?";
       freshBtn.style.borderColor = "var(--red)";
       freshBtn.style.color       = "var(--red)";
       freshConfirmTimeout = setTimeout(() => {
         freshBtn.dataset.confirming = "";
-        freshBtn.textContent = "Nytt ark";
+        freshBtn.textContent = FRESH_BTN_LABEL;
         freshBtn.style.borderColor = "";
         freshBtn.style.color       = "";
       }, 3000);
@@ -3757,7 +3836,7 @@ function initPhone() {
       // Second tap — confirmed
       clearTimeout(freshConfirmTimeout);
       freshBtn.dataset.confirming = "";
-      freshBtn.textContent = "Nytt ark";
+      freshBtn.textContent = FRESH_BTN_LABEL;
       freshBtn.style.borderColor = "";
       freshBtn.style.color       = "";
       if (manualMode) {
@@ -3784,7 +3863,7 @@ function initPhone() {
       refreshGameTabs();
       refreshRekkeButtons();
       updateUploadTitle();
-      toast("Nytt ark klart", "ok", 2000);
+      toast("Alt nullstilt", "ok", 2000);
     }
   });
 
@@ -3984,6 +4063,12 @@ function initPhone() {
       blocks[activeBlockIdx].userName = blocks[activeBlockIdx].userName || savedGlobal;
     }
     nameInput.value = (blocks[activeBlockIdx] && blocks[activeBlockIdx].userName) || '';
+    // Tapping the locked field offers to take the block back — the escape
+    // hatch for anything flagged as shared, including blocks wrongly flagged
+    // by older builds that marked them just for opening the share sheet.
+    nameInput.addEventListener("mousedown", (e) => {
+      if (nameInput.readOnly) { e.preventDefault(); reclaimSharedBlock(); }
+    });
     let nameTimer = null;
     nameInput.addEventListener("input", () => {
       const v = nameInput.value.trim().slice(0, 24);
@@ -4025,14 +4110,31 @@ function initPhone() {
 async function connectPhone(code, opts = {}) {
   setConnStatus("connecting", "Kobler til\u2026");
 
-  // Verify the code is valid — an iPad host must be live on this channel
+  // Verify the code points at a real session. The host presence marker is the
+  // primary signal, but it is NOT proof of absence: a brief host wifi drop can
+  // leave the marker cleared for a session that is still running (the server
+  // executes the dead socket's onDisconnect removal after the host has already
+  // reconnected). Refusing to connect on that basis stranded phones on a live
+  // game, so when the marker is missing we look for actual session data before
+  // declaring the code bad. A typo'd code has no data at all and still errors.
   try {
     const hostSnap = await db.ref('bingoview/' + code + '/host').once('value');
     if (!hostSnap.exists()) {
-      if (opts.quiet) { setConnStatus("idle", "Ikke tilkoblet"); return; }
-      setConnStatus("error", "Ugyldig kode");
-      toast("Ingen aktiv bingo-sesjon med den koden", "err", 4000);
-      return;
+      let hasSession = false;
+      try {
+        const probes = await Promise.all(
+          ['callState', 'state', 'papers'].map(p =>
+            db.ref('bingoview/' + code + '/' + p).once('value'))
+        );
+        hasSession = probes.some(s => s.exists());
+      } catch (e) {}
+      if (!hasSession) {
+        if (opts.quiet) { setConnStatus("idle", "Ikke tilkoblet"); return; }
+        setConnStatus("error", "Ugyldig kode");
+        toast("Ingen aktiv bingo-sesjon med den koden", "err", 4000);
+        return;
+      }
+      console.log('[BV phone] host marker missing but session data found — connecting anyway');
     }
   } catch(err) {
     if (opts.quiet) { setConnStatus("idle", "Ikke tilkoblet"); return; }
@@ -4575,7 +4677,8 @@ function renderActiveGame() {
   if (gs.paperEl) {
     document.getElementById("phone-upload").style.display = "none";
     document.getElementById("phone-paper").style.display = "flex";
-    document.getElementById("btn-share-paper").style.display = "block";
+    // inline-flex, not block: the button lays out an icon beside its label.
+    document.getElementById("btn-share-paper").style.display = "inline-flex";
 
     const count = Object.keys(gs.cellMap).length;
     document.getElementById("phone-detected-count").textContent = count ? `${count}/90 funnet` : "";
