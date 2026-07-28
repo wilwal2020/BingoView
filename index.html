@@ -676,64 +676,56 @@ body.fx-on .cell::before {
    the pulse resumes the moment the class comes off. The ::before keeps
    doing the light/colour burst on its own timeline. */
 
-/* 1 ── New number called: a pop with squash & stretch. No expanding ring —
-   the follow-through it used to provide now comes from the glow instead,
-   which trails the movement without drawing a second shape (see below). */
-/* Overshoots twice and flashes white-hot before settling. The 100% frame
-   deliberately lands on the .latest glow so there's no snap at the end. */
-/* Built on the standard motion guidance rather than by eye, after three
-   attempts missed:
-     - micro-interactions live at 100-200ms; past ~500ms reads as sluggish
-       (Material uses 200ms as its reference). The previous 0.78s version
-       was in hero-transition territory, which is why it felt slow.
-     - what makes motion satisfying is NOT duration. It's squash & stretch,
-       follow-through, and secondary action — auxiliary elements trailing
-       the primary one.
-   Follow-through matters, but it does NOT have to be a separate shape.
-   With the expanding ring removed, the GLOW does that job: the transform
-   reaches rest at 78% of the run and the light keeps decaying for the
-   remaining 22%. So the movement still finishes early and crisply, and
-   something is still trailing it afterwards.
+/* 1 ── New number called: anticipation. The cell pulls back for a beat
+   before it leaps, which is what makes the pop feel deliberate rather
+   than merely reactive — the oldest trick in the animation book.
+   Picked from a side-by-side of six candidates (see call-animations.html).
 
-   The scale3d values are deliberately non-uniform — stretching wider than
-   tall at the peak, then squashing narrower than tall — which is what
-   gives it a tactile, physical feel. At this length the stages fuse into
-   one elastic gesture; the same stage count at 0.9s is what read as
-   wobble earlier. 0.34s keeps the motion inside the range where it still
-   reads as a micro-interaction. */
+   Notes carried over from the versions that came before it:
+     - micro-interactions live at 100-200ms and past ~500ms reads as
+       sluggish (Material uses 200ms as its reference). An earlier 0.78s
+       attempt was in hero-transition territory and dragged badly. The
+       0.4s here spends its first fifth on the wind-up, so the leap
+       itself still lands inside the snappy range.
+     - the scale3d values are deliberately non-uniform: squashing shorter
+       and narrower on the wind-up, stretching wider than tall on the
+       release. That squash & stretch is what makes it feel physical.
+     - there is no expanding ring any more. The glow provides the
+       follow-through instead, decaying alongside the last of the
+       movement rather than stopping with the peak, so the tail is
+       carried by light instead of by a second shape.
+
+   Unlike the versions before it, this one starts from scale 1 rather than
+   from nothing — the number is already printed on the paper, so winding
+   up from its resting size reads more naturally than materialising. */
 body.fx-on .cell.latest.latest-fresh {
-  animation: fxCellPop 0.34s linear;
+  animation: fxCellAnticipate 0.4s linear;
   z-index: 6;
 }
-@keyframes fxCellPop {
-  /* Explode out — full size in ~110ms. */
+@keyframes fxCellAnticipate {
   0% {
-    transform: scale3d(0.5, 0.5, 1);
-    box-shadow: 0 0 0 0 rgba(255,90,60,0);
-    text-shadow: none;
-    animation-timing-function: cubic-bezier(0.15, 0.9, 0.3, 1);
+    transform: scale3d(1, 1, 1);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
   }
-  /* Peak, stretched wider than tall. */
-  32% {
-    transform: scale3d(1.33, 1.25, 1);
+  /* Wind up — shrink back, gathering itself. */
+  22% {
+    transform: scale3d(0.78, 0.86, 1);
+    animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1);
+  }
+  /* Release — peak, stretched wider than tall, white-hot. */
+  50% {
+    transform: scale3d(1.32, 1.24, 1);
     box-shadow: 0 0 40px 11px rgba(255,110,70,0.95);
     text-shadow: 0 0 20px #fff, 0 0 8px #fff;
-    animation-timing-function: cubic-bezier(0.4, 0, 0.4, 1);
+    animation-timing-function: cubic-bezier(0.35, 0, 0.3, 1);
   }
-  /* Squash through the rest position — narrower than tall. */
-  58% {
-    transform: scale3d(0.97, 1.04, 1);
-    box-shadow: 0 0 32px 8px rgba(255,110,70,0.8);
-    text-shadow: 0 0 12px #fff;
-    animation-timing-function: cubic-bezier(0.3, 0, 0.2, 1);
-  }
-  /* Movement is DONE here — everything past this point is just light
-     decaying, which is what replaces the ring's follow-through. */
-  78% {
-    transform: scale3d(1, 1, 1);
-    box-shadow: 0 0 26px 5px rgba(255,110,70,0.6);
-    text-shadow: 0 0 7px rgba(255,255,255,0.65);
-    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+  /* Settle through a single soft squash. Movement ends here; everything
+     past this point is just the glow decaying. */
+  76% {
+    transform: scale3d(0.98, 1.03, 1);
+    box-shadow: 0 0 24px 5px rgba(255,110,70,0.6);
+    text-shadow: 0 0 8px rgba(255,255,255,0.6);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.3, 1);
   }
   /* Land on the .latest glow so there's no snap at the end. */
   100% {
@@ -4642,9 +4634,10 @@ function renderCells(gameKey) {
       // Force a reflow so the animation actually restarts from 0
       void newLatestEl.offsetWidth;
       newLatestEl.classList.add('latest-fresh');
-      // Clean up the marker class after the animation finishes. Covers the
-      // 0.34s FX pop and the plain 0.4s cellPop used when FX are off.
-      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 480);
+      // Clean up the marker class after the animation finishes. Covers both
+      // the 0.4s FX anticipation pop and the plain 0.4s cellPop used when
+      // FX are off.
+      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 520);
     }
   }
   gs._prevLatestNum = lastNum;

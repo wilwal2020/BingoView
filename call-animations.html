@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BingoView — animasjonsvalg</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@700;800&display=swap');
+
+:root {
+  --paper:  #f5f0e8;
+  --gold:   #e3a53a;
+  --red:    #c8281e;
+  --dim:    #8b93a6;
+  --mono:   'IBM Plex Mono', monospace;
+  --display:'Bebas Neue', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body {
+  background: #0a1020;
+  color: var(--paper);
+  font-family: var(--mono);
+  min-height: 100dvh;
+  padding: 18px 14px 60px;
+}
+body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: -1;
+  background: radial-gradient(120% 80% at 50% 0%, #16233d 0%, #0a1020 60%);
+}
+h1 {
+  font-family: var(--display);
+  font-size: 2rem;
+  letter-spacing: 0.06em;
+  color: var(--gold);
+}
+.sub { font-size: 0.75rem; color: var(--dim); margin: 4px 0 18px; line-height: 1.5; }
+
+.toolbar {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  position: sticky; top: 0; z-index: 10;
+  padding: 10px 0; margin-bottom: 14px;
+  background: linear-gradient(#0a1020 70%, rgba(10,16,32,0));
+}
+.btn {
+  background: transparent; border: 1px solid #3a4a6d; border-radius: 7px;
+  color: var(--paper); font-family: var(--mono); font-size: 0.78rem;
+  padding: 9px 13px; cursor: pointer;
+}
+.btn.primary { background: var(--gold); border-color: var(--gold); color: #1a1206; font-weight: 600; }
+
+.card {
+  border: 1px solid #223052;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.02);
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+.card-key {
+  font-family: var(--display); font-size: 1.5rem; color: var(--gold);
+  letter-spacing: 0.05em; line-height: 1;
+}
+.card-name { font-size: 0.95rem; font-weight: 600; }
+.card-dur { margin-left: auto; font-size: 0.68rem; color: var(--dim); }
+.card-desc { font-size: 0.72rem; color: var(--dim); line-height: 1.5; margin-bottom: 12px; }
+
+/* ── A faithful slice of the real bingo strip ───────────────── */
+.strip {
+  background: #fff;
+  border-radius: 4px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  max-width: 300px;
+}
+.cell {
+  aspect-ratio: 1;
+  display: flex; align-items: center; justify-content: center;
+  border-right: 1px solid rgba(0,0,0,0.10);
+  border-bottom: 1px solid rgba(0,0,0,0.10);
+  font-family: 'Manrope', system-ui, sans-serif;
+  font-size: 1.35rem; font-weight: 800;
+  color: #111; background: #fff;
+  position: relative;
+}
+.cell:nth-child(5n) { border-right: none; }
+.cell:nth-last-child(-n+5) { border-bottom: none; }
+.cell.called { background: rgba(200,40,30,0.16); color: var(--red); }
+.cell.latest {
+  background: var(--red); color: #fff;
+  box-shadow: 0 0 14px rgba(200,40,30,0.55);
+  z-index: 2;
+}
+.cell::before {
+  content: ""; position: absolute; inset: 0;
+  pointer-events: none; opacity: 0; z-index: 5;
+}
+.replay {
+  margin-top: 10px;
+  font-size: 0.7rem; color: var(--dim);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   THE CANDIDATES — each is a different CHARACTER, not a retune
+   ══════════════════════════════════════════════════════════════ */
+
+/* A — POP (what's live now): squash & stretch, elastic */
+.fx-a.go { animation: aPop 0.34s linear; }
+@keyframes aPop {
+  0%   { transform: scale3d(0.5,0.5,1); box-shadow: 0 0 0 0 rgba(255,90,60,0); text-shadow: none;
+         animation-timing-function: cubic-bezier(0.15,0.9,0.3,1); }
+  32%  { transform: scale3d(1.33,1.25,1); box-shadow: 0 0 40px 11px rgba(255,110,70,0.95);
+         text-shadow: 0 0 20px #fff, 0 0 8px #fff;
+         animation-timing-function: cubic-bezier(0.4,0,0.4,1); }
+  58%  { transform: scale3d(0.97,1.04,1); box-shadow: 0 0 32px 8px rgba(255,110,70,0.8);
+         text-shadow: 0 0 12px #fff;
+         animation-timing-function: cubic-bezier(0.3,0,0.2,1); }
+  78%  { transform: scale3d(1,1,1); box-shadow: 0 0 26px 5px rgba(255,110,70,0.6);
+         text-shadow: 0 0 7px rgba(255,255,255,0.65);
+         animation-timing-function: cubic-bezier(0.4,0,0.6,1); }
+  100% { transform: scale3d(1,1,1); box-shadow: 0 0 14px rgba(200,40,30,0.55); text-shadow: none; }
+}
+
+/* B — STAMP: drops in from big and hits the paper hard. Authoritative. */
+.fx-b.go { animation: bStamp 0.3s linear; }
+@keyframes bStamp {
+  0%   { transform: scale3d(2.1,2.1,1); opacity: 0.15; box-shadow: 0 0 0 0 rgba(255,90,60,0);
+         animation-timing-function: cubic-bezier(0.7,0,0.9,0.5); }   /* accelerate DOWN, like a falling stamp */
+  45%  { transform: scale3d(0.88,0.82,1); opacity: 1;                /* impact — squashes flat */
+         box-shadow: 0 0 44px 14px rgba(255,110,70,0.95);
+         text-shadow: 0 0 22px #fff;
+         animation-timing-function: cubic-bezier(0.2,0,0.3,1); }
+  70%  { transform: scale3d(1.04,1.06,1); box-shadow: 0 0 24px 5px rgba(255,110,70,0.6);
+         animation-timing-function: cubic-bezier(0.4,0,0.3,1); }
+  100% { transform: scale3d(1,1,1); box-shadow: 0 0 14px rgba(200,40,30,0.55); text-shadow: none; }
+}
+
+/* C — FLIP: the square turns over like a physical tile. */
+.fx-c.go { animation: cFlip 0.42s linear; }
+@keyframes cFlip {
+  0%   { transform: perspective(300px) rotateY(0deg) scale(1);
+         animation-timing-function: cubic-bezier(0.5,0,0.9,0.6); }
+  50%  { transform: perspective(300px) rotateY(-88deg) scale(1.1);   /* edge-on */
+         box-shadow: 0 0 30px 8px rgba(255,110,70,0.8);
+         animation-timing-function: cubic-bezier(0.1,0.4,0.3,1); }
+  78%  { transform: perspective(300px) rotateY(8deg) scale(1.04);
+         animation-timing-function: cubic-bezier(0.3,0,0.2,1); }
+  100% { transform: perspective(300px) rotateY(0deg) scale(1);
+         box-shadow: 0 0 14px rgba(200,40,30,0.55); }
+}
+
+/* D — HEARTBEAT: two quick thumps. Reads as excitement. */
+.fx-d.go { animation: dBeat 0.44s linear; }
+@keyframes dBeat {
+  0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(255,90,60,0);
+         animation-timing-function: cubic-bezier(0.2,0.8,0.3,1); }
+  18%  { transform: scale(1.3); box-shadow: 0 0 34px 9px rgba(255,110,70,0.9);
+         text-shadow: 0 0 16px #fff;
+         animation-timing-function: cubic-bezier(0.4,0,0.5,1); }
+  36%  { transform: scale(1.02); box-shadow: 0 0 18px 3px rgba(255,110,70,0.5);
+         animation-timing-function: cubic-bezier(0.2,0.8,0.3,1); }
+  56%  { transform: scale(1.22); box-shadow: 0 0 30px 7px rgba(255,110,70,0.85);
+         text-shadow: 0 0 12px #fff;
+         animation-timing-function: cubic-bezier(0.4,0,0.3,1); }
+  100% { transform: scale(1); box-shadow: 0 0 14px rgba(200,40,30,0.55); text-shadow: none; }
+}
+
+/* E — INK: no movement at all. The red floods out from the centre,
+   like ink soaking into paper. Calm but very readable. */
+.fx-e.go::before {
+  background: radial-gradient(circle, var(--red) 0%, var(--red) 60%, rgba(200,40,30,0) 72%);
+  animation: eInkRing 0.46s cubic-bezier(0.25,0.8,0.3,1) forwards;
+}
+@keyframes eInkRing {
+  0%   { opacity: 1; transform: scale(0.1); }
+  70%  { opacity: 1; transform: scale(1.9); }
+  100% { opacity: 1; transform: scale(1.9); }
+}
+.fx-e.go { animation: eInkGlow 0.46s ease-out; }
+@keyframes eInkGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(255,90,60,0); }
+  60%  { box-shadow: 0 0 26px 6px rgba(255,110,70,0.7); }
+  100% { box-shadow: 0 0 14px rgba(200,40,30,0.55); }
+}
+
+/* F — ANTICIPATION: pulls back a hair before it leaps. The oldest
+   trick in animation for making something feel deliberate. */
+.fx-f.go { animation: fAnticipate 0.4s linear; }
+@keyframes fAnticipate {
+  0%   { transform: scale3d(1,1,1);
+         animation-timing-function: cubic-bezier(0.4,0,0.6,1); }
+  22%  { transform: scale3d(0.78,0.86,1);                       /* wind up */
+         animation-timing-function: cubic-bezier(0.1,0.9,0.2,1); }
+  50%  { transform: scale3d(1.32,1.24,1);                       /* release */
+         box-shadow: 0 0 40px 11px rgba(255,110,70,0.95);
+         text-shadow: 0 0 20px #fff;
+         animation-timing-function: cubic-bezier(0.35,0,0.3,1); }
+  76%  { transform: scale3d(0.98,1.03,1); box-shadow: 0 0 24px 5px rgba(255,110,70,0.6);
+         animation-timing-function: cubic-bezier(0.4,0,0.3,1); }
+  100% { transform: scale3d(1,1,1); box-shadow: 0 0 14px rgba(200,40,30,0.55); text-shadow: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell, .cell::before { animation: none !important; }
+}
+</style>
+</head>
+<body>
+
+<h1>Animasjonsvalg</h1>
+<p class="sub">
+  Seks forskjellige uttrykk for «nytt tall kalt», på ekte bingoceller.
+  Trykk på en celle for å spille den av igjen, eller bruk knappene under.
+  Si fra hvilken bokstav du liker — så legger jeg den inn i BingoView.
+</p>
+
+<div class="toolbar">
+  <button class="btn primary" id="play-all">▶ Spill alle</button>
+  <button class="btn" id="play-loop">↻ Loop alle</button>
+  <button class="btn" id="slow">🐌 Sakte film (0.25×)</button>
+</div>
+
+<div id="cards"></div>
+
+<script>
+const VARIANTS = [
+  { key: 'A', cls: 'fx-a', name: 'Pop',           dur: '340ms',
+    desc: 'Det som ligger inne nå. Spretter ut, strekker seg bredere enn høy på toppen, klemmes sammen på vei tilbake. Elastisk.' },
+  { key: 'B', cls: 'fx-b', name: 'Stempel',       dur: '300ms',
+    desc: 'Faller ned ovenfra og treffer arket hardt — klemmes flat i nedslaget. Bestemt og tungt, som et gummistempel.' },
+  { key: 'C', cls: 'fx-c', name: 'Vending',       dur: '420ms',
+    desc: 'Ruten snur seg rundt som en fysisk brikke. Rolig og taktil, mer «brettspill» enn «app».' },
+  { key: 'D', cls: 'fx-d', name: 'Hjerteslag',    dur: '440ms',
+    desc: 'To raske dunk etter hverandre. Leser som iver — mest energi av alle, men også mest bevegelse.' },
+  { key: 'E', cls: 'fx-e', name: 'Blekk',         dur: '460ms',
+    desc: 'Ingen bevegelse i det hele tatt. Rødfargen flommer ut fra midten som blekk i papir. Roligst, og forstyrrer ikke lesingen av arket.' },
+  { key: 'F', cls: 'fx-f', name: 'Oppladning',    dur: '400ms',
+    desc: 'Trekker seg litt sammen før den spretter ut. Det lille tilbaketrekket gjør at spretten føles villet i stedet for tilfeldig.' },
+];
+
+// Numbers that look like a real strip row
+const ROW = [7, 23, 41, 58, 76];
+const HIT = 2;   // which cell "gets called"
+
+const cards = document.getElementById('cards');
+VARIANTS.forEach(v => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <div class="card-head">
+      <span class="card-key">${v.key}</span>
+      <span class="card-name">${v.name}</span>
+      <span class="card-dur">${v.dur}</span>
+    </div>
+    <div class="card-desc">${v.desc}</div>
+    <div class="strip"></div>
+    <div class="replay">Trykk på ruten for å spille av igjen</div>`;
+  const strip = card.querySelector('.strip');
+  ROW.forEach((n, i) => {
+    const c = document.createElement('div');
+    c.className = 'cell' + (i === HIT ? ' latest ' + v.cls : (i === 0 || i === 4 ? ' called' : ''));
+    c.textContent = n;
+    strip.appendChild(c);
+  });
+  card._target = strip.children[HIT];
+  strip.addEventListener('click', () => play(card._target));
+  cards.appendChild(card);
+});
+
+let rate = 1;
+function play(el) {
+  el.classList.remove('go');
+  void el.offsetWidth;              // restart from 0
+  el.classList.add('go');
+  el.getAnimations({ subtree: true }).forEach(a => { a.playbackRate = rate; });
+}
+function playAll() {
+  document.querySelectorAll('.card').forEach((c, i) =>
+    setTimeout(() => play(c._target), i * 480 / rate));
+}
+
+document.getElementById('play-all').addEventListener('click', playAll);
+
+let loop = null;
+document.getElementById('play-loop').addEventListener('click', e => {
+  if (loop) { clearInterval(loop); loop = null; e.target.textContent = '↻ Loop alle'; return; }
+  playAll();
+  loop = setInterval(playAll, 3400 / rate);
+  e.target.textContent = '■ Stopp loop';
+});
+
+document.getElementById('slow').addEventListener('click', e => {
+  rate = rate === 1 ? 0.25 : 1;
+  e.target.textContent = rate === 1 ? '🐌 Sakte film (0.25×)' : '⚡ Normal fart';
+  e.target.classList.toggle('primary', rate !== 1);
+  playAll();
+});
+
+playAll();
+</script>
+</body>
+</html>
