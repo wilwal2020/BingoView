@@ -1204,6 +1204,11 @@ header .conn-label { margin-left: auto; }
 }
 .bv-toggle input:checked + .bv-toggle-track { background: var(--green); }
 .bv-toggle input:checked + .bv-toggle-track::before { transform: translateX(18px); }
+/* Row for a feature this browser can't do (e.g. vibration in Firefox) */
+.bv-row.unsupported .bv-row-label > span:first-child { opacity: 0.45; }
+.bv-row.unsupported .bv-row-desc { color: #e0a33a; opacity: 1; }
+.bv-row.unsupported .bv-toggle { opacity: 0.35; }
+.bv-row.unsupported .bv-toggle-track { cursor: not-allowed; }
 .bv-overlay-actions {
   display: flex;
   justify-content: flex-end;
@@ -1623,7 +1628,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
   <div id="bv-settings-overlay" class="bv-overlay" style="display:none">
     <div class="bv-overlay-card">
       <div class="bv-overlay-title">Innstillinger</div>
-      <div class="bv-row">
+      <div class="bv-row" id="bv-row-vibrate">
         <div class="bv-row-label">
           <span>Vibrer ved nytt tall</span>
           <span class="bv-row-desc">Kort vibrasjon når host kaller et tall</span>
@@ -1643,7 +1648,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <span class="bv-toggle-track"></span>
         </label>
       </div>
-      <div class="bv-row">
+      <div class="bv-row" id="bv-row-strong-vibrate">
         <div class="bv-row-label">
           <span>Sterk vibrasjon ved 1 igjen</span>
           <span class="bv-row-desc">Lengre vibrasjon når du mangler 1 tall på rekka</span>
@@ -1942,13 +1947,19 @@ function playTick() {
     osc.stop(ctx.currentTime + 0.2);
   } catch (e) {}
 }
+// Firefox removed the Vibration API entirely (bug 1900037, ~FF129) — desktop
+// and Android both. navigator.vibrate is undefined there, so every call was
+// silently doing nothing while the settings toggle still said it was on.
+// iOS Safari has never shipped it either. Detect once and tell the user.
+const VIBRATE_SUPPORTED = typeof navigator.vibrate === 'function';
+
 function vibrateShort() {
-  if (!feedback.vibrate) return;
-  try { if (navigator.vibrate) navigator.vibrate(80); } catch (e) {}
+  if (!feedback.vibrate || !VIBRATE_SUPPORTED) return;
+  try { navigator.vibrate(80); } catch (e) {}
 }
 function vibrateStrong() {
-  if (!feedback.strongVibrate) return;
-  try { if (navigator.vibrate) navigator.vibrate([180, 70, 180, 70, 180]); } catch (e) {}
+  if (!feedback.strongVibrate || !VIBRATE_SUPPORTED) return;
+  try { navigator.vibrate([180, 70, 180, 70, 180]); } catch (e) {}
 }
 
 // Track per-game proximity state to detect transitions to "1 missing"
@@ -2875,7 +2886,7 @@ function initPhone() {
   document.getElementById("btn-phone-connect").addEventListener("click", () => {
     // Prime vibration API with a tiny pulse (required on Android before
     // programmatic vibrations from non-gesture contexts can fire)
-    try { if (navigator.vibrate) navigator.vibrate(1); } catch (e) {}
+    try { if (VIBRATE_SUPPORTED) navigator.vibrate(1); } catch (e) {}
     // Prime AudioContext so playTick() works from Firebase callbacks
     const ctx = getAudioCtx();
     if (ctx && ctx.state === 'suspended') ctx.resume();
@@ -3347,6 +3358,22 @@ function initPhone() {
   vibrateOn.checked = !!feedback.vibrate;
   soundOn.checked   = !!feedback.sound;
   strongOn.checked  = !!feedback.strongVibrate;
+
+  // No Vibration API in this browser (Firefox removed it; iOS Safari never had
+  // it). Grey the toggles out and say why, instead of leaving them switched on
+  // and pretending they do something.
+  if (!VIBRATE_SUPPORTED) {
+    [["bv-row-vibrate", vibrateOn], ["bv-row-strong-vibrate", strongOn]]
+      .forEach(([rowId, input]) => {
+        const row = document.getElementById(rowId);
+        if (!row) return;
+        row.classList.add("unsupported");
+        input.checked  = false;
+        input.disabled = true;
+        row.querySelector(".bv-row-desc").textContent =
+          "Nettleseren din støtter ikke vibrasjon — bruk Chrome på Android";
+      });
+  }
 
   document.getElementById("btn-bv-settings").addEventListener("click", () => {
     settingsOverlay.style.display = "flex";
