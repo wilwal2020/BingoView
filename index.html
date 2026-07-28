@@ -3161,6 +3161,172 @@ function buildCompactShareUrl(blocksData, code) {
   return url;
 }
 
+// ── Firebase-backed short share links ─────────────────────────
+// The self-contained ?p= link carries the whole bingoark inline, so it runs
+// to hundreds of characters. Instead we stash that same payload in Firebase
+// under a short random key and share ?s=<key>, which brings a one-block link
+// down from ~600 characters to ~55. Opening it needs a connection — but the
+// recipient is joining a live host session anyway, so that's already a given.
+// The inline ?p= link stays fully supported for old links and as the offline
+// fallback when the write can't go through.
+
+// Shares live under the bingoview/ namespace because the database rules only
+// grant read/write there — a top-level node is denied. The _shares segment
+// sits where a session code would; no real (uppercased) code collides with it.
+const SHARE_DB_PATH = 'bingoview/_shares/';
+
+// Ambiguous-glyph-free base62 so a hand-typed key can't be misread.
+const SHARE_KEY_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+function makeShareKey() {
+  let k = '';
+  const arr = new Uint8Array(9);
+  (window.crypto || crypto).getRandomValues(arr);
+  for (let i = 0; i < arr.length; i++) k += SHARE_KEY_ALPHABET[arr[i] % SHARE_KEY_ALPHABET.length];
+  return k;
+}
+
+// Remembered so the next share can delete its predecessor, keeping a single
+// user from piling up abandoned share nodes in the database over time.
+function readLastShareKey() { try { return localStorage.getItem('bv_lastShareKey') || ''; } catch (e) { return ''; } }
+function writeLastShareKey(k) { try { localStorage.setItem('bv_lastShareKey', k); } catch (e) {} }
+
+// Write the payload under a fresh key and resolve with the short URL. Rejects
+// if the database can't be reached, so the caller can fall back to ?p=.
+function publishShareLink(encoded, code) {
+  const key = makeShareKey();
+  const payload = { p: encoded, ts: firebase.database.ServerValue.TIMESTAMP };
+  if (code) payload.c = code;
+  return db.ref(SHARE_DB_PATH + key).set(payload).then(() => {
+    const prev = readLastShareKey();
+    if (prev && prev !== key) db.ref(SHARE_DB_PATH + prev).remove().catch(() => {});
+    writeLastShareKey(key);
+    return location.origin + location.pathname + '?s=' + key;
+  });
+}
+
+// Shared import path for both ?p= (payload decoded inline) and ?s= (payload
+// fetched from Firebase). `result` is the decoded { code, blocks } object.
+function receiveSharedPaper(result, codeParam) {
+  // If the recipient already has a saved session for the target code, load it
+  // FIRST so a shared block is ADDED to their existing blocks instead of
+  // replacing everything. Without this, the import populates memory with only
+  // the new block and connectPhone then saves that over the stored session,
+  // losing the blocks they already had.
+  const targetCode = (codeParam || '').trim().toUpperCase();
+  if (targetCode) {
+    try {
+      if (localStorage.getItem('bv_paper_' + targetCode)) {
+        sessionCode = targetCode;
+        restoreSession();
+      }
+    } catch (e) {}
+  }
+  if (!(result && Array.isArray(result.blocks) && result.blocks.length)) return;
+
+  // The share format always exposes a `blocks` array (single-block v3/v4 are
+  // normalised to a one-entry array). Iterate it and import each as its own
+  // block. The first block fills the current active block if empty; subsequent
+  // blocks always get a new slot.
+  //
+  // Fingerprint a block by its per-game strip IDs so an imported block that
+  // duplicates one the user ALREADY has (e.g. they left the page and came back
+  // via an OLD share link) is skipped instead of being added as a second
+  // identical block that clobbers the current one.
+  const normId = s => {
+    const n = s && s.id != null ? parseInt(s.id, 10) : NaN;
+    return Number.isFinite(n) ? String(n) : '?';
+  };
+  const blockFingerprint = (gamesObj) => getGameIds()
+    .filter(g => Array.isArray(gamesObj[g]) && gamesObj[g].length)
+    .map(g => g + ':' + gamesObj[g].map(normId).sort().join(','))
+    .join('|');
+  const existingFingerprints = () => {
+    const set = new Set();
+    blocks.forEach(blk => {
+      const gamesObj = {};
+      getGameIds().forEach(g => {
+        if (blk.gameState[g] && blk.gameState[g].strips)
+          gamesObj[g] = blk.gameState[g].strips;
+      });
+      const fp = blockFingerprint(gamesObj);
+      if (fp) set.add(fp);
+    });
+    return set;
+  };
+
+  let totalArk = 0;
+  let importedBlocks = 0;
+  let skippedDupes = 0;
+  result.blocks.forEach((entry) => {
+    const games = entry.games || {};
+    const gameCount = Object.keys(games).length;
+    if (!gameCount) return;
+
+    // Skip a block we already have (exact strip-ID match). Recomputed each
+    // iteration so duplicates within the same link are caught too.
+    const fp = blockFingerprint(games);
+    if (fp && existingFingerprints().has(fp)) {
+      skippedDupes++;
+      return;
+    }
+
+    totalArk += gameCount;
+    importedBlocks++;
+
+    // First imported block: fill active block if empty, else new block.
+    // Later imported blocks: always new block.
+    const activeIsEmpty = !getGameIds().some(g =>
+      blocks[activeBlockIdx] &&
+      blocks[activeBlockIdx].gameState[g] &&
+      blocks[activeBlockIdx].gameState[g].strips
+    );
+    if (importedBlocks === 1 && activeIsEmpty) {
+      // Reuse the current empty active block
+    } else {
+      blocks.push(createEmptyBlock());
+      registerBlockPresence(blocks.length - 1);
+      activeBlockIdx = blocks.length - 1;
+      gameState = blocks[activeBlockIdx].gameState;
+    }
+    Object.entries(games).forEach(([g, strips]) => {
+      if (gameState[g] && Array.isArray(strips)) {
+        gameState[g].strips = strips;
+        buildPaperForGame(g);
+      }
+    });
+    if (entry.userName && entry.userName.trim()) {
+      const trimmed = entry.userName.trim().slice(0, 24);
+      if (blocks[activeBlockIdx]) {
+        blocks[activeBlockIdx].userName = trimmed;
+      }
+    }
+  });
+  // Update name input to show the active block's name
+  const nameInput = document.getElementById("user-name-input");
+  if (nameInput) nameInput.value = blocks[activeBlockIdx].userName || '';
+  publishUserName();
+  showGameTabs();
+  refreshBlockTabs();
+  renderActiveGame();
+  if (importedBlocks === 0) {
+    toast(
+      skippedDupes ? "Blokken finnes allerede" : "Ingen ark å importere",
+      'ok', 3500);
+  } else {
+    toast(
+      importedBlocks > 1
+        ? `${importedBlocks} blokker (${totalArk} ark) importert!`
+        : `${totalArk} ark importert!`,
+      'ok', 4000);
+  }
+  // Auto-connect if session code provided
+  const code = (result.code || codeParam || '').trim().toUpperCase();
+  if (code) {
+    document.getElementById("phone-code-input").value = code;
+    setTimeout(() => connectPhone(code), 300);
+  }
+}
+
 function showShareModal(url) {
   const overlay = document.getElementById('share-overlay');
   const urlBox  = document.getElementById('share-url-box');
@@ -3180,6 +3346,16 @@ function showShareModal(url) {
     qrImg.alt = 'QR feilet — bruk lenken';
   }
   overlay.style.display = 'flex';
+}
+
+// Placeholder shown while the short link is being written to Firebase. Clears
+// the URL box's data-url so the copy button knows the link isn't ready yet.
+function showShareGenerating() {
+  const urlBox = document.getElementById('share-url-box');
+  urlBox.textContent = 'Lager lenke…';
+  urlBox.dataset.url = '';
+  document.getElementById('share-qr-img').src = '';
+  document.getElementById('share-overlay').style.display = 'flex';
 }
 
 // Offline-prep mode: lets the user scan blocks before connecting to the
@@ -3415,6 +3591,10 @@ function initPhone() {
     });
   }
 
+  // Each (re)generation supersedes the last: block toggles re-run this while a
+  // previous Firebase write may still be in flight, and we must not let an
+  // older write's short link overwrite the current selection's.
+  let _shareGen = 0;
   function regenerateShareLink() {
     const selected = [..._shareSelected].sort((a, b) => a - b);
     if (!selected.length) {
@@ -3436,8 +3616,17 @@ function initPhone() {
       });
       return { games, userName: (blk.userName || '').trim() };
     });
-    const url = buildCompactShareUrl(blocksData, sessionCode);
-    showShareModal(url);
+
+    // Encode once. The inline ?p= URL is both the offline fallback and exactly
+    // the payload we stash in Firebase for the short ?s= link.
+    const encoded = encodeCompactPapers(blocksData, sessionCode);
+    const longUrl = buildCompactShareUrl(blocksData, sessionCode);
+
+    const gen = ++_shareGen;
+    showShareGenerating();
+    publishShareLink(encoded, sessionCode)
+      .then(shortUrl => { if (gen === _shareGen) showShareModal(shortUrl); })
+      .catch(()       => { if (gen === _shareGen) showShareModal(longUrl); });
   }
 
   document.getElementById("btn-share-paper").addEventListener("click", () => {
@@ -3463,6 +3652,7 @@ function initPhone() {
   // Share modal controls
   document.getElementById("share-copy-btn").addEventListener("click", async () => {
     const urlBox = document.getElementById("share-url-box");
+    if (!urlBox.dataset.url) { toast('Lenken er ikke klar ennå', 'warn', 2000); return; }
     try {
       await navigator.clipboard.writeText(urlBox.dataset.url);
       toast('Lenke kopiert!', 'ok', 2000);
@@ -3493,133 +3683,35 @@ function initPhone() {
 
   // Import paper from URL — supports compact (?p=) and legacy (?import=) formats
   const urlParams = new URLSearchParams(location.search);
-  const compactParam = urlParams.get('p');
-  const importParam  = urlParams.get('import');
-  const codeParam    = urlParams.get('c');   // session code for auto-connect
+  const compactParam  = urlParams.get('p');
+  const shareKeyParam = urlParams.get('s');   // Firebase-backed short share link
+  const importParam   = urlParams.get('import');
+  const codeParam     = urlParams.get('c');   // session code for auto-connect
 
   if (compactParam) {
+    // Self-contained inline link (older shares + offline fallback).
     try {
-      // If the recipient already has a saved session for the target code,
-      // load it FIRST so a shared block is ADDED to their existing blocks
-      // instead of replacing everything. Without this, the import populates
-      // memory with only the new block and connectPhone then saves that over
-      // the stored session, losing the blocks they already had.
-      const targetCode = (codeParam || '').trim().toUpperCase();
-      if (targetCode) {
-        try {
-          if (localStorage.getItem('bv_paper_' + targetCode)) {
-            sessionCode = targetCode;
-            restoreSession();
-          }
-        } catch(e) {}
-      }
       const result = decodeCompactPaper(compactParam);
-      if (result && Array.isArray(result.blocks) && result.blocks.length) {
-        // The share format always exposes a `blocks` array (single-block
-        // v3/v4 are normalised to a one-entry array). Iterate it and
-        // import each as its own block. The first block fills the current
-        // active block if empty; subsequent blocks always get a new slot.
-        //
-        // Fingerprint a block by its per-game strip IDs so an imported block
-        // that duplicates one the user ALREADY has (e.g. they left the page
-        // and came back via an OLD share link) is skipped instead of being
-        // added as a second identical block that clobbers the current one.
-        const normId = s => {
-          const n = s && s.id != null ? parseInt(s.id, 10) : NaN;
-          return Number.isFinite(n) ? String(n) : '?';
-        };
-        const blockFingerprint = (gamesObj) => getGameIds()
-          .filter(g => Array.isArray(gamesObj[g]) && gamesObj[g].length)
-          .map(g => g + ':' + gamesObj[g].map(normId).sort().join(','))
-          .join('|');
-        const existingFingerprints = () => {
-          const set = new Set();
-          blocks.forEach(blk => {
-            const gamesObj = {};
-            getGameIds().forEach(g => {
-              if (blk.gameState[g] && blk.gameState[g].strips)
-                gamesObj[g] = blk.gameState[g].strips;
-            });
-            const fp = blockFingerprint(gamesObj);
-            if (fp) set.add(fp);
-          });
-          return set;
-        };
-
-        let totalArk = 0;
-        let importedBlocks = 0;
-        let skippedDupes = 0;
-        result.blocks.forEach((entry, bIdx) => {
-          const games = entry.games || {};
-          const gameCount = Object.keys(games).length;
-          if (!gameCount) return;
-
-          // Skip a block we already have (exact strip-ID match). Recomputed
-          // each iteration so duplicates within the same link are caught too.
-          const fp = blockFingerprint(games);
-          if (fp && existingFingerprints().has(fp)) {
-            skippedDupes++;
-            return;
-          }
-
-          totalArk += gameCount;
-          importedBlocks++;
-
-          // First imported block: fill active block if empty, else new block.
-          // Later imported blocks: always new block.
-          const activeIsEmpty = !getGameIds().some(g =>
-            blocks[activeBlockIdx] &&
-            blocks[activeBlockIdx].gameState[g] &&
-            blocks[activeBlockIdx].gameState[g].strips
-          );
-          if (importedBlocks === 1 && activeIsEmpty) {
-            // Reuse the current empty active block
-          } else {
-            blocks.push(createEmptyBlock());
-            registerBlockPresence(blocks.length - 1);
-            activeBlockIdx = blocks.length - 1;
-            gameState = blocks[activeBlockIdx].gameState;
-          }
-          Object.entries(games).forEach(([g, strips]) => {
-            if (gameState[g] && Array.isArray(strips)) {
-              gameState[g].strips = strips;
-              buildPaperForGame(g);
-            }
-          });
-          if (entry.userName && entry.userName.trim()) {
-            const trimmed = entry.userName.trim().slice(0, 24);
-            if (blocks[activeBlockIdx]) {
-              blocks[activeBlockIdx].userName = trimmed;
-            }
-          }
-        });
-        // Update name input to show the active block's name
-        const nameInput = document.getElementById("user-name-input");
-        if (nameInput) nameInput.value = blocks[activeBlockIdx].userName || '';
-        publishUserName();
-        showGameTabs();
-        refreshBlockTabs();
-        renderActiveGame();
-        if (importedBlocks === 0) {
-          toast(
-            skippedDupes ? "Blokken finnes allerede" : "Ingen ark å importere",
-            'ok', 3500);
-        } else {
-          toast(
-            importedBlocks > 1
-              ? `${importedBlocks} blokker (${totalArk} ark) importert!`
-              : `${totalArk} ark importert!`,
-            'ok', 4000);
-        }
-        // Auto-connect if session code provided
-        const code = (result.code || codeParam || '').trim().toUpperCase();
-        if (code) {
-          document.getElementById("phone-code-input").value = code;
-          setTimeout(() => connectPhone(code), 300);
-        }
-      }
+      receiveSharedPaper(result, codeParam);
     } catch(e) { console.warn('[BV] compact import error', e); }
     history.replaceState(null, '', location.pathname);
+  } else if (shareKeyParam) {
+    // ?s=<key>: the payload lives in Firebase — fetch it, then import through
+    // the exact same path as an inline link. Strip the query right away so a
+    // reload doesn't re-import, and so the key isn't left sitting in the bar.
+    const key = shareKeyParam.replace(/[^A-Za-z0-9]/g, '').slice(0, 24);
+    history.replaceState(null, '', location.pathname);
+    db.ref(SHARE_DB_PATH + key).once('value').then(snap => {
+      const data = snap.val();
+      if (!data || !data.p) { toast('Delingslenken finnes ikke lenger', 'err', 4500); return; }
+      let result = null;
+      try { result = decodeCompactPaper(data.p); }
+      catch(e) { console.warn('[BV] share decode error', e); }
+      if (result) receiveSharedPaper(result, codeParam || data.c);
+    }).catch(e => {
+      console.warn('[BV] share fetch error', e);
+      toast('Kunne ikke hente delt ark', 'err', 4500);
+    });
   } else if (importParam) {
     try {
       const decoded = JSON.parse(atob(decodeURIComponent(importParam)));
@@ -3912,12 +4004,15 @@ function initPhone() {
     document.getElementById("phone-code-input").value = code;
     history.replaceState(null, '', location.pathname);
     connectPhone(code);
-  } else if (lastCode && lastCode.trim().length >= 4
+  } else if (!shareKeyParam && lastCode && lastCode.trim().length >= 4
              && localStorage.getItem('bv_paper_' + lastCode.trim().toUpperCase())) {
     // Auto-reconnect after a refresh: a last-used code WITH saved paper data
     // means a session was in progress — reconnect so the blocks reappear
     // without any taps. Quiet: if the host is gone (bingo night over), just
     // land on the normal connect screen without error toasts.
+    // Skipped for ?s= links: the async share import owns the connection (via
+    // the shared code), and we don't want a stale last-session connect racing
+    // it or flashing the recipient's own old blocks first.
     connectPhone(lastCode.trim().toUpperCase(), { quiet: true });
   }
 
