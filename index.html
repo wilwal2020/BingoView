@@ -649,6 +649,108 @@ header .conn-label { margin-left: auto; }
   50%     { box-shadow: inset 0 0 18px 3px rgba(26,122,64,0.9); }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   CELEBRATION FX — opt-in via "Animasjoner" in Innstillinger.
+   Everything is scoped to body.fx-on, so with the setting off not a
+   single rule below can match and the feature is completely inert.
+
+   The one-shot flourishes are painted on .cell::before rather than on
+   the cell itself. .row-hot and .row-winner already run *infinite*
+   animations on the cell (rowPulse / rowWinPulse), and a second
+   `animation:` declaration would clobber them — the pseudo-element
+   gives each flourish its own animation timeline to play on.
+   ═══════════════════════════════════════════════════════════════════ */
+body.fx-on .cell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 5;
+}
+
+/* 1 ── New number called: ring expanding out past the cell edges. */
+body.fx-on .cell.latest-fresh::before {
+  border-radius: 50%;
+  border: 2.5px solid rgba(255,116,86,0.95);
+  animation: fxRipple 0.62s cubic-bezier(0.22,0.9,0.3,1) forwards;
+}
+@keyframes fxRipple {
+  0%   { opacity: 0.95; transform: scale(0.35); }
+  100% { opacity: 0;    transform: scale(2.5); }
+}
+/* Punchier than the plain cellPop the app uses when FX are off. */
+body.fx-on .cell.latest.latest-fresh {
+  animation: fxCellPop 0.5s cubic-bezier(0.34,1.8,0.5,1);
+}
+@keyframes fxCellPop {
+  0%   { transform: scale(0.55) rotate(-6deg); }
+  55%  { transform: scale(1.22) rotate(3deg); }
+  100% { transform: scale(1)    rotate(0deg); }
+}
+
+/* 2 ── Row just went hot (1 number away). Each cell carries its own
+   --fx-d delay, so the flash travels across the row as a sweep. */
+body.fx-on .cell.fx-hot-sweep::before {
+  background: radial-gradient(circle, rgba(255,214,120,0.95), rgba(255,190,80,0.15) 70%);
+  animation: fxSweep 0.5s ease-out forwards;
+  animation-delay: var(--fx-d, 0s);
+}
+@keyframes fxSweep {
+  0%   { opacity: 0;    transform: scale(0.5); }
+  35%  { opacity: 0.95; transform: scale(1.1); }
+  100% { opacity: 0;    transform: scale(1.35); }
+}
+
+/* 3 ── Row completely filled: same staggered sweep in bingo green. */
+body.fx-on .cell.fx-row-done::before {
+  background: radial-gradient(circle, rgba(126,255,178,0.95), rgba(40,200,110,0.2) 70%);
+  animation: fxRowDone 0.6s ease-out forwards;
+  animation-delay: var(--fx-d, 0s);
+}
+@keyframes fxRowDone {
+  0%   { opacity: 0; transform: scale(0.4); }
+  40%  { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+
+/* 4 ── Win: the whole sheet reacts. */
+body.fx-on #digital-paper.fx-win-shake { animation: fxShake 0.62s ease-in-out; }
+@keyframes fxShake {
+  0%, 100% { transform: translateX(0)    rotate(0deg); }
+  15%      { transform: translateX(-7px) rotate(-0.7deg); }
+  30%      { transform: translateX(6px)  rotate(0.6deg); }
+  45%      { transform: translateX(-5px) rotate(-0.45deg); }
+  60%      { transform: translateX(4px)  rotate(0.3deg); }
+  80%      { transform: translateX(-2px) rotate(-0.15deg); }
+}
+/* Outranks the .strip.has-winner rowWinPulse rule for the 0.6s the
+   .fx-slam class is present, then hands the banner back to the pulse. */
+body.fx-on .strip.has-winner.fx-slam .strip-id-banner {
+  animation: fxBannerSlam 0.55s cubic-bezier(0.2,1.5,0.4,1);
+}
+@keyframes fxBannerSlam {
+  0%   { transform: scale(1.5) translateY(-14px); opacity: 0; }
+  55%  { transform: scale(0.96) translateY(0);    opacity: 1; }
+  100% { transform: scale(1);                     opacity: 1; }
+}
+
+/* Confetti layer — sits above the paper but below the toast (1500)
+   and the settings overlays (2000) so it never blocks a message. */
+#fx-confetti {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1400;
+}
+#fx-confetti i {
+  position: absolute;
+  display: block;
+  border-radius: 1px;
+  will-change: transform, opacity;
+}
+
 /* Big control-number banner shown above a strip when it has a winning row.
    Spans both grid columns of .strip and stays hidden until .has-winner is set. */
 .strip-id-banner {
@@ -1648,6 +1750,16 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <span class="bv-toggle-track"></span>
         </label>
       </div>
+      <div class="bv-row" id="bv-row-anim">
+        <div class="bv-row-label">
+          <span>Animasjoner</span>
+          <span class="bv-row-desc">Feiring når tall kalles, rekka nærmer seg og du vinner</span>
+        </div>
+        <label class="bv-toggle">
+          <input type="checkbox" id="bv-anim-on">
+          <span class="bv-toggle-track"></span>
+        </label>
+      </div>
       <div class="bv-row" id="bv-row-strong-vibrate">
         <div class="bv-row-label">
           <span>Sterk vibrasjon ved 1 igjen</span>
@@ -1913,7 +2025,9 @@ console.log('[BV] Firebase initialized');
 // ════════════════════════════════════
 const FEEDBACK_KEY = 'bv_feedback';
 const feedback = (() => {
-  const defaults = { vibrate: true, sound: false, strongVibrate: true };
+  // animations default to OFF — it's an opt-in flourish, not something to
+  // spring on an existing user mid-game.
+  const defaults = { vibrate: true, sound: false, strongVibrate: true, animations: false };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}'); } catch (e) {}
   return { ...defaults, ...saved };
@@ -1960,6 +2074,147 @@ function vibrateShort() {
 function vibrateStrong() {
   if (!feedback.strongVibrate || !VIBRATE_SUPPORTED) return;
   try { navigator.vibrate([180, 70, 180, 70, 180]); } catch (e) {}
+}
+
+// ════════════════════════════════════
+// CELEBRATION FX
+// ════════════════════════════════════
+// All of this is inert unless feedback.animations is on. Triggers live in
+// updateProximityHighlights(), which already computes every state we care
+// about (row hot / row full / strip won) on each render — the FX layer just
+// watches those values for *transitions*, so a re-render caused by Firebase
+// re-pushing the same callState, a tab switch, or the phone waking up can
+// never replay a celebration the user has already seen.
+
+const _fxReducedMotion = window.matchMedia
+  ? window.matchMedia('(prefers-reduced-motion: reduce)')
+  : null;
+
+function fxEnabled() {
+  return !!feedback.animations && !(_fxReducedMotion && _fxReducedMotion.matches);
+}
+function applyFxSetting() {
+  document.body.classList.toggle('fx-on', fxEnabled());
+}
+// Someone flipping "reduce motion" in the OS mid-session should take effect
+// without a reload.
+if (_fxReducedMotion && _fxReducedMotion.addEventListener) {
+  _fxReducedMotion.addEventListener('change', applyFxSetting);
+}
+
+// Restart-safe one-shot class: strips any in-flight run, forces a reflow so
+// the animation replays from 0, then clears up after itself.
+function fxOneShot(el, cls, dur) {
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  setTimeout(() => el.classList.remove(cls), dur);
+}
+
+// Staggered flash across a row — the per-cell --fx-d delay is what turns
+// nine individual flashes into one sweep travelling along the row.
+const FX_SWEEP_CLASSES = ['fx-hot-sweep', 'fx-row-done'];
+
+function fxSweepRow(cells, cls, dur) {
+  const STEP = 45;
+  cells.forEach((c, i) => {
+    // Drop BOTH sweep classes, not just this one: a row that goes hot and
+    // then fills on the very next call would otherwise still be carrying the
+    // gold sweep, leaving which animation shows up to stylesheet order.
+    c.classList.remove(...FX_SWEEP_CLASSES);
+    void c.offsetWidth;
+    c.style.setProperty('--fx-d', (i * STEP) + 'ms');
+    c.classList.add(cls);
+    setTimeout(() => {
+      c.classList.remove(cls);
+      c.style.removeProperty('--fx-d');
+    }, dur + i * STEP);
+  });
+}
+
+const FX_CONFETTI_COLORS = ['#e3a53a', '#c8281e', '#1a7a40', '#ffffff', '#9b7aff', '#f5c518'];
+
+const FX_CONFETTI_DELAY_MAX = 450;
+const FX_CONFETTI_DUR_MIN   = 1900;
+const FX_CONFETTI_DUR_SPAN  = 1500;
+
+function fxConfetti(count) {
+  if (!fxEnabled()) return;
+  const layer = document.createElement('div');
+  layer.id = 'fx-confetti';
+  document.body.appendChild(layer);
+
+  const W = window.innerWidth;
+  const H = window.innerHeight;
+
+  // Cleanup is deliberately NOT left to anim.onfinish alone. A backgrounded
+  // tab (screen locked, user switched apps) stops running the rendering
+  // steps that dispatch animation events, so onfinish never arrives and the
+  // pieces would sit frozen on screen forever once the user came back.
+  // onfinish is kept as the fast path; this timer is the guarantee.
+  let removed = false;
+  const removeLayer = () => { if (!removed) { removed = true; layer.remove(); } };
+  let alive = count;
+  const done = () => { if (--alive <= 0) removeLayer(); };
+  setTimeout(removeLayer, FX_CONFETTI_DELAY_MAX + FX_CONFETTI_DUR_MIN + FX_CONFETTI_DUR_SPAN + 600);
+
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('i');
+    const size = 6 + Math.random() * 7;
+    p.style.background = FX_CONFETTI_COLORS[(Math.random() * FX_CONFETTI_COLORS.length) | 0];
+    p.style.width  = size + 'px';
+    p.style.height = (size * (0.4 + Math.random() * 0.6)) + 'px';
+    p.style.left   = (Math.random() * W) + 'px';
+    p.style.top    = '-24px';
+    layer.appendChild(p);
+
+    const drift = (Math.random() - 0.5) * 220;
+    const spin  = (Math.random() < 0.5 ? -1 : 1) * (360 + Math.random() * 720);
+    const anim = p.animate([
+      { transform: 'translate3d(0,0,0) rotate(0deg)', opacity: 1 },
+      { opacity: 1, offset: 0.7 },
+      { transform: `translate3d(${drift}px, ${H + 80}px, 0) rotate(${spin}deg)`, opacity: 0 }
+    ], {
+      duration: FX_CONFETTI_DUR_MIN + Math.random() * FX_CONFETTI_DUR_SPAN,
+      delay: Math.random() * FX_CONFETTI_DELAY_MAX,
+      easing: 'cubic-bezier(0.15,0.6,0.5,1)',
+      fill: 'forwards'
+    });
+    anim.onfinish = done;
+    anim.oncancel = done;
+  }
+}
+
+// Sheet-level win reaction. Kept separate from the per-strip banner slam so
+// that two strips winning on the same call still produce ONE confetti burst.
+function fxWinPaper() {
+  if (!fxEnabled()) return;
+  fxConfetti(90);
+  const paper = document.getElementById('digital-paper');
+  if (paper) fxOneShot(paper, 'fx-win-shake', 700);
+}
+function fxWinStrip(stripEl) {
+  if (!fxEnabled()) return;
+  fxOneShot(stripEl, 'fx-slam', 600);
+}
+
+// A win on a game whose paper isn't currently in the DOM is parked here and
+// replayed by renderActiveGame(). Without this, the auto-switch-to-the-
+// winning-game path would record the win while the sheet was still detached
+// and the user would never see the celebration.
+function fxFlushPending() {
+  if (!fxEnabled()) return;
+  const gs = gameState[activeGame];
+  if (!gs || !gs.paperEl) return;
+  let won = false;
+  gs.paperEl.querySelectorAll('.strip').forEach(stripEl => {
+    if (stripEl._fxPendingWin) {
+      stripEl._fxPendingWin = false;
+      fxWinStrip(stripEl);
+      won = true;
+    }
+  });
+  if (won) fxWinPaper();
 }
 
 // Track per-game proximity state to detect transitions to "1 missing"
@@ -3355,9 +3610,12 @@ function initPhone() {
   const vibrateOn       = document.getElementById("bv-vibrate-on");
   const soundOn         = document.getElementById("bv-sound-on");
   const strongOn        = document.getElementById("bv-strong-vibrate-on");
+  const animOn          = document.getElementById("bv-anim-on");
   vibrateOn.checked = !!feedback.vibrate;
   soundOn.checked   = !!feedback.sound;
   strongOn.checked  = !!feedback.strongVibrate;
+  animOn.checked    = !!feedback.animations;
+  applyFxSetting();
 
   // No Vibration API in this browser (Firefox removed it; iOS Safari never had
   // it). Grey the toggles out and say why, instead of leaving them switched on
@@ -3416,6 +3674,18 @@ function initPhone() {
     feedback.strongVibrate = strongOn.checked;
     saveFeedback();
     if (feedback.strongVibrate) vibrateStrong(); // preview
+  });
+  animOn.addEventListener("change", () => {
+    feedback.animations = animOn.checked;
+    saveFeedback();
+    applyFxSetting();
+    if (fxEnabled()) {
+      fxConfetti(60); // preview — show them what they just bought
+      toast("Animasjoner på", "ok", 1800);
+    } else if (animOn.checked) {
+      // Checked, but the OS asks for reduced motion, so nothing will play.
+      toast("Systemet ditt er satt til redusert bevegelse", "warn", 3500);
+    }
   });
 
   // BV error log overlay
@@ -4101,6 +4371,9 @@ function renderActiveGame() {
 
     // Re-paint cells (called/latest + manual-play hints/wrong if applicable)
     renderCells(activeGame);
+    // A win that landed while this sheet was off-screen (auto-switch to the
+    // winning game) gets its celebration now that the paper is in the DOM.
+    fxFlushPending();
   } else {
     document.getElementById("phone-paper").style.display  = "none";
     document.getElementById("phone-upload").style.display = "flex";
@@ -4273,8 +4546,9 @@ function renderCells(gameKey) {
       // Force a reflow so the animation actually restarts from 0
       void newLatestEl.offsetWidth;
       newLatestEl.classList.add('latest-fresh');
-      // Clean up the marker class after the animation finishes
-      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 450);
+      // Clean up the marker class after the animation finishes. Long enough
+      // to cover the FX ripple (0.62s), which outlasts the plain cellPop.
+      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 700);
     }
   }
   gs._prevLatestNum = lastNum;
@@ -4905,6 +5179,10 @@ function updateProximityHighlights(gameKey) {
   // missing threshold to START warming
   const warmThreshold = rekke === 'Rekke1' ? 2 : 3;
 
+  // Strips that won on THIS pass, collected so the sheet-level celebration
+  // (confetti + shake) fires once rather than once per winning strip.
+  const fxWinStrips = [];
+
   gs.paperEl.querySelectorAll(".strip").forEach(stripEl => {
     const rowArr  = stripEl._rows    || [];   // all 9 cells per row
     const numRows = stripEl._numRows || [];   // only number cells per row
@@ -4921,6 +5199,9 @@ function updateProximityHighlights(gameKey) {
     stripEl.classList.remove("has-winner");
 
     let stripHasWinner = false;
+    // Which rows ended up "hot" this pass — read by the FX layer below to
+    // detect the moment a row *becomes* one away.
+    const rowIsHot = [false, false, false];
 
     if (rowsNeeded === 1) {
       // Rekke1: highlight every row independently based on its own missing count
@@ -4931,6 +5212,7 @@ function updateProximityHighlights(gameKey) {
         else if (m <= warmThreshold)  cls = "row-warm";
         if (cls) rowArr[idx].forEach(c => c.classList.add(cls));
         if (cls === "row-winner") stripHasWinner = true;
+        if (cls === "row-hot")    rowIsHot[idx] = true;
       });
     } else {
       // Rekke 2/3: brute-force every combination of `rowsNeeded` rows and
@@ -4990,6 +5272,7 @@ function updateProximityHighlights(gameKey) {
 
         rowsToHighlight.forEach(idx => {
           rowArr[idx].forEach(c => c.classList.add(cls));
+          if (cls === "row-hot") rowIsHot[idx] = true;
         });
         if (cls === "row-winner") stripHasWinner = true;
       }
@@ -5005,7 +5288,47 @@ function updateProximityHighlights(gameKey) {
         stripEl._bannerNumEl.textContent = last != null ? String(last) : "—";
       }
     }
+
+    // ── Celebration FX triggers ──
+    // Compare this pass against the previous one and fire only on the
+    // rising edge. `prev` being undefined means this is the strip's first
+    // paint (fresh scan, or reconnecting to a session already in progress),
+    // where we record silently — nobody wants confetti for a bingo they
+    // won ten minutes ago just because their phone reconnected.
+    const rowIsFull = missingPerRow.map(m => m === 0);
+    const prev = stripEl._fxSeen;
+    // document.hidden: phone locked or user in another app. Nothing would be
+    // seen, and deliberately not replayed on return either — same reasoning
+    // as the latest-fresh guard in renderCells. The winning row and its
+    // banner are persistent state, so returning still shows the result.
+    if (prev && fxEnabled() && !document.hidden) {
+      const onScreen = stripEl.isConnected;
+      for (let i = 0; i < rowArr.length; i++) {
+        // A row that fills up is the bigger event, so it wins the cell:
+        // going 1-away → full in a single call shows only the green cascade.
+        if (rowIsFull[i] && !prev.full[i]) {
+          if (onScreen) fxSweepRow(rowArr[i], 'fx-row-done', 620);
+        } else if (rowIsHot[i] && !prev.hot[i]) {
+          if (onScreen) fxSweepRow(rowArr[i], 'fx-hot-sweep', 520);
+        }
+      }
+      if (stripHasWinner && !prev.won) {
+        // Detached paper (a background game just won): park it for
+        // renderActiveGame to replay once this sheet is actually on screen.
+        if (onScreen) fxWinStrips.push(stripEl);
+        else stripEl._fxPendingWin = true;
+      }
+    }
+    // Recorded unconditionally — including while FX are off — so switching
+    // the setting on mid-game replays nothing retroactively.
+    stripEl._fxSeen = { hot: rowIsHot.slice(), full: rowIsFull, won: stripHasWinner };
   });
+
+  // One burst per call, however many strips won on it.
+  if (fxWinStrips.length) {
+    fxWinStrips.forEach(fxWinStrip);
+    fxWinPaper();
+  }
 }
 
 
