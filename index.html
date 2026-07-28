@@ -458,6 +458,32 @@ header .conn-label { margin-left: auto; }
   background: #1a1a1a;
 }
 
+/* Countdown-to-next-number ring. A brass line tracing the sheet's edge that
+   drains over the host's configured interval, then refills on the next call —
+   so the direction alternates and the sheet always ends a cycle either fully
+   outlined or bare. Purely informational: it never intercepts taps. */
+#paper-ring-wrap {
+  position: relative;
+  max-width: 420px;
+  margin: 0 auto;
+}
+#call-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  display: none;
+  overflow: visible;
+}
+#call-ring.on { display: block; }
+#call-ring-rect {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 3;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 5px rgba(227,165,58,0.55));
+}
+
 /* Digitally reconstructed bingo paper */
 #digital-paper {
   display: flex;
@@ -2033,7 +2059,14 @@ header { padding: 7px 13px; gap: 5px 7px; }
       </div>
       <div id="paper-canvas-wrap">
         <div id="phone-rekke-banner">Rekke 1</div>
-        <div id="digital-paper"></div>
+        <!-- The ring lives OUTSIDE #digital-paper: renderActiveGame clears that
+             element's children when swapping sheets, which would wipe it. -->
+        <div id="paper-ring-wrap">
+          <div id="digital-paper"></div>
+          <svg id="call-ring" aria-hidden="true" focusable="false">
+            <rect id="call-ring-rect" />
+          </svg>
+        </div>
       </div>
       <div id="phone-status-bar">
         <div class="detected-count" id="phone-detected-count"></div>
@@ -2348,6 +2381,134 @@ function fxFlushPending() {
   });
   if (won) fxWinPaper();
 }
+
+// ════════════════════════════════════
+// CALL COUNTDOWN RING
+// ════════════════════════════════════
+// A brass outline around the sheet showing how long until the next number is
+// due. The host decides the interval (0 = feature off). After an odd-numbered
+// call the ring drains; after an even one it refills — the alternation the
+// host asked for, and it means we never need a "reset" frame between cycles.
+//
+// Direction and progress are derived from the call itself (its index and its
+// timestamp), never from local state, so a phone that reloads or joins late
+// lands exactly where everyone else is instead of restarting the cycle.
+
+let callTimerSec = 0;      // seconds, from the host's state node; 0 = disabled
+let _ringLen     = 0;      // perimeter of the ring path, in user units
+let _ringAnim    = null;   // in-flight WAAPI animation, so we can cancel it
+let _serverOffset = 0;     // phone clock -> Firebase server clock correction
+
+// Called numbers arrive per game; remember the latest so switching games (or
+// a resize) can redraw the correct ring without waiting for the next call.
+const _lastCall = {};      // gameKey -> { at: serverMs, n: totalCalls }
+
+try {
+  db.ref('.info/serverTimeOffset').on('value', s => {
+    const v = Number(s.val());
+    if (isFinite(v)) _serverOffset = v;
+  });
+} catch (e) {}
+
+function serverNow() { return Date.now() + _serverOffset; }
+
+function hideCallRing() {
+  if (_ringAnim) { try { _ringAnim.cancel(); } catch (e) {} _ringAnim = null; }
+  const svg = document.getElementById('call-ring');
+  if (svg) svg.classList.remove('on');
+}
+
+// Size the ring to the sheet. The paper's own corner radius is 8px; the path
+// is inset by half the stroke so the line sits fully inside its own box.
+function updateCallRingGeometry() {
+  const svg   = document.getElementById('call-ring');
+  const rect  = document.getElementById('call-ring-rect');
+  const paper = document.getElementById('digital-paper');
+  if (!svg || !rect || !paper) return false;
+  const w = paper.offsetWidth, h = paper.offsetHeight;
+  if (!w || !h) return false;
+
+  const inset = 2.5;                 // half of stroke-width 3, plus a hair
+  const rw = Math.max(0, w - inset * 2);
+  const rh = Math.max(0, h - inset * 2);
+  const r  = Math.min(8 + inset, rw / 2, rh / 2);
+
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  rect.setAttribute('x', inset);
+  rect.setAttribute('y', inset);
+  rect.setAttribute('width', rw);
+  rect.setAttribute('height', rh);
+  rect.setAttribute('rx', r);
+
+  let len = 0;
+  try { len = rect.getTotalLength(); } catch (e) {}
+  // getTotalLength on <rect> is well supported, but fall back to the closed
+  // form rather than leaving the ring undrawable if it ever isn't.
+  if (!len || !isFinite(len)) len = 2 * (rw + rh) - 8 * r + 2 * Math.PI * r;
+  _ringLen = len;
+  rect.style.strokeDasharray = len;
+  return true;
+}
+
+// Draw/animate the ring for a call: `callAt` in server ms, `callIndex` the
+// running count of calls in this game (1-based).
+function applyCallRing(callAt, callIndex) {
+  const svg  = document.getElementById('call-ring');
+  const rect = document.getElementById('call-ring-rect');
+  const gs   = gameState[activeGame];
+  if (!svg || !rect) return;
+  if (!callTimerSec || !callIndex || !gs || !gs.paperEl || !gs.paperEl.isConnected) {
+    hideCallRing();
+    return;
+  }
+  if (!updateCallRingGeometry()) { hideCallRing(); return; }
+
+  // Odd call -> drain (full to empty). Even call -> refill.
+  const filling = (callIndex % 2) === 0;
+  const from = filling ? _ringLen : 0;
+  const to   = filling ? 0 : _ringLen;
+
+  const dur = callTimerSec * 1000;
+  let elapsed = callAt ? (serverNow() - callAt) : 0;
+  if (!isFinite(elapsed) || elapsed < 0) elapsed = 0;   // clock skew guard
+
+  if (_ringAnim) { try { _ringAnim.cancel(); } catch (e) {} _ringAnim = null; }
+  svg.classList.add('on');
+
+  // Cycle already over: hold the finished state until the next call.
+  if (elapsed >= dur) { rect.style.strokeDashoffset = to; return; }
+
+  const start = from + (to - from) * (elapsed / dur);
+  rect.style.strokeDashoffset = start;
+  try {
+    _ringAnim = rect.animate(
+      [{ strokeDashoffset: start }, { strokeDashoffset: to }],
+      { duration: dur - elapsed, easing: 'linear', fill: 'forwards' }
+    );
+  } catch (e) {
+    // No WAAPI: leave the ring at its correct current position rather than
+    // animating. Still conveys roughly where the cycle stands.
+  }
+}
+
+function refreshCallRing() {
+  const info = _lastCall[activeGame];
+  if (!info) { hideCallRing(); return; }
+  applyCallRing(info.at, info.n);
+}
+
+// The sheet changes size when a different game's paper is shown, on rotation,
+// and when the window resizes. Re-derive the geometry and re-seat the ring.
+(function watchRingSize() {
+  const paper = document.getElementById('digital-paper');
+  if (!paper) return;
+  let t = null;
+  const kick = () => { clearTimeout(t); t = setTimeout(refreshCallRing, 60); };
+  if (window.ResizeObserver) new ResizeObserver(kick).observe(paper);
+  window.addEventListener('resize', kick);
+})();
 
 // Track per-game proximity state to detect transitions to "1 missing"
 const _proximityState = {};
@@ -4242,7 +4403,10 @@ async function connectPhone(code, opts = {}) {
   updateUploadTitle();
 
   // Mark connected once Firebase confirms the write
-  presenceRef.once('value', () => setConnStatus("connected", "Tilkoblet \u2713"));
+  // Connected is the steady state and needs no words \u2014 the green dot plus a
+  // tick says it. Every other state still spells itself out, because those
+  // are the ones the user has to act on.
+  presenceRef.once('value', () => setConnStatus("connected", "\u2713"));
 
   // Everything attached below dumps its existing data the moment it
   // attaches, so hold celebrations across that whole opening burst.
@@ -4257,7 +4421,17 @@ async function connectPhone(code, opts = {}) {
       const data = snap.val();
       if (!data || !data.ts) return;
       if (data.ts <= resetTs) return;
+      const nums = Array.isArray(data.numbers) ? data.numbers : [];
+      // Remember when this call landed (server clock where available) and how
+      // many calls deep the game is — together they fix the ring's direction
+      // and how much of the interval is already gone.
+      _lastCall[g] = {
+        at: (data.sts != null ? Number(data.sts) : Number(data.ts)) || 0,
+        n:  nums.length
+      };
       reconcileGameState(g, data.numbers || [], data.rekke);
+      // After reconcile: it may have auto-switched the active game to this one.
+      if (g === activeGame) refreshCallRing();
     };
     csRef.on('value', csHandler);
     _channelDetachFns.push(() => csRef.off('value', csHandler));
@@ -4292,7 +4466,12 @@ async function connectPhone(code, opts = {}) {
     if (gen !== _connGeneration) return;
     const data = snap.val();
     if (!data) return;
+    // Countdown length is the host's call: 0 (or absent, e.g. an older host
+    // build) means no ring at all.
+    const t = Number(data.callTimer);
+    callTimerSec = (isFinite(t) && t > 0) ? t : 0;
     applyRemoteState(data.game, data.rekke);
+    refreshCallRing();
   };
   stateRef.on('value', stateHandler);
   _channelDetachFns.push(() => stateRef.off('value', stateHandler));
@@ -4664,6 +4843,8 @@ function renderActiveGame() {
     if (desiredPaper) wrap.appendChild(desiredPaper);
   }
   wrap.classList.toggle("tappable", manualMode || manualPlayMode);
+  // The sheet on screen just changed — re-seat the countdown ring on it.
+  refreshCallRing();
   const game = getGame(activeGame) || {};
   // Design: the paper is always crisp white — game identity lives in the
   // per-game strip-id rails and the active tab, not a tinted sheet.
@@ -5485,6 +5666,13 @@ function applyRemoteState(game, rekke) {
 
 function handleRemoteReset(scope, game) {
   resetTs = Date.now();
+  // A reset means no call is outstanding, so no countdown should be running.
+  if (scope === 'all') {
+    Object.keys(_lastCall).forEach(k => delete _lastCall[k]);
+  } else if (game) {
+    delete _lastCall[game];
+  }
+  hideCallRing();
   const resetOneInBlock = (blk, g) => {
     const gs = blk.gameState[g];
     gs.called      = [];
