@@ -467,10 +467,12 @@ header .conn-label { margin-left: auto; }
   max-width: 420px;
   margin: 0 auto;
 }
+/* Sits OUTSIDE the sheet: the SVG is grown past the paper on every side and
+   pulled back by the same amount, so the line rides just clear of the edge
+   instead of overlapping the numbers. #paper-canvas-wrap's 9px padding is
+   what gives it room to do that without being clipped. */
 #call-ring {
   position: absolute;
-  left: 0;
-  top: 0;
   pointer-events: none;
   display: none;
   overflow: visible;
@@ -481,7 +483,9 @@ header .conn-label { margin-left: auto; }
   stroke: var(--gold);
   stroke-width: 3;
   stroke-linecap: round;
-  filter: drop-shadow(0 0 5px rgba(227,165,58,0.55));
+  /* No drop-shadow here on purpose. A filter forces the whole ring to be
+     re-rasterised on every frame of the countdown, which is what made it
+     stutter on iOS. The brass line reads perfectly well without it. */
 }
 
 /* Digitally reconstructed bingo paper */
@@ -1894,6 +1898,16 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <span class="bv-toggle-track"></span>
         </label>
       </div>
+      <div class="bv-row" id="bv-row-call-ring">
+        <div class="bv-row-label">
+          <span>Nedtelling til neste tall</span>
+          <span class="bv-row-desc">Gullstrek rundt arket som teller ned — lengden bestemmes på bingo-siden</span>
+        </div>
+        <label class="bv-toggle">
+          <input type="checkbox" id="bv-call-ring-on">
+          <span class="bv-toggle-track"></span>
+        </label>
+      </div>
       <div class="bv-row" id="bv-row-strong-vibrate">
         <div class="bv-row-label">
           <span>Sterk vibrasjon ved 1 igjen</span>
@@ -2168,7 +2182,10 @@ const FEEDBACK_KEY = 'bv_feedback';
 const feedback = (() => {
   // animations default to OFF — it's an opt-in flourish, not something to
   // spring on an existing user mid-game.
-  const defaults = { vibrate: true, sound: false, strongVibrate: true, animations: false };
+  const defaults = { vibrate: true, sound: false, strongVibrate: true, animations: false,
+                     // Countdown ring: opt-in per phone. The host only sets how
+                     // long it runs; this decides whether it's drawn at all.
+                     callRing: false };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}'); } catch (e) {}
   return { ...defaults, ...saved };
@@ -2397,6 +2414,7 @@ function fxFlushPending() {
 let callTimerSec = 0;      // seconds, from the host's state node; 0 = disabled
 let _ringLen     = 0;      // perimeter of the ring path, in user units
 let _ringAnim    = null;   // in-flight WAAPI animation, so we can cancel it
+let _ringKey     = null;   // identifies the cycle currently being animated
 let _serverOffset = 0;     // phone clock -> Firebase server clock correction
 
 // Called numbers arrive per game; remember the latest so switching games (or
@@ -2414,12 +2432,23 @@ function serverNow() { return Date.now() + _serverOffset; }
 
 function hideCallRing() {
   if (_ringAnim) { try { _ringAnim.cancel(); } catch (e) {} _ringAnim = null; }
+  _ringKey = null;
   const svg = document.getElementById('call-ring');
   if (svg) svg.classList.remove('on');
 }
 
-// Size the ring to the sheet. The paper's own corner radius is 8px; the path
-// is inset by half the stroke so the line sits fully inside its own box.
+const RING_SW  = 3;   // stroke width, matches the stylesheet
+const RING_GAP = 4;   // clear space between the sheet's edge and the line
+const RING_PAD = RING_GAP + RING_SW;   // how far the SVG overhangs the sheet
+
+// Last measured sheet size, so we only touch the DOM when it actually
+// changes. Rewriting the geometry mid-countdown resets strokeDasharray and
+// visibly hitches the animation, so this is a smoothness guard as much as a
+// performance one.
+let _ringGeom = { w: 0, h: 0 };
+
+// Grow the ring around the sheet: the SVG is RING_PAD bigger on each side and
+// offset back by the same, so the path traces just outside the paper.
 function updateCallRingGeometry() {
   const svg   = document.getElementById('call-ring');
   const rect  = document.getElementById('call-ring-rect');
@@ -2427,17 +2456,23 @@ function updateCallRingGeometry() {
   if (!svg || !rect || !paper) return false;
   const w = paper.offsetWidth, h = paper.offsetHeight;
   if (!w || !h) return false;
+  if (w === _ringGeom.w && h === _ringGeom.h) return true;   // unchanged
 
-  const inset = 2.5;                 // half of stroke-width 3, plus a hair
-  const rw = Math.max(0, w - inset * 2);
-  const rh = Math.max(0, h - inset * 2);
-  const r  = Math.min(8 + inset, rw / 2, rh / 2);
+  const W = w + RING_PAD * 2;
+  const H = h + RING_PAD * 2;
+  const rw = W - RING_SW;
+  const rh = H - RING_SW;
+  // The sheet's own corner radius is 8px; the ring's centreline runs
+  // RING_GAP + half a stroke further out, so its radius grows to match.
+  const r = Math.min(8 + RING_GAP + RING_SW / 2, rw / 2, rh / 2);
 
-  svg.setAttribute('width', w);
-  svg.setAttribute('height', h);
-  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
-  rect.setAttribute('x', inset);
-  rect.setAttribute('y', inset);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.style.left = (-RING_PAD) + 'px';
+  svg.style.top  = (-RING_PAD) + 'px';
+  rect.setAttribute('x', RING_SW / 2);
+  rect.setAttribute('y', RING_SW / 2);
   rect.setAttribute('width', rw);
   rect.setAttribute('height', rh);
   rect.setAttribute('rx', r);
@@ -2449,6 +2484,7 @@ function updateCallRingGeometry() {
   if (!len || !isFinite(len)) len = 2 * (rw + rh) - 8 * r + 2 * Math.PI * r;
   _ringLen = len;
   rect.style.strokeDasharray = len;
+  _ringGeom = { w, h };
   return true;
 }
 
@@ -2459,11 +2495,23 @@ function applyCallRing(callAt, callIndex) {
   const rect = document.getElementById('call-ring-rect');
   const gs   = gameState[activeGame];
   if (!svg || !rect) return;
-  if (!callTimerSec || !callIndex || !gs || !gs.paperEl || !gs.paperEl.isConnected) {
+  // feedback.callRing is the phone's own opt-in; callTimerSec is the length
+  // the host set. Both have to be present for there to be a ring.
+  if (!feedback.callRing || !callTimerSec || !callIndex ||
+      !gs || !gs.paperEl || !gs.paperEl.isConnected) {
     hideCallRing();
     return;
   }
   if (!updateCallRingGeometry()) { hideCallRing(); return; }
+
+  // Firebase re-fires callState for reasons that have nothing to do with a new
+  // number (presence writes, re-renders, the resize observer). Restarting the
+  // animation for those cancels and rebuilds it mid-flight, which is what made
+  // the countdown stutter. If nothing that shapes the animation has changed and
+  // it is still running, leave it alone.
+  const key = [activeGame, callIndex, callTimerSec, Math.round(_ringLen)].join('|');
+  if (key === _ringKey && _ringAnim && _ringAnim.playState === 'running') return;
+  _ringKey = key;
 
   // Odd call -> drain (full to empty). Even call -> refill.
   const filling = (callIndex % 2) === 0;
@@ -4042,10 +4090,12 @@ function initPhone() {
   const soundOn         = document.getElementById("bv-sound-on");
   const strongOn        = document.getElementById("bv-strong-vibrate-on");
   const animOn          = document.getElementById("bv-anim-on");
+  const callRingOn      = document.getElementById("bv-call-ring-on");
   vibrateOn.checked = !!feedback.vibrate;
   soundOn.checked   = !!feedback.sound;
   strongOn.checked  = !!feedback.strongVibrate;
   animOn.checked    = !!feedback.animations;
+  if (callRingOn) callRingOn.checked = !!feedback.callRing;
   applyFxSetting();
 
   // No Vibration API in this browser (Firefox removed it; iOS Safari never had
@@ -4106,6 +4156,15 @@ function initPhone() {
     saveFeedback();
     if (feedback.strongVibrate) vibrateStrong(); // preview
   });
+  if (callRingOn) {
+    callRingOn.addEventListener("change", () => {
+      feedback.callRing = callRingOn.checked;
+      saveFeedback();
+      if (!feedback.callRing) hideCallRing();
+      else if (!callTimerSec) toast("Bingo-siden har ikke satt en nedtelling ennå", "warn", 2600);
+      refreshCallRing();
+    });
+  }
   animOn.addEventListener("change", () => {
     feedback.animations = animOn.checked;
     saveFeedback();
