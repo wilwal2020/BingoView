@@ -681,7 +681,7 @@ body.fx-on .cell::before {
    different rates, so the wave reads as a real impact. */
 body.fx-on .cell.latest-fresh::before {
   border-radius: 50%;
-  animation: fxShockwave 0.8s cubic-bezier(0.15,0.85,0.25,1) forwards;
+  animation: fxShockwave 1s cubic-bezier(0.15,0.85,0.25,1) forwards;
 }
 @keyframes fxShockwave {
   0% {
@@ -690,7 +690,7 @@ body.fx-on .cell.latest-fresh::before {
     box-shadow: 0 0 0 4px rgba(255,255,255,0.95),
                 0 0 0 4px rgba(255,120,60,0.9);
   }
-  40% { opacity: 0.9; }
+  55% { opacity: 0.85; }
   100% {
     opacity: 0;
     transform: scale(1.9);
@@ -701,22 +701,31 @@ body.fx-on .cell.latest-fresh::before {
 /* Overshoots twice and flashes white-hot before settling. The 100% frame
    deliberately lands on the .latest glow so there's no snap at the end. */
 body.fx-on .cell.latest.latest-fresh {
-  animation: fxCellPop 0.66s cubic-bezier(0.3,1.9,0.4,1);
+  animation: fxCellPop 0.9s cubic-bezier(0.3,1.6,0.4,1);
   z-index: 6;
 }
+/* Timing note: the peak sits at 30% and the glow is held to 55% before it
+   starts decaying. An earlier version put the peak at 35% of a 0.66s run
+   and decayed immediately, so the whole impact was over in ~230ms and the
+   rest was just settling — it read as a blink rather than a hit. */
 @keyframes fxCellPop {
   0% {
     transform: scale(0.3) rotate(-16deg);
     box-shadow: 0 0 0 0 rgba(255,90,60,0);
     text-shadow: none;
   }
-  35% {
+  30% {
     transform: scale(1.45) rotate(8deg);
     box-shadow: 0 0 36px 10px rgba(255,110,70,0.95);
     text-shadow: 0 0 20px #fff, 0 0 8px #fff;
   }
-  60%  { transform: scale(0.9) rotate(-4deg); }
-  80%  { transform: scale(1.1) rotate(2deg); }
+  55% {
+    transform: scale(0.94) rotate(-4deg);
+    box-shadow: 0 0 30px 7px rgba(255,110,70,0.75);
+    text-shadow: 0 0 12px #fff;
+  }
+  75%  { transform: scale(1.12) rotate(2deg); }
+  88%  { transform: scale(0.98) rotate(-1deg); }
   100% {
     transform: scale(1) rotate(0deg);
     box-shadow: 0 0 14px rgba(200,40,30,0.55);
@@ -4409,7 +4418,16 @@ function col_safe(num, fn) {
 function renderActiveGame() {
   const gs = gameState[activeGame];
   const wrap = document.getElementById("digital-paper");
-  wrap.innerHTML = "";
+  // Swap the sheet only when it's genuinely a different one. Detaching an
+  // element cancels every CSS animation running inside it, so clearing the
+  // wrapper unconditionally restarted the new-number pop from zero whenever
+  // this ran mid-animation — e.g. the auto-switch to a game that just got a
+  // call, which happens at exactly the moment the pop is playing.
+  const desiredPaper = gs.paperEl || null;
+  if (wrap.firstChild !== desiredPaper) {
+    wrap.innerHTML = "";
+    if (desiredPaper) wrap.appendChild(desiredPaper);
+  }
   wrap.classList.toggle("tappable", manualMode || manualPlayMode);
   const game = getGame(activeGame) || {};
   // Design: the paper is always crisp white — game identity lives in the
@@ -4422,7 +4440,6 @@ function renderActiveGame() {
   document.getElementById("phone-pending").style.display = "none";
 
   if (gs.paperEl) {
-    wrap.appendChild(gs.paperEl);
     document.getElementById("phone-upload").style.display = "none";
     document.getElementById("phone-paper").style.display = "flex";
     document.getElementById("btn-share-paper").style.display = "block";
@@ -4597,8 +4614,16 @@ function renderCells(gameKey) {
     setClass(cell, 'hint-yellow', hintYellowSet.has(numStr));
     setClass(cell, 'wrong',       wrongSet.has(numStr));
     setClass(cell, 'jackpot',     numStr === jackpotStr);
-    // Always strip latest-fresh — only the truly new latest gets it back
-    setClass(cell, 'latest-fresh', false);
+    // Only strip latest-fresh when the latest number actually changed.
+    // Stripping it on EVERY render truncated the pop: several Firebase
+    // listeners (callState, state/applyRemoteState, jackpot) can each
+    // trigger a re-render of the *same* state within milliseconds of a
+    // call, and each one killed the in-flight animation — which is why the
+    // pop looked like it was playing far too fast. The re-fire protection
+    // the original comment describes comes from the `latestChanged` guard
+    // on ADDING the class below, not from clearing it here, so a repeat
+    // render still can't restart the animation.
+    if (latestChanged) setClass(cell, 'latest-fresh', false);
   });
 
   if (latestChanged && lastNum) {
@@ -4608,8 +4633,8 @@ function renderCells(gameKey) {
       void newLatestEl.offsetWidth;
       newLatestEl.classList.add('latest-fresh');
       // Clean up the marker class after the animation finishes. Long enough
-      // to cover the FX shockwave (0.8s), which outlasts the plain cellPop.
-      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 850);
+      // to cover the FX shockwave (1s), which outlasts the plain cellPop.
+      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 1050);
     }
   }
   gs._prevLatestNum = lastNum;
