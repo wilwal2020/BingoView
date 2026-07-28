@@ -2162,10 +2162,29 @@ const _fxReducedMotion = window.matchMedia
   ? window.matchMedia('(prefers-reduced-motion: reduce)')
   : null;
 
-// Set while a bulk catch-up is being applied — the first callState snapshot
-// after (re)connecting, which replays the whole call history at once. State
-// still updates; celebrations don't fire. See reconcileGameState.
+// Set while a bulk catch-up is being applied — a (re)connection replaying
+// history rather than things happening now. State still updates;
+// celebrations don't fire.
+//
+// This is time-boxed rather than tied to one listener because the replay
+// arrives by several independent routes, each reaching the FX layer
+// differently: callState per game via reconcileGameState, and the legacy
+// callLog via child_added, which Firebase fires once for every entry that
+// already exists — i.e. the whole history, one call at a time, through
+// handleCalledNumber. Guarding those individually missed cases; holding the
+// flag across the opening burst covers all of them, including any route
+// added later.
 let _fxCatchUp = false;
+let _fxCatchUpTimer = null;
+
+function fxBeginCatchUp(ms = 3000) {
+  _fxCatchUp = true;
+  clearTimeout(_fxCatchUpTimer);
+  _fxCatchUpTimer = setTimeout(() => {
+    _fxCatchUpTimer = null;
+    _fxCatchUp = false;
+  }, ms);
+}
 
 function fxEnabled() {
   return !!feedback.animations && !(_fxReducedMotion && _fxReducedMotion.matches);
@@ -4028,6 +4047,10 @@ async function connectPhone(code, opts = {}) {
   // Mark connected once Firebase confirms the write
   presenceRef.once('value', () => setConnStatus("connected", "Tilkoblet \u2713"));
 
+  // Everything attached below dumps its existing data the moment it
+  // attaches, so hold celebrations across that whole opening burst.
+  fxBeginCatchUp();
+
   // Primary real-time sync: full called list per game from main site.
   // Fires immediately on connect (catches up), then on every call/undo.
   getGameIds().forEach(g => {
@@ -4057,6 +4080,11 @@ async function connectPhone(code, opts = {}) {
       // Only use callLog if callState isn't being used (older main-site build)
       if (!data.undo) handleCalledNumber(data.number, data.game, data.rekke);
     };
+    // child_added fires once for every entry that ALREADY exists, so
+    // attaching here replays the entire call history as if it were live.
+    // Restart the catch-up window right at the attach, because resetTs
+    // resolving is async and may land well after connect.
+    fxBeginCatchUp();
     clRef.on('child_added', clHandler);
     _channelDetachFns.push(() => clRef.off('child_added', clHandler));
   });
@@ -5235,12 +5263,19 @@ function applyRemoteState(game, rekke) {
       changed = true;
     }
   }
-  if (rekke && /^Rekke[1-3]$/.test(rekke)) {
+  // The rekke in a state payload belongs to `game` — the host's active game,
+  // broadcast in the SAME message — not to whatever game the phone happens to
+  // be showing. Binding it to `game` matters when the two differ: falling back
+  // to the viewed game (as `currentGame || activeGame` did) let a stray rekke
+  // land on the wrong game and flip its win state — e.g. a Rekke1 value turning
+  // a single already-complete row into a false "bingo". If `game` is missing or
+  // unknown (a legacy/partial write) we don't know which game the rekke is for,
+  // so we leave every game's rekke untouched rather than guess.
+  if (rekke && /^Rekke[1-3]$/.test(rekke) && game && getGameIds().includes(game)) {
     currentRekke = rekke;
-    const tgt = currentGame || activeGame;
-    // Apply rekke to ALL blocks, not just active
+    // Apply to `game` across ALL blocks (they all track the same host stream).
     blocks.forEach(blk => {
-      if (blk.gameState[tgt]) blk.gameState[tgt].rekke = rekke;
+      if (blk.gameState[game]) blk.gameState[game].rekke = rekke;
     });
     changed = true;
   }
