@@ -2162,6 +2162,11 @@ const _fxReducedMotion = window.matchMedia
   ? window.matchMedia('(prefers-reduced-motion: reduce)')
   : null;
 
+// Set while a bulk catch-up is being applied — the first callState snapshot
+// after (re)connecting, which replays the whole call history at once. State
+// still updates; celebrations don't fire. See reconcileGameState.
+let _fxCatchUp = false;
+
 function fxEnabled() {
   return !!feedback.animations && !(_fxReducedMotion && _fxReducedMotion.matches);
 }
@@ -2296,7 +2301,10 @@ function checkProximityTransition(gameKey) {
   if (!gs || !gs.paperEl) return;
   const hasOneAway = gs.paperEl.querySelector('.row-hot') !== null;
   const had = _proximityState[gameKey] || false;
-  if (hasOneAway && !had) {
+  // Same catch-up exclusion as the visual FX: reconnecting to a game where
+  // a row was already one away must not buzz as though it just got there.
+  // The state is still recorded, so the NEXT genuine transition fires.
+  if (hasOneAway && !had && !_fxCatchUp) {
     vibrateStrong();
   }
   _proximityState[gameKey] = hasOneAway;
@@ -5087,6 +5095,18 @@ function reconcileGameState(gameKey, numbers, rekke) {
   const list = Array.isArray(numbers) ? numbers.map(Number) : [];
   let newCallArrived = false;
 
+  // Firebase's FIRST snapshot after (re)connecting replays the entire call
+  // history in one go. Those numbers were called minutes ago, so this pass
+  // has to bring the board up to date without celebrating anything — the
+  // rows it "completes" were completed long before the page was reloaded.
+  // Without this, refreshing mid-game replayed the row-complete cascade,
+  // and on Rekke1 the whole win celebration, confetti and all.
+  // Same reasoning as the _prevHostLen guard just below, which already
+  // suppresses the per-call vibrate/tick on exactly this snapshot.
+  const catchUpGs = gameState[gameKey];
+  const prevCatchUp = _fxCatchUp;
+  if (!catchUpGs || catchUpGs._prevHostLen == null) _fxCatchUp = true;
+
   // Apply to ALL blocks (they all track the same host stream)
   blocks.forEach((blk, bIdx) => {
     const gs = blk.gameState[gameKey];
@@ -5197,6 +5217,9 @@ function reconcileGameState(gameKey, numbers, rekke) {
   // Refresh block badges (non-active blocks may have changed proximity)
   refreshBlockTabs();
   saveSession();
+  // Restored last: everything above can trigger FX, and this function has no
+  // early returns, so this is the single exit point.
+  _fxCatchUp = prevCatchUp;
 }
 
 let _lastRemoteGame = null;  // track actual host game changes
@@ -5390,7 +5413,8 @@ function updateProximityHighlights(gameKey) {
     // seen, and deliberately not replayed on return either — same reasoning
     // as the latest-fresh guard in renderCells. The winning row and its
     // banner are persistent state, so returning still shows the result.
-    if (prev && fxEnabled() && !document.hidden) {
+    // _fxCatchUp: a reconnect replaying history, not things happening now.
+    if (prev && fxEnabled() && !document.hidden && !_fxCatchUp) {
       const onScreen = stripEl.isConnected;
       for (let i = 0; i < rowArr.length; i++) {
         // A row that fills up is the bigger event, so it wins the cell:
