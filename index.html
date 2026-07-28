@@ -676,40 +676,9 @@ body.fx-on .cell::before {
    the pulse resumes the moment the class comes off. The ::before keeps
    doing the light/colour burst on its own timeline. */
 
-/* 1 ── New number called: double shockwave + a hard overshoot pop.
-   Two rings out of one element via two box-shadow spreads growing at
-   different rates, so the wave reads as a real impact. */
-body.fx-on .cell.latest-fresh::before {
-  border-radius: 50%;
-  /* The SECONDARY element, and the whole reason the pop can be this fast.
-     It runs 620ms against the cell's 260ms, so the ring is still spreading
-     and fading long after the number has settled. That trailing motion is
-     what registers as satisfying — the cell itself doesn't have to hang
-     around to provide it. */
-  animation: fxShockwave 0.62s linear forwards;
-}
-@keyframes fxShockwave {
-  0% {
-    opacity: 1;
-    transform: scale(0.25);
-    box-shadow: 0 0 0 5px rgba(255,255,255,0.95),
-                0 0 0 5px rgba(255,120,60,0.9);
-    animation-timing-function: cubic-bezier(0.05, 0.8, 0.2, 1);
-  }
-  /* Ring is already well out while the cell is still at its peak, then
-     spends the remaining ~60% of its life dissolving. */
-  30% {
-    opacity: 0.9;
-    transform: scale(1.5);
-    animation-timing-function: cubic-bezier(0.35, 0, 0.5, 1);
-  }
-  100% {
-    opacity: 0;
-    transform: scale(2.15);
-    box-shadow: 0 0 0 14px rgba(255,255,255,0),
-                0 0 0 34px rgba(255,120,60,0);
-  }
-}
+/* 1 ── New number called: a pop with squash & stretch. No expanding ring —
+   the follow-through it used to provide now comes from the glow instead,
+   which trails the movement without drawing a second shape (see below). */
 /* Overshoots twice and flashes white-hot before settling. The 100% frame
    deliberately lands on the .latest glow so there's no snap at the end. */
 /* Built on the standard motion guidance rather than by eye, after three
@@ -720,22 +689,24 @@ body.fx-on .cell.latest-fresh::before {
      - what makes motion satisfying is NOT duration. It's squash & stretch,
        follow-through, and secondary action — auxiliary elements trailing
        the primary one.
-   So: keep the PRIMARY transform short and hand the lingering to the
-   SECONDARY element. The cell is done in 260ms, while the shockwave ring
-   below runs 620ms. The eye reads the cell as instant and the ring
-   supplies the satisfaction, instead of the two fighting each other.
+   Follow-through matters, but it does NOT have to be a separate shape.
+   With the expanding ring removed, the GLOW does that job: the transform
+   reaches rest at 78% of the run and the light keeps decaying for the
+   remaining 22%. So the movement still finishes early and crisply, and
+   something is still trailing it afterwards.
 
    The scale3d values are deliberately non-uniform — stretching wider than
    tall at the peak, then squashing narrower than tall — which is what
-   gives it a tactile, physical feel. At 260ms these stages fuse into one
-   elastic gesture; the same number of stages at 0.9s is what read as
-   wobble earlier. */
+   gives it a tactile, physical feel. At this length the stages fuse into
+   one elastic gesture; the same stage count at 0.9s is what read as
+   wobble earlier. 0.34s keeps the motion inside the range where it still
+   reads as a micro-interaction. */
 body.fx-on .cell.latest.latest-fresh {
-  animation: fxCellPop 0.26s linear;
+  animation: fxCellPop 0.34s linear;
   z-index: 6;
 }
 @keyframes fxCellPop {
-  /* Explode out — full size in ~95ms. */
+  /* Explode out — full size in ~110ms. */
   0% {
     transform: scale3d(0.5, 0.5, 1);
     box-shadow: 0 0 0 0 rgba(255,90,60,0);
@@ -743,18 +714,26 @@ body.fx-on .cell.latest.latest-fresh {
     animation-timing-function: cubic-bezier(0.15, 0.9, 0.3, 1);
   }
   /* Peak, stretched wider than tall. */
-  36% {
-    transform: scale3d(1.34, 1.26, 1);
-    box-shadow: 0 0 38px 10px rgba(255,110,70,0.95);
+  32% {
+    transform: scale3d(1.33, 1.25, 1);
+    box-shadow: 0 0 40px 11px rgba(255,110,70,0.95);
     text-shadow: 0 0 20px #fff, 0 0 8px #fff;
     animation-timing-function: cubic-bezier(0.4, 0, 0.4, 1);
   }
   /* Squash through the rest position — narrower than tall. */
-  64% {
+  58% {
     transform: scale3d(0.97, 1.04, 1);
-    box-shadow: 0 0 24px 5px rgba(255,110,70,0.7);
-    text-shadow: 0 0 10px #fff;
+    box-shadow: 0 0 32px 8px rgba(255,110,70,0.8);
+    text-shadow: 0 0 12px #fff;
     animation-timing-function: cubic-bezier(0.3, 0, 0.2, 1);
+  }
+  /* Movement is DONE here — everything past this point is just light
+     decaying, which is what replaces the ring's follow-through. */
+  78% {
+    transform: scale3d(1, 1, 1);
+    box-shadow: 0 0 26px 5px rgba(255,110,70,0.6);
+    text-shadow: 0 0 7px rgba(255,255,255,0.65);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
   }
   /* Land on the .latest glow so there's no snap at the end. */
   100% {
@@ -4663,10 +4642,9 @@ function renderCells(gameKey) {
       // Force a reflow so the animation actually restarts from 0
       void newLatestEl.offsetWidth;
       newLatestEl.classList.add('latest-fresh');
-      // Clean up the marker class after the animation finishes. Long enough
-      // to cover the FX shockwave (0.62s), which outlasts both the 0.26s
-      // pop and the plain cellPop.
-      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 700);
+      // Clean up the marker class after the animation finishes. Covers the
+      // 0.34s FX pop and the plain 0.4s cellPop used when FX are off.
+      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 480);
     }
   }
   gs._prevLatestNum = lastNum;
