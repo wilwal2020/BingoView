@@ -681,10 +681,12 @@ body.fx-on .cell::before {
    different rates, so the wave reads as a real impact. */
 body.fx-on .cell.latest-fresh::before {
   border-radius: 50%;
-  /* Outlasts the pop on purpose: the ring is still fading after the cell
-     has settled, so the light carries the tail instead of everything
-     stopping at once. */
-  animation: fxShockwave 0.9s linear forwards;
+  /* The SECONDARY element, and the whole reason the pop can be this fast.
+     It runs 620ms against the cell's 260ms, so the ring is still spreading
+     and fading long after the number has settled. That trailing motion is
+     what registers as satisfying — the cell itself doesn't have to hang
+     around to provide it. */
+  animation: fxShockwave 0.62s linear forwards;
 }
 @keyframes fxShockwave {
   0% {
@@ -692,13 +694,14 @@ body.fx-on .cell.latest-fresh::before {
     transform: scale(0.25);
     box-shadow: 0 0 0 5px rgba(255,255,255,0.95),
                 0 0 0 5px rgba(255,120,60,0.9);
-    animation-timing-function: cubic-bezier(0.08, 0.8, 0.2, 1);
+    animation-timing-function: cubic-bezier(0.05, 0.8, 0.2, 1);
   }
-  /* Ring is most of the way out while the cell is still at its peak. */
-  38% {
-    opacity: 0.92;
-    transform: scale(1.55);
-    animation-timing-function: cubic-bezier(0.4, 0, 0.5, 1);
+  /* Ring is already well out while the cell is still at its peak, then
+     spends the remaining ~60% of its life dissolving. */
+  30% {
+    opacity: 0.9;
+    transform: scale(1.5);
+    animation-timing-function: cubic-bezier(0.35, 0, 0.5, 1);
   }
   100% {
     opacity: 0;
@@ -709,51 +712,53 @@ body.fx-on .cell.latest-fresh::before {
 }
 /* Overshoots twice and flashes white-hot before settling. The 100% frame
    deliberately lands on the .latest glow so there's no snap at the end. */
-/* Pacing, not bounce count, is what makes this read as satisfying: a fast
-   hit, a held beat at the peak, then a slow settle. One global easing
-   can't express that — it applies the same curve to every segment — so
-   the shorthand below is `linear` and each keyframe sets the easing for
-   the segment that STARTS at it. Two earlier attempts failed the other
-   ways round: a springy bezier re-sprung all four keyframe bounces and
-   wobbled, then a clean single-bounce ease at 0.5s had no weight at all
-   and just looked quick. */
+/* Built on the standard motion guidance rather than by eye, after three
+   attempts missed:
+     - micro-interactions live at 100-200ms; past ~500ms reads as sluggish
+       (Material uses 200ms as its reference). The previous 0.78s version
+       was in hero-transition territory, which is why it felt slow.
+     - what makes motion satisfying is NOT duration. It's squash & stretch,
+       follow-through, and secondary action — auxiliary elements trailing
+       the primary one.
+   So: keep the PRIMARY transform short and hand the lingering to the
+   SECONDARY element. The cell is done in 260ms, while the shockwave ring
+   below runs 620ms. The eye reads the cell as instant and the ring
+   supplies the satisfaction, instead of the two fighting each other.
+
+   The scale3d values are deliberately non-uniform — stretching wider than
+   tall at the peak, then squashing narrower than tall — which is what
+   gives it a tactile, physical feel. At 260ms these stages fuse into one
+   elastic gesture; the same number of stages at 0.9s is what read as
+   wobble earlier. */
 body.fx-on .cell.latest.latest-fresh {
-  animation: fxCellPop 0.78s linear;
+  animation: fxCellPop 0.26s linear;
   z-index: 6;
 }
 @keyframes fxCellPop {
-  /* Punch out hard... */
+  /* Explode out — full size in ~95ms. */
   0% {
-    transform: scale(0.5) rotate(-5deg);
+    transform: scale3d(0.5, 0.5, 1);
     box-shadow: 0 0 0 0 rgba(255,90,60,0);
     text-shadow: none;
-    animation-timing-function: cubic-bezier(0.1, 0.85, 0.25, 1);
+    animation-timing-function: cubic-bezier(0.15, 0.9, 0.3, 1);
   }
-  /* ...reach full size fast, at ~200ms, so the hit lands crisply... */
-  26% {
-    transform: scale(1.34) rotate(1.5deg);
+  /* Peak, stretched wider than tall. */
+  36% {
+    transform: scale3d(1.34, 1.26, 1);
     box-shadow: 0 0 38px 10px rgba(255,110,70,0.95);
     text-shadow: 0 0 20px #fff, 0 0 8px #fff;
-    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.4, 1);
   }
-  /* ...then hang there for a beat, barely shrinking. This plateau is what
-     gives the pop its weight — it's the part that was missing. */
-  46% {
-    transform: scale(1.26) rotate(0deg);
-    box-shadow: 0 0 32px 8px rgba(255,110,70,0.85);
-    text-shadow: 0 0 16px #fff, 0 0 6px #fff;
-    animation-timing-function: cubic-bezier(0.45, 0, 0.25, 1);
-  }
-  /* ...fall through a single soft undershoot... */
-  76% {
-    transform: scale(0.975) rotate(0deg);
-    box-shadow: 0 0 20px 3px rgba(255,110,70,0.5);
-    text-shadow: 0 0 6px rgba(255,255,255,0.7);
+  /* Squash through the rest position — narrower than tall. */
+  64% {
+    transform: scale3d(0.97, 1.04, 1);
+    box-shadow: 0 0 24px 5px rgba(255,110,70,0.7);
+    text-shadow: 0 0 10px #fff;
     animation-timing-function: cubic-bezier(0.3, 0, 0.2, 1);
   }
-  /* ...and land exactly on the .latest glow, so there's no snap at the end. */
+  /* Land on the .latest glow so there's no snap at the end. */
   100% {
-    transform: scale(1) rotate(0deg);
+    transform: scale3d(1, 1, 1);
     box-shadow: 0 0 14px rgba(200,40,30,0.55);
     text-shadow: none;
   }
@@ -4659,8 +4664,9 @@ function renderCells(gameKey) {
       void newLatestEl.offsetWidth;
       newLatestEl.classList.add('latest-fresh');
       // Clean up the marker class after the animation finishes. Long enough
-      // to cover the FX shockwave (0.9s), which outlasts the plain cellPop.
-      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 980);
+      // to cover the FX shockwave (0.62s), which outlasts both the 0.26s
+      // pop and the plain cellPop.
+      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 700);
     }
   }
   gs._prevLatestNum = lastNum;
