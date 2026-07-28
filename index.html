@@ -669,49 +669,110 @@ body.fx-on .cell::before {
   z-index: 5;
 }
 
-/* 1 ── New number called: ring expanding out past the cell edges. */
+/* These three animate the CELL itself, not just the ::before overlay, so
+   the paper physically reacts. The cell is where .row-hot / .row-winner run
+   their infinite pulses, so a one-shot here does temporarily replace the
+   breathing — half a second out of a 1.6s loop, invisible in practice, and
+   the pulse resumes the moment the class comes off. The ::before keeps
+   doing the light/colour burst on its own timeline. */
+
+/* 1 ── New number called: double shockwave + a hard overshoot pop.
+   Two rings out of one element via two box-shadow spreads growing at
+   different rates, so the wave reads as a real impact. */
 body.fx-on .cell.latest-fresh::before {
   border-radius: 50%;
-  border: 2.5px solid rgba(255,116,86,0.95);
-  animation: fxRipple 0.62s cubic-bezier(0.22,0.9,0.3,1) forwards;
+  animation: fxShockwave 0.8s cubic-bezier(0.15,0.85,0.25,1) forwards;
 }
-@keyframes fxRipple {
-  0%   { opacity: 0.95; transform: scale(0.35); }
-  100% { opacity: 0;    transform: scale(2.5); }
+@keyframes fxShockwave {
+  0% {
+    opacity: 1;
+    transform: scale(0.2);
+    box-shadow: 0 0 0 4px rgba(255,255,255,0.95),
+                0 0 0 4px rgba(255,120,60,0.9);
+  }
+  40% { opacity: 0.9; }
+  100% {
+    opacity: 0;
+    transform: scale(1.9);
+    box-shadow: 0 0 0 12px rgba(255,255,255,0),
+                0 0 0 30px rgba(255,120,60,0);
+  }
 }
-/* Punchier than the plain cellPop the app uses when FX are off. */
+/* Overshoots twice and flashes white-hot before settling. The 100% frame
+   deliberately lands on the .latest glow so there's no snap at the end. */
 body.fx-on .cell.latest.latest-fresh {
-  animation: fxCellPop 0.5s cubic-bezier(0.34,1.8,0.5,1);
+  animation: fxCellPop 0.66s cubic-bezier(0.3,1.9,0.4,1);
+  z-index: 6;
 }
 @keyframes fxCellPop {
-  0%   { transform: scale(0.55) rotate(-6deg); }
-  55%  { transform: scale(1.22) rotate(3deg); }
-  100% { transform: scale(1)    rotate(0deg); }
+  0% {
+    transform: scale(0.3) rotate(-16deg);
+    box-shadow: 0 0 0 0 rgba(255,90,60,0);
+    text-shadow: none;
+  }
+  35% {
+    transform: scale(1.45) rotate(8deg);
+    box-shadow: 0 0 36px 10px rgba(255,110,70,0.95);
+    text-shadow: 0 0 20px #fff, 0 0 8px #fff;
+  }
+  60%  { transform: scale(0.9) rotate(-4deg); }
+  80%  { transform: scale(1.1) rotate(2deg); }
+  100% {
+    transform: scale(1) rotate(0deg);
+    box-shadow: 0 0 14px rgba(200,40,30,0.55);
+    text-shadow: none;
+  }
 }
 
-/* 2 ── Row just went hot (1 number away). Each cell carries its own
-   --fx-d delay, so the flash travels across the row as a sweep. */
+/* 2 ── Row just went hot (1 number away): the row does a Mexican wave.
+   Each cell carries its own --fx-d, so the lift travels along the row. */
+body.fx-on .cell.fx-hot-sweep {
+  /* !important because .cell.row-hot[data-num]:not(.called):not(.latest) is
+     specificity (0,5,0) and outranks this rule — without it the missing-
+     number cells would keep their infinite rowHotMissPulse and be the only
+     squares in the row not joining the wave. These classes are transient and
+     JS-controlled, so there's nothing else competing for the slot. */
+  animation: fxHotWave 0.62s cubic-bezier(0.3,1.7,0.4,1) var(--fx-d, 0s) both !important;
+  z-index: 4;
+}
+@keyframes fxHotWave {
+  0%   { transform: translateY(0)     scale(1); }
+  30%  { transform: translateY(-10px) scale(1.18); }
+  62%  { transform: translateY(3px)   scale(0.96); }
+  100% { transform: translateY(0)     scale(1); }
+}
 body.fx-on .cell.fx-hot-sweep::before {
-  background: radial-gradient(circle, rgba(255,214,120,0.95), rgba(255,190,80,0.15) 70%);
-  animation: fxSweep 0.5s ease-out forwards;
-  animation-delay: var(--fx-d, 0s);
+  background: radial-gradient(circle, #fff 0%, rgba(255,214,120,0.95) 42%, rgba(255,170,40,0) 76%);
+  animation: fxHotFlash 0.62s ease-out var(--fx-d, 0s) both;
 }
-@keyframes fxSweep {
-  0%   { opacity: 0;    transform: scale(0.5); }
-  35%  { opacity: 0.95; transform: scale(1.1); }
-  100% { opacity: 0;    transform: scale(1.35); }
+@keyframes fxHotFlash {
+  0%   { opacity: 0; transform: scale(0.3); }
+  25%  { opacity: 1; transform: scale(1.3); }
+  100% { opacity: 0; transform: scale(1.9); }
 }
 
-/* 3 ── Row completely filled: same staggered sweep in bingo green. */
-body.fx-on .cell.fx-row-done::before {
-  background: radial-gradient(circle, rgba(126,255,178,0.95), rgba(40,200,110,0.2) 70%);
-  animation: fxRowDone 0.6s ease-out forwards;
-  animation-delay: var(--fx-d, 0s);
+/* 3 ── Row completely filled: each cell flips over in sequence, like the
+   row is being stamped shut one square at a time. */
+body.fx-on .cell.fx-row-done {
+  /* Same reasoning as fx-hot-sweep above: must outrank the proximity
+     rules' infinite pulses for the duration of the one-shot. */
+  animation: fxDoneFlip 0.7s cubic-bezier(0.3,1.7,0.4,1) var(--fx-d, 0s) both !important;
+  z-index: 4;
 }
-@keyframes fxRowDone {
-  0%   { opacity: 0; transform: scale(0.4); }
-  40%  { opacity: 1; transform: scale(1.15); }
-  100% { opacity: 0; transform: scale(1.5); }
+@keyframes fxDoneFlip {
+  0%   { transform: perspective(320px) rotateX(0deg)   scale(1); }
+  35%  { transform: perspective(320px) rotateX(-58deg) scale(1.24); }
+  70%  { transform: perspective(320px) rotateX(14deg)  scale(0.95); }
+  100% { transform: perspective(320px) rotateX(0deg)   scale(1); }
+}
+body.fx-on .cell.fx-row-done::before {
+  background: radial-gradient(circle, #fff 0%, rgba(126,255,178,0.95) 42%, rgba(26,122,64,0) 78%);
+  animation: fxDoneFlash 0.7s ease-out var(--fx-d, 0s) both;
+}
+@keyframes fxDoneFlash {
+  0%   { opacity: 0; transform: scale(0.3); }
+  30%  { opacity: 1; transform: scale(1.35); }
+  100% { opacity: 0; transform: scale(2); }
 }
 
 /* 4 ── Win: the whole sheet reacts. */
@@ -2116,7 +2177,7 @@ function fxOneShot(el, cls, dur) {
 const FX_SWEEP_CLASSES = ['fx-hot-sweep', 'fx-row-done'];
 
 function fxSweepRow(cells, cls, dur) {
-  const STEP = 45;
+  const STEP = 38;   // tighter than the animation length, so the wave overlaps
   cells.forEach((c, i) => {
     // Drop BOTH sweep classes, not just this one: a row that goes hot and
     // then fills on the very next call would otherwise still be carrying the
@@ -4547,8 +4608,8 @@ function renderCells(gameKey) {
       void newLatestEl.offsetWidth;
       newLatestEl.classList.add('latest-fresh');
       // Clean up the marker class after the animation finishes. Long enough
-      // to cover the FX ripple (0.62s), which outlasts the plain cellPop.
-      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 700);
+      // to cover the FX shockwave (0.8s), which outlasts the plain cellPop.
+      setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 850);
     }
   }
   gs._prevLatestNum = lastNum;
@@ -5307,9 +5368,9 @@ function updateProximityHighlights(gameKey) {
         // A row that fills up is the bigger event, so it wins the cell:
         // going 1-away → full in a single call shows only the green cascade.
         if (rowIsFull[i] && !prev.full[i]) {
-          if (onScreen) fxSweepRow(rowArr[i], 'fx-row-done', 620);
+          if (onScreen) fxSweepRow(rowArr[i], 'fx-row-done', 720);
         } else if (rowIsHot[i] && !prev.hot[i]) {
-          if (onScreen) fxSweepRow(rowArr[i], 'fx-hot-sweep', 520);
+          if (onScreen) fxSweepRow(rowArr[i], 'fx-hot-sweep', 640);
         }
       }
       if (stripHasWinner && !prev.won) {
