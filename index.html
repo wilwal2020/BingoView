@@ -488,6 +488,35 @@ header .conn-label { margin-left: auto; }
      stutter on iOS. The brass line reads perfectly well without it. */
 }
 
+/* Running count + the historical average for the rekke being played, sat
+   under the sheet. margin-top clears the countdown ring's overhang so the
+   two never touch. */
+#paper-stats {
+  display: flex;
+  justify-content: center;
+  gap: 26px;
+  margin: 14px auto 2px;
+  max-width: 420px;
+}
+.paper-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--mono);
+}
+.paper-stat-num {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+.paper-stat-lbl {
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
 /* Digitally reconstructed bingo paper */
 #digital-paper {
   display: flex;
@@ -2081,6 +2110,16 @@ header { padding: 7px 13px; gap: 5px 7px; }
             <rect id="call-ring-rect" />
           </svg>
         </div>
+        <div id="paper-stats" style="display:none">
+          <div class="paper-stat">
+            <span class="paper-stat-num" id="stat-called">0</span>
+            <span class="paper-stat-lbl">tall kalt</span>
+          </div>
+          <div class="paper-stat" id="paper-stat-avg">
+            <span class="paper-stat-num" id="stat-avg">–</span>
+            <span class="paper-stat-lbl">snitt <span id="stat-avg-rekke">Rekke 1</span></span>
+          </div>
+        </div>
       </div>
       <div id="phone-status-bar">
         <div class="detected-count" id="phone-detected-count"></div>
@@ -2557,6 +2596,39 @@ function refreshCallRing() {
   if (window.ResizeObserver) new ResizeObserver(kick).observe(paper);
   window.addEventListener('resize', kick);
 })();
+
+// ════════════════════════════════════
+// PAPER STATS (called count + rekke average)
+// ════════════════════════════════════
+// How many numbers have gone so far, next to how many it usually takes to
+// land the rekke being played. The average is the host's — it owns the game
+// history — and stays null until it sends one, in which case we show a dash
+// rather than inventing a figure.
+
+let rekkeAverages = null;   // { Rekke1, Rekke2, Rekke3 } from the host
+
+function updatePaperStats() {
+  const row = document.getElementById('paper-stats');
+  if (!row) return;
+  const gs = gameState[activeGame];
+  if (!gs || !gs.paperEl || !gs.paperEl.isConnected) { row.style.display = 'none'; return; }
+
+  // Count what the HOST has called. In manual-play mode gs.called is only the
+  // numbers the user has confirmed, so hostCalled is the honest total there;
+  // in normal mode the two are the same list.
+  const called = (gs.hostCalled && gs.hostCalled.length)
+    ? gs.hostCalled.length
+    : ((gs.called && gs.called.length) || 0);
+
+  const rekke = gs.rekke || 'Rekke1';
+  const avg = rekkeAverages ? rekkeAverages[rekke] : null;
+
+  document.getElementById('stat-called').textContent = called;
+  document.getElementById('stat-avg').textContent =
+    (avg != null && isFinite(avg)) ? avg : '–';
+  document.getElementById('stat-avg-rekke').textContent = rekke.replace('Rekke', 'Rekke ');
+  row.style.display = 'flex';
+}
 
 // Track per-game proximity state to detect transitions to "1 missing"
 const _proximityState = {};
@@ -4529,8 +4601,13 @@ async function connectPhone(code, opts = {}) {
     // build) means no ring at all.
     const t = Number(data.callTimer);
     callTimerSec = (isFinite(t) && t > 0) ? t : 0;
+    // Average balls per rekke, straight from the host's game history.
+    if (Array.isArray(data.avgs) && data.avgs.length === 3) {
+      rekkeAverages = { Rekke1: data.avgs[0], Rekke2: data.avgs[1], Rekke3: data.avgs[2] };
+    }
     applyRemoteState(data.game, data.rekke);
     refreshCallRing();
+    updatePaperStats();
   };
   stateRef.on('value', stateHandler);
   _channelDetachFns.push(() => stateRef.off('value', stateHandler));
@@ -4904,6 +4981,7 @@ function renderActiveGame() {
   wrap.classList.toggle("tappable", manualMode || manualPlayMode);
   // The sheet on screen just changed — re-seat the countdown ring on it.
   refreshCallRing();
+  updatePaperStats();
   const game = getGame(activeGame) || {};
   // Design: the paper is always crisp white — game identity lives in the
   // per-game strip-id rails and the active tab, not a tinted sheet.
@@ -5122,6 +5200,7 @@ function renderCells(gameKey) {
   }
 
   updateProximityHighlights(gameKey);
+  if (gameKey === activeGame) updatePaperStats();
 }
 
 // ── Manual play (connected mode) ──────────────────────────────
@@ -5474,6 +5553,8 @@ function updateRekkeLabel() {
   if (!el) return;
   // Big centred "Rekke X" in the accent colour, above the paper
   el.textContent = (gs.rekke || 'Rekke1').replace("Rekke", "Rekke ");
+  // The average shown under the sheet is per-rekke, so it moves with this.
+  updatePaperStats();
 }
 
 
