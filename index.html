@@ -488,16 +488,24 @@ header .conn-label { margin-left: auto; }
      stutter on iOS. The brass line reads perfectly well without it. */
 }
 
-/* Running count + the historical average for the rekke being played, sat
-   between the "Rekke X" banner and the sheet. margin-bottom clears the
-   countdown ring's overhang so the two never touch. */
-#paper-stats {
-  display: flex;
-  justify-content: center;
-  gap: 26px;
-  margin: 5px auto 12px;
+/* Header row above the sheet: called count · REKKE X · rekke average.
+   1fr/auto/1fr means the two side columns are always equal, so the banner
+   stays centred on the sheet however wide the figures beside it get.
+   margin-bottom clears the countdown ring's top overhang. */
+#paper-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: baseline;
+  gap: 10px;
   max-width: 420px;
+  margin: 0 auto 12px;
+  padding: 0 2px;
 }
+#paper-header .paper-stat-l { justify-self: start; }
+#paper-header .paper-stat-r { justify-self: end; }
+/* visibility, not display: the columns keep their width so the banner does
+   not jump sideways when the figures appear. */
+#paper-header.stats-hidden .paper-stat { visibility: hidden; }
 .paper-stat {
   display: flex;
   align-items: baseline;
@@ -2116,15 +2124,19 @@ header { padding: 7px 13px; gap: 5px 7px; }
         </button>
       </div>
       <div id="paper-canvas-wrap">
-        <div id="phone-rekke-banner">Rekke 1</div>
-        <div id="paper-stats" style="display:none">
-          <div class="paper-stat">
+        <!-- Count and average flank the rekke banner. The 1fr/auto/1fr grid is
+             what keeps "Rekke X" optically centred on the sheet no matter how
+             wide the two figures beside it grow. The labels drop the rekke name
+             because the banner between them already says it. -->
+        <div id="paper-header" class="stats-hidden">
+          <div class="paper-stat paper-stat-l">
             <span class="paper-stat-num" id="stat-called">0</span>
-            <span class="paper-stat-lbl">tall kalt</span>
+            <span class="paper-stat-lbl">kalt</span>
           </div>
-          <div class="paper-stat" id="paper-stat-avg">
+          <div id="phone-rekke-banner">Rekke 1</div>
+          <div class="paper-stat paper-stat-r">
             <span class="paper-stat-num" id="stat-avg">–</span>
-            <span class="paper-stat-lbl">snitt <span id="stat-avg-rekke">Rekke 1</span></span>
+            <span class="paper-stat-lbl">snitt</span>
           </div>
         </div>
         <!-- The ring lives OUTSIDE #digital-paper: renderActiveGame clears that
@@ -2623,10 +2635,15 @@ function refreshCallRing() {
 let rekkeAverages = null;   // { Rekke1, Rekke2, Rekke3 } from the host
 
 function updatePaperStats() {
-  const row = document.getElementById('paper-stats');
-  if (!row) return;
+  const header = document.getElementById('paper-header');
+  if (!header) return;
   const gs = gameState[activeGame];
-  if (!gs || !gs.paperEl || !gs.paperEl.isConnected) { row.style.display = 'none'; return; }
+  // Hide only the figures, never the header itself — the rekke banner lives
+  // in here too and has to stay put.
+  if (!gs || !gs.paperEl || !gs.paperEl.isConnected) {
+    header.classList.add('stats-hidden');
+    return;
+  }
 
   // Count what the HOST has called. In manual-play mode gs.called is only the
   // numbers the user has confirmed, so hostCalled is the honest total there;
@@ -2647,8 +2664,7 @@ function updatePaperStats() {
 
   document.getElementById('stat-avg').textContent =
     (avg != null && isFinite(avg)) ? avg : '–';
-  document.getElementById('stat-avg-rekke').textContent = rekke.replace('Rekke', 'Rekke ');
-  row.style.display = 'flex';
+  header.classList.remove('stats-hidden');
 }
 
 // Track per-game proximity state to detect transitions to "1 missing"
