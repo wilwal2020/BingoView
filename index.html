@@ -489,13 +489,13 @@ header .conn-label { margin-left: auto; }
 }
 
 /* Running count + the historical average for the rekke being played, sat
-   under the sheet. margin-top clears the countdown ring's overhang so the
-   two never touch. */
+   between the "Rekke X" banner and the sheet. margin-bottom clears the
+   countdown ring's overhang so the two never touch. */
 #paper-stats {
   display: flex;
   justify-content: center;
   gap: 26px;
-  margin: 14px auto 2px;
+  margin: 5px auto 12px;
   max-width: 420px;
 }
 .paper-stat {
@@ -515,6 +515,21 @@ header .conn-label { margin-left: auto; }
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--dim);
+}
+
+/* Past the average for this rekke — the game is running long, so the count
+   stops being brass and starts asking to be noticed. */
+@keyframes statOverPulse {
+  0%, 100% { opacity: 1;    text-shadow: 0 0 6px rgba(200,40,30,0.50); }
+  50%      { opacity: 0.72; text-shadow: 0 0 15px rgba(200,40,30,0.95); }
+}
+.paper-stat-num.over-average {
+  color: #ff5347;   /* lifted off --red so it stays legible on the navy panel */
+  animation: statOverPulse 1.15s ease-in-out infinite;
+}
+/* Still say it loudly, just without the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .paper-stat-num.over-average { animation: none; text-shadow: 0 0 8px rgba(200,40,30,0.7); }
 }
 
 /* Digitally reconstructed bingo paper */
@@ -2102,14 +2117,6 @@ header { padding: 7px 13px; gap: 5px 7px; }
       </div>
       <div id="paper-canvas-wrap">
         <div id="phone-rekke-banner">Rekke 1</div>
-        <!-- The ring lives OUTSIDE #digital-paper: renderActiveGame clears that
-             element's children when swapping sheets, which would wipe it. -->
-        <div id="paper-ring-wrap">
-          <div id="digital-paper"></div>
-          <svg id="call-ring" aria-hidden="true" focusable="false">
-            <rect id="call-ring-rect" />
-          </svg>
-        </div>
         <div id="paper-stats" style="display:none">
           <div class="paper-stat">
             <span class="paper-stat-num" id="stat-called">0</span>
@@ -2119,6 +2126,14 @@ header { padding: 7px 13px; gap: 5px 7px; }
             <span class="paper-stat-num" id="stat-avg">–</span>
             <span class="paper-stat-lbl">snitt <span id="stat-avg-rekke">Rekke 1</span></span>
           </div>
+        </div>
+        <!-- The ring lives OUTSIDE #digital-paper: renderActiveGame clears that
+             element's children when swapping sheets, which would wipe it. -->
+        <div id="paper-ring-wrap">
+          <div id="digital-paper"></div>
+          <svg id="call-ring" aria-hidden="true" focusable="false">
+            <rect id="call-ring-rect" />
+          </svg>
         </div>
       </div>
       <div id="phone-status-bar">
@@ -2623,7 +2638,13 @@ function updatePaperStats() {
   const rekke = gs.rekke || 'Rekke1';
   const avg = rekkeAverages ? rekkeAverages[rekke] : null;
 
-  document.getElementById('stat-called').textContent = called;
+  const calledEl = document.getElementById('stat-called');
+  calledEl.textContent = called;
+  // Strictly over: landing exactly on the average is still "on time".
+  // No average known (host hasn't sent one) means nothing to be over.
+  const over = (avg != null && isFinite(avg) && called > avg);
+  calledEl.classList.toggle('over-average', over);
+
   document.getElementById('stat-avg').textContent =
     (avg != null && isFinite(avg)) ? avg : '–';
   document.getElementById('stat-avg-rekke').textContent = rekke.replace('Rekke', 'Rekke ');
