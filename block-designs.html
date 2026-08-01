@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>BingoView — Skriftvarianter</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;700&family=JetBrains+Mono:wght@500;700&family=Roboto+Mono:wght@500;700&family=Space+Mono:wght@700&family=DM+Mono:wght@500&family=Inter:wght@600;800&family=Manrope:wght@700;800&family=Outfit:wght@600;800&family=Lexend:wght@700&family=Barlow+Condensed:wght@700;800&family=Bebas+Neue&family=Anton&family=Archivo+Black&display=swap" rel="stylesheet">
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 24px 80px;
+    background: #0e0f15;
+    color: #e5e7ed;
+    font-family: 'Inter', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  h1 {
+    text-align: center;
+    margin: 0 0 8px;
+    letter-spacing: 0.04em;
+    font-size: 1.7rem;
+  }
+  .sub {
+    text-align: center;
+    color: #8e93a4;
+    margin: 0 0 36px;
+    font-size: 0.95rem;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .designs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 24px;
+    max-width: 1500px;
+    margin: 0 auto;
+  }
+  .design-card {
+    background: #14161e;
+    border: 1px solid #20232e;
+    border-radius: 14px;
+    padding: 20px 18px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .design-card h2 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .design-card .blurb {
+    margin: 0;
+    color: #8e93a4;
+    font-size: 0.78rem;
+    line-height: 1.45;
+  }
+  .design-card .technical {
+    color: #5d6173;
+    font-size: 0.72rem;
+    font-family: 'IBM Plex Mono', monospace;
+    margin: -4px 0 0;
+  }
+
+  /* ============================================================
+     SHARED PAPER STRUCTURE — Variant D (implemented design)
+     ============================================================ */
+  .design-paper {
+    background: #a7c8f6;
+    color: #111;
+    padding: 10px 8px;
+    border-radius: 4px;
+    border: 1px solid #888;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .design-paper .strip {
+    display: grid;
+    grid-template-columns: 28px 1fr;
+    overflow: hidden;
+    background: #fff;
+    border: none;
+    border-radius: 6px;
+    box-shadow:
+      0 2px 8px rgba(0,0,0,0.18),
+      0 1px 0 rgba(0,0,0,0.04);
+  }
+  .design-paper .strip-id {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #1d2a55;
+    color: #ffd166;
+    border-right: 1px solid rgba(0, 0, 0, 0.10);
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    font-size: 0.7rem;
+  }
+  .design-paper .strip-grid {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+  }
+  .design-paper .cell {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid rgba(0, 0, 0, 0.10);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #111;
+    background: #fff;
+    position: relative;
+  }
+  .design-paper .strip-grid > .cell:nth-child(9n)       { border-right: none; }
+  .design-paper .strip-grid > .cell:nth-last-child(-n+9){ border-bottom: none; }
+  .design-paper .cell.called {
+    background: rgba(200,40,30,0.16);
+    color: #b22b1f;
+  }
+  .design-paper .cell.latest {
+    background: #d63327;
+    color: #fff;
+    box-shadow: 0 0 12px rgba(200,40,30,0.5);
+  }
+
+  /* Proximity highlights */
+  .design-paper .cell.row-warm:not([data-num]) { background: rgba(232,160,32,0.24); }
+  .design-paper .cell.row-hot:not([data-num])  {
+    background: rgba(232,160,32,0.44);
+    animation: pulseWarm 1.6s ease-in-out infinite;
+  }
+  .design-paper .cell.row-warm[data-num]:not(.called):not(.latest) {
+    box-shadow: inset 0 0 0 4px #f3d9a5;
+  }
+  .design-paper .cell.row-hot[data-num]:not(.called):not(.latest)  {
+    box-shadow: inset 0 0 0 4px #ecc080;
+    animation: pulseHotMiss 1.6s ease-in-out infinite;
+  }
+  @keyframes pulseWarm {
+    0%,100% { background: rgba(232,160,32,0.34); }
+    50%     { background: rgba(232,160,32,0.55); }
+  }
+  @keyframes pulseHotMiss {
+    0%,100% { box-shadow: inset 0 0 0 4px #ecc080; }
+    50%     { box-shadow: inset 0 0 0 4px #ffcf6e, inset 0 0 14px 2px rgba(232,160,32,0.55); }
+  }
+
+  /* ==========================================================================
+     FONT VARIANTS — set on .cell only (strip-id stays in display font).
+     The numbers are what the user reads most, so that's what changes here.
+     ========================================================================== */
+  .font-ibm    .design-paper .cell { font-family: 'IBM Plex Mono', monospace; font-weight: 700; }
+  .font-jet    .design-paper .cell { font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+  .font-roboto .design-paper .cell { font-family: 'Roboto Mono', monospace; font-weight: 700; }
+  .font-space  .design-paper .cell { font-family: 'Space Mono', monospace; font-weight: 700; }
+  .font-dm     .design-paper .cell { font-family: 'DM Mono', monospace; font-weight: 500; }
+
+  .font-inter  .design-paper .cell { font-family: 'Inter', sans-serif; font-weight: 800; }
+  .font-manrope.design-paper .cell { font-family: 'Manrope', sans-serif; font-weight: 800; }
+  .font-outfit .design-paper .cell { font-family: 'Outfit', sans-serif; font-weight: 800; }
+  .font-lexend .design-paper .cell { font-family: 'Lexend', sans-serif; font-weight: 700; }
+
+  .font-barlow .design-paper .cell { font-family: 'Barlow Condensed', sans-serif; font-weight: 800; font-size: 1.55rem; }
+  .font-bebas  .design-paper .cell { font-family: 'Bebas Neue', sans-serif; font-weight: 400; font-size: 1.5rem; }
+  .font-anton  .design-paper .cell { font-family: 'Anton', sans-serif; font-weight: 400; font-size: 1.45rem; }
+  .font-archivo.design-paper .cell { font-family: 'Archivo Black', sans-serif; font-weight: 400; font-size: 1.2rem; }
+
+  footer {
+    text-align: center;
+    color: #61667a;
+    font-size: 0.78rem;
+    margin-top: 56px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Skriftvarianter</h1>
+<p class="sub">
+  Designet er låst (Variant D + ny fargesett). Hver kort bruker en ulik
+  skrift bare i tallcellene. Strip-IDen holdes nøytral så fokus er på
+  tallene.
+</p>
+
+<div class="designs">
+
+  <div class="design-card">
+    <h2>1 · IBM Plex Mono</h2>
+    <p class="technical">font: 'IBM Plex Mono', 700 · nåværende</p>
+    <p class="blurb">Klassisk mono — godt for grid-alignment, små romslig.</p>
+    <div class="font-ibm"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>2 · JetBrains Mono</h2>
+    <p class="technical">font: 'JetBrains Mono', 700</p>
+    <p class="blurb">Litt rundere mono, lett mer karakter enn IBM.</p>
+    <div class="font-jet"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>3 · Roboto Mono</h2>
+    <p class="technical">font: 'Roboto Mono', 700</p>
+    <p class="blurb">Renere, mer nøytral mono. Veldig "Google"-ren.</p>
+    <div class="font-roboto"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>4 · Space Mono</h2>
+    <p class="technical">font: 'Space Mono', 700</p>
+    <p class="blurb">Geometrisk mono med signaturkarakter (ser litt retro ut).</p>
+    <div class="font-space"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>5 · DM Mono</h2>
+    <p class="technical">font: 'DM Mono', 500</p>
+    <p class="blurb">Tynnere, mer elegant mono. Mindre "tabular" følelse.</p>
+    <div class="font-dm"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>6 · Inter</h2>
+    <p class="technical">font: 'Inter', 800 · sans-serif</p>
+    <p class="blurb">Ikke-mono — moderne sans, ekstra bold for vekt.</p>
+    <div class="font-inter"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>7 · Manrope</h2>
+    <p class="technical">font: 'Manrope', 800 · sans-serif</p>
+    <p class="blurb">Geometrisk sans med rundere kurver. Litt vennligere.</p>
+    <div class="font-manrope"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>8 · Outfit</h2>
+    <p class="technical">font: 'Outfit', 800 · sans-serif</p>
+    <p class="blurb">Avrundet og friendly. Litt "moderne brand".</p>
+    <div class="font-outfit"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>9 · Lexend</h2>
+    <p class="technical">font: 'Lexend', 700 · sans-serif</p>
+    <p class="blurb">Designet spesifikt for lesbarhet — runde, åpne tegn.</p>
+    <div class="font-lexend"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>10 · Barlow Condensed</h2>
+    <p class="technical">font: 'Barlow Condensed', 800 · 1.55rem</p>
+    <p class="blurb">Kondensert sans (samme familie som bingosiden bruker andre steder).</p>
+    <div class="font-barlow"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>11 · Bebas Neue</h2>
+    <p class="technical">font: 'Bebas Neue' · 1.5rem</p>
+    <p class="blurb">Klassisk høy/smal display-skrift. Føles veldig "bingosal".</p>
+    <div class="font-bebas"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>12 · Anton</h2>
+    <p class="technical">font: 'Anton' · 1.45rem</p>
+    <p class="blurb">Som Bebas men tyngre. Solid og dramatisk.</p>
+    <div class="font-anton"><div class="design-paper" data-design></div></div>
+  </div>
+
+  <div class="design-card">
+    <h2>13 · Archivo Black</h2>
+    <p class="technical">font: 'Archivo Black' · 1.2rem</p>
+    <p class="blurb">Veldig tung sans. Fyller cellene helt, høy synlighet.</p>
+    <div class="font-archivo"><div class="design-paper" data-design></div></div>
+  </div>
+
+</div>
+
+<footer>Pek på favoritten — så implementeres den</footer>
+
+<script>
+  const SAMPLE = [
+    { id: '4201', cells: [
+        [3, 13, 20, null, null, null, 55, 60, null],
+        [null, 10, 25, null, 47, 54, 69, null, null],
+        [null, null, 27, 35, null, 42, 56, null, 83],
+    ],
+      called: [13, 20, 55, 60, 25, 47, 54, 69, 27, 42],
+      latest: 60,
+      hotRow: 0,
+      warmRow: 2,
+    },
+    { id: '4202', cells: [
+        [9, null, 22, 31, null, null, null, 74, 86],
+        [null, 14, null, null, 41, 53, 67, null, 88],
+        [null, 18, 28, 39, 45, null, null, 78, null],
+    ],
+      called: [14, 41, 53, 9, 22, 31, 86],
+      latest: 53,
+      warmRow: 1,
+    },
+    { id: '4203', cells: [
+        [4, null, 21, null, null, 50, null, 73, 89],
+        [null, 11, null, 32, 44, null, null, 76, null],
+        [null, null, 29, null, 48, 51, 65, null, 81],
+    ], called: [], latest: null },
+  ];
+
+  function renderInto(paperEl) {
+    SAMPLE.forEach(strip => {
+      const stripEl = document.createElement('div');
+      stripEl.className = 'strip';
+      const idEl = document.createElement('div');
+      idEl.className = 'strip-id';
+      idEl.textContent = strip.id;
+      stripEl.appendChild(idEl);
+      const grid = document.createElement('div');
+      grid.className = 'strip-grid';
+      strip.cells.forEach((row, rIdx) => {
+        const rowClass = rIdx === strip.hotRow  ? 'row-hot'
+                       : rIdx === strip.warmRow ? 'row-warm'
+                       : null;
+        row.forEach(num => {
+          const cell = document.createElement('div');
+          cell.className = 'cell';
+          if (num != null) {
+            cell.textContent = num;
+            cell.dataset.num = num;
+            if (strip.called.includes(num)) {
+              cell.classList.add(num === strip.latest ? 'latest' : 'called');
+            }
+          }
+          if (rowClass) cell.classList.add(rowClass);
+          grid.appendChild(cell);
+        });
+      });
+      stripEl.appendChild(grid);
+      paperEl.appendChild(stripEl);
+    });
+  }
+
+  document.querySelectorAll('.design-paper[data-design]').forEach(renderInto);
+</script>
+
+</body>
+</html>
