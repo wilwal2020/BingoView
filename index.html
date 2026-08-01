@@ -572,25 +572,32 @@ body.start-parked #rekke-buttons { display: none !important; }
      stutter on iOS. The brass line reads perfectly well without it. */
 }
 
-/* ── Countdown urgency ──────────────────────────────────────────
-   A timer that looks identical at thirty seconds out and at one second out
-   is reporting a number, not building toward anything. These phases give
-   the cycle a shape: brass while there's time, amber when there isn't much,
-   red for the last stretch. Scoped to body.fx-on like everything else, so
-   with animations off the ring stays the plain brass line it always was.
+/* ── Countdown cue ──────────────────────────────────────────────
+   The ring is a heads-up, not a tension device. It stays plain brass for
+   the whole cycle and gets exactly one beat, shortly before the call: the
+   line warms and swells once, then the number arrives.
 
-   stroke and stroke-width are transitioned rather than animated so the
-   colour bleeds in over half a second instead of switching, and so nothing
-   here touches the `animation` slot the heartbeat below needs. */
-body.fx-on #call-ring-rect { transition: stroke 0.5s linear, stroke-width 0.5s linear; }
-body.fx-on #call-ring.ring-warn #call-ring-rect {
-  stroke: #ff9a3c;
-  stroke-width: 3.4;
+   This deliberately replaced a three-stage escalation (amber, then red,
+   then a per-second heartbeat). Escalation tells you to brace; the ring's
+   whole job is to let you glance at it and know a number is coming. One
+   soft cue does that, and a ramp toward panic actively works against it. */
+body.fx-on #call-ring-rect { transition: stroke 0.6s linear, stroke-width 0.6s linear; }
+body.fx-on #call-ring.ring-cue #call-ring-rect {
+  stroke: #ffd98a;
+  stroke-width: 3.6;
 }
-body.fx-on #call-ring.ring-urgent #call-ring-rect {
-  stroke: var(--red);
-  stroke-width: 4;
+/* One breath, played once — not a loop. A repeating pulse is what turns a
+   reminder into a countdown, which is the thing being avoided here. */
+body.fx-on:not([data-fx="rolig"]) #call-ring.ring-cue {
+  animation: ringCueSwell 0.9s ease-out;
+  transform-origin: 50% 50%;
 }
+@keyframes ringCueSwell {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(calc(1 + 0.010 * var(--fx-amp))); }
+  100% { transform: scale(1); }
+}
+
 /* Host is past due. Not an alarm — the opposite: the ring backs off and
    waits, so a late call reads as "still coming" rather than as a countdown
    stuck at zero. */
@@ -604,27 +611,6 @@ body.fx-on #call-ring.ring-overdue #call-ring-rect {
   50%      { opacity: 0.6; }
 }
 
-/* The heartbeat. One pulse per second through the urgent phase, started at
-   the exact instant the phase begins so it stays in step with the ticks JS
-   schedules alongside it. Scaling the whole SVG keeps this on the
-   compositor — the ring breathes outward without re-rasterising a filter,
-   which is the thing that made this element stutter on iOS before. */
-body.fx-on:not([data-fx="rolig"]) #call-ring.ring-urgent {
-  animation: ringHeartbeat 1s ease-in-out infinite;
-  transform-origin: 50% 50%;
-}
-@keyframes ringHeartbeat {
-  0%   { transform: scale(1); }
-  12%  { transform: scale(calc(1 + 0.016 * var(--fx-amp))); }
-  40%  { transform: scale(1); }
-  100% { transform: scale(1); }
-}
-/* Last second at Maks: double time. The acceleration is the whole point —
-   a heartbeat that keeps a steady tempo isn't nervous about anything. */
-body.fx-on[data-fx="maks"] #call-ring.ring-final {
-  animation: ringHeartbeat 0.5s ease-in-out infinite;
-}
-
 /* A new call restarts the cycle. Without a beat marking that, the ring just
    silently teleports back to full and the reset is the one moment in the
    loop with no feedback at all. */
@@ -633,23 +619,6 @@ body.fx-on #call-ring.ring-hit { animation: ringHit 0.5s cubic-bezier(0.2,1.4,0.
   0%   { transform: scale(calc(1 + 0.05 * var(--fx-amp))); }
   100% { transform: scale(1); }
 }
-
-/* The head. A short bright dash pinned to the leading edge of the ring,
-   travelling on the same timeline as the ring itself — see applyCallRing
-   for the arithmetic. Its job is legibility: on a 45-second interval the
-   ring's own edge creeps too slowly to read as motion, and a moving point
-   of light is the cheapest way to say "this is still running". */
-#call-ring-spark {
-  fill: none;
-  stroke: #fff6dc;
-  stroke-width: 4.5;
-  stroke-linecap: round;
-  opacity: 0;
-}
-body.fx-on:not([data-fx="rolig"]) #call-ring.on #call-ring-spark { opacity: 1; }
-body.fx-on #call-ring.ring-warn   #call-ring-spark { stroke: #ffd0a0; }
-body.fx-on #call-ring.ring-urgent #call-ring-spark { stroke: #ffdede; }
-body.fx-on #call-ring.ring-overdue #call-ring-spark { opacity: 0; }
 
 /* Header row above the sheet: called count · REKKE X · rekke average.
    1fr/auto/1fr means the two side columns are always equal, so the banner
@@ -2408,7 +2377,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
       <div class="bv-row" id="bv-row-call-ring">
         <div class="bv-row-label">
           <span>Nedtelling til neste tall</span>
-          <span class="bv-row-desc">Gullstrek rundt arket som teller ned — lengden bestemmes på bingo-siden. Med animasjoner på strammer den seg til mot slutten</span>
+          <span class="bv-row-desc">Gullstrek rundt arket som teller ned — lengden bestemmes på bingo-siden. Med animasjoner på gir den et lite varsel rett før neste tall</span>
         </div>
         <label class="bv-toggle">
           <input type="checkbox" id="bv-call-ring-on">
@@ -2615,9 +2584,6 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <div id="digital-paper"></div>
           <svg id="call-ring" aria-hidden="true" focusable="false">
             <rect id="call-ring-rect" />
-            <!-- Bright head riding the leading edge of the ring. Same geometry,
-                 same timeline, just a short dash instead of a long one. -->
-            <rect id="call-ring-spark" />
           </svg>
         </div>
       </div>
@@ -3534,12 +3500,10 @@ function serverNow() { return Date.now() + _serverOffset; }
 // Phase timers for the urgency escalation, plus the per-second ticks. Held
 // so a cycle that gets superseded (new call, game switch, ring turned off)
 // can't leave a countdown ticking for a number that already arrived.
-let _ringTimers = [];
-let _ringSparkAnim = null;
-let _ringSparkLen  = 0;
-let _ringCycleId   = null;   // game|callIndex of the cycle currently drawn
+let _ringTimers  = [];
+let _ringCycleId = null;   // game|callIndex of the cycle currently drawn
 
-const RING_PHASES = ['ring-warn', 'ring-urgent', 'ring-final', 'ring-overdue', 'ring-hit'];
+const RING_PHASES = ['ring-cue', 'ring-overdue', 'ring-hit'];
 
 function clearRingTimers() {
   _ringTimers.forEach(clearTimeout);
@@ -3548,15 +3512,12 @@ function clearRingTimers() {
 function ringPhase(cls) {
   const svg = document.getElementById('call-ring');
   if (!svg) return;
-  // ring-final stacks on top of ring-urgent (it only swaps the tempo), so it
-  // is the one phase that doesn't clear its predecessor.
-  if (cls !== 'ring-final') svg.classList.remove(...RING_PHASES);
+  svg.classList.remove(...RING_PHASES);
   if (cls) svg.classList.add(cls);
 }
 
 function hideCallRing() {
   if (_ringAnim) { try { _ringAnim.cancel(); } catch (e) {} _ringAnim = null; }
-  if (_ringSparkAnim) { try { _ringSparkAnim.cancel(); } catch (e) {} _ringSparkAnim = null; }
   clearRingTimers();
   _ringKey = null;
   _ringCycleId = null;
@@ -3582,7 +3543,6 @@ let _ringGeom = { w: 0, h: 0 };
 function updateCallRingGeometry() {
   const svg   = document.getElementById('call-ring');
   const rect  = document.getElementById('call-ring-rect');
-  const spark = document.getElementById('call-ring-spark');
   const paper = document.getElementById('digital-paper');
   if (!svg || !rect || !paper) return false;
   const w = paper.offsetWidth, h = paper.offsetHeight;
@@ -3615,59 +3575,35 @@ function updateCallRingGeometry() {
   if (!len || !isFinite(len)) len = 2 * (rw + rh) - 8 * r + 2 * Math.PI * r;
   _ringLen = len;
   rect.style.strokeDasharray = len;
-
-  // The head traces the identical path; only its dash pattern differs — a
-  // short dash followed by a gap longer than the whole perimeter, so exactly
-  // one segment is ever visible. Kept proportional to the ring so it stays a
-  // "head" rather than becoming an arc on a small sheet.
-  if (spark) {
-    _ringSparkLen = Math.max(24, Math.min(70, len * 0.07));
-    spark.setAttribute('x', RING_SW / 2);
-    spark.setAttribute('y', RING_SW / 2);
-    spark.setAttribute('width', rw);
-    spark.setAttribute('height', rh);
-    spark.setAttribute('rx', r);
-    spark.style.strokeDasharray = _ringSparkLen + ' ' + len;
-  }
   _ringGeom = { w, h };
   return true;
 }
 
 // Draw/animate the ring for a call: `callAt` in server ms, `callIndex` the
 // running count of calls in this game (1-based).
-// Escalation windows for one cycle. Absolute caps as well as fractions: on a
-// 60-second interval "the last quarter" is fifteen seconds of red, which is
-// not urgency, it's just a red ring. The last few seconds are what's urgent
-// regardless of how long the run-up was.
-function ringPhaseWindows(dur) {
-  return {
-    urgent: Math.min(3200, dur * 0.3),
-    warn:   Math.min(9000, dur * 0.55),
-  };
+// How long before the call the cue fires. Capped in absolute time as well as
+// proportionally: on a 45-second interval a quarter of the cycle is eleven
+// seconds, which stops being "shortly before" and becomes a second phase.
+function ringCueLead(dur) {
+  return Math.min(1400, dur * 0.25);
 }
 
-// Sound + haptic for one tick of the final countdown. Pitch climbs as the
-// seconds run out — by the last tick it's a full octave above the first, so
-// the ear knows how close the call is without watching the ring.
-function ringTick(secondsLeft) {
+// The cue itself: one soft note and one light tap, once. Deliberately a
+// single event rather than a 3-2-1 — the ring is telling you a number is
+// coming, not asking you to brace for it.
+function ringCue() {
   if (document.hidden) return;
   const ctx = sfxReady();
   if (ctx) {
-    const step = Math.max(0, 4 - secondsLeft);
-    try {
-      sfxTone(ctx, { freq: 440 * Math.pow(2, step / 4), type: 'triangle',
-                     dur: secondsLeft <= 1 ? 0.18 : 0.09,
-                     gain: 0.07 + step * 0.02 });
-    } catch (e) {}
+    try { sfxTone(ctx, { freq: 587.33, type: 'sine', dur: 0.26, gain: 0.07 }); } catch (e) {}
   }
-  fxHaptic(secondsLeft <= 1 ? 22 : 9);
+  fxHaptic(12);
 }
 
 function applyCallRing(callAt, callIndex) {
-  const svg   = document.getElementById('call-ring');
-  const rect  = document.getElementById('call-ring-rect');
-  const spark = document.getElementById('call-ring-spark');
-  const gs    = gameState[activeGame];
+  const svg  = document.getElementById('call-ring');
+  const rect = document.getElementById('call-ring-rect');
+  const gs   = gameState[activeGame];
   if (!svg || !rect) return;
   // feedback.callRing is the phone's own opt-in; callTimerSec is the length
   // the host set. Both have to be present for there to be a ring.
@@ -3703,45 +3639,29 @@ function applyCallRing(callAt, callIndex) {
   if (!isFinite(elapsed) || elapsed < 0) elapsed = 0;   // clock skew guard
 
   if (_ringAnim) { try { _ringAnim.cancel(); } catch (e) {} _ringAnim = null; }
-  if (_ringSparkAnim) { try { _ringSparkAnim.cancel(); } catch (e) {} _ringSparkAnim = null; }
-  // Past this point we own the cycle, so any escalation left over from the
-  // previous one has to go — otherwise a fresh 45-second countdown inherits
-  // the red heartbeat of the one that just finished.
+  // Past this point we own the cycle, so anything left over from the
+  // previous one has to go — otherwise a fresh countdown inherits the cue
+  // or the overdue dimming of the one that just finished.
   clearRingTimers();
   ringPhase(null);
   svg.classList.add('on');
-
-  // The head sits just behind the leading edge of the ring. Both dashes run
-  // along the same path, so pinning one to the other is pure arithmetic: the
-  // drawn arc always ends at arclength (L - offset), and a dash of length S
-  // covers [-offset2, -offset2 + S], so offset2 = offset + S - L puts it in
-  // [L - offset - S, L - offset] — flush against the edge, in both
-  // directions, for free, with no per-frame work.
-  const sparkAt = d => d + _ringSparkLen - _ringLen;
 
   // Cycle already over: hold the finished state until the next call, and say
   // so. The host being late is information the ring is uniquely placed to
   // give, and it used to just sit there looking finished.
   if (elapsed >= dur) {
     rect.style.strokeDashoffset = to;
-    if (spark) spark.style.strokeDashoffset = sparkAt(to);
     if (fxEnabled()) ringPhase('ring-overdue');
     return;
   }
 
   const start = from + (to - from) * (elapsed / dur);
   rect.style.strokeDashoffset = start;
-  if (spark) spark.style.strokeDashoffset = sparkAt(start);
   try {
-    const opts = { duration: dur - elapsed, easing: 'linear', fill: 'forwards' };
     _ringAnim = rect.animate(
-      [{ strokeDashoffset: start }, { strokeDashoffset: to }], opts
+      [{ strokeDashoffset: start }, { strokeDashoffset: to }],
+      { duration: dur - elapsed, easing: 'linear', fill: 'forwards' }
     );
-    if (spark) {
-      _ringSparkAnim = spark.animate(
-        [{ strokeDashoffset: sparkAt(start) }, { strokeDashoffset: sparkAt(to) }], opts
-      );
-    }
   } catch (e) {
     // No WAAPI: leave the ring at its correct current position rather than
     // animating. Still conveys roughly where the cycle stands.
@@ -3749,13 +3669,12 @@ function applyCallRing(callAt, callIndex) {
 
   if (!fxEnabled()) return;
 
-  // ── Escalation ──
-  // Everything below is scheduled from `remaining`, never from the phase
-  // that happens to be showing, so a phone that joins the session halfway
-  // through a cycle drops straight into the correct phase instead of
-  // replaying the run-up.
+  // ── The cue ──
+  // Scheduled from `remaining`, never from whatever is currently showing, so
+  // a phone joining mid-cycle lands in the right state: if the lead time has
+  // already passed it cues immediately rather than replaying the wait.
   const remaining = dur - elapsed;
-  const win = ringPhaseWindows(dur);
+  const lead = ringCueLead(dur);
 
   // A new call restarting the cycle is the one beat in the loop that had no
   // feedback at all — the ring simply teleported back to full.
@@ -3763,34 +3682,15 @@ function applyCallRing(callAt, callIndex) {
     fxOneShot(svg, 'ring-hit', 520);
   }
 
-  const enterUrgent = () => {
-    ringPhase('ring-urgent');
-    // Ticks are scheduled off this same instant as the CSS heartbeat starts,
-    // so the pulse and the sound stay in step without either driving the
-    // other. secondsLeft counts the phase down, not the cycle.
-    const left = Math.min(remaining, win.urgent);
-    // The -400 drops a trailing sliver: with a 3.2s window the honest ticks
-    // are at 3, 2 and 1 seconds left, and a fourth at 0.2s would land on top
-    // of the call itself.
-    for (let t = 0; t < left - 400; t += 1000) {
-      const secondsLeft = Math.max(1, Math.round((left - t) / 1000));
-      _ringTimers.push(setTimeout(() => ringTick(secondsLeft), t));
-    }
-    if (fxLevel() === 'maks' && left > 1000) {
-      _ringTimers.push(setTimeout(() => ringPhase('ring-final'), left - 1000));
-    }
-    _ringTimers.push(setTimeout(() => ringPhase('ring-overdue'), left));
-  };
-
-  if (remaining > win.warn) {
-    _ringTimers.push(setTimeout(() => ringPhase('ring-warn'), remaining - win.warn));
-    _ringTimers.push(setTimeout(enterUrgent, remaining - win.urgent));
-  } else if (remaining > win.urgent) {
-    ringPhase('ring-warn');
-    _ringTimers.push(setTimeout(enterUrgent, remaining - win.urgent));
+  const enterCue = () => { ringPhase('ring-cue'); ringCue(); };
+  if (remaining > lead) {
+    _ringTimers.push(setTimeout(enterCue, remaining - lead));
   } else {
-    enterUrgent();
+    enterCue();
   }
+  // The ring holds the cue look until the call lands; if the host is late it
+  // hands over to the overdue state instead of sitting there mid-gesture.
+  _ringTimers.push(setTimeout(() => ringPhase('ring-overdue'), remaining));
 }
 
 function refreshCallRing() {
