@@ -478,6 +478,8 @@ body.start-parked #rekke-buttons { display: none !important; }
   color: var(--paper);
   box-shadow: inset 0 0 0 1px var(--gold);
 }
+/* Four options instead of two — tighten up so the row still fits a phone. */
+#bv-anim-seg button { padding: 5px 7px; font-size: 0.67rem; }
 
 /* Slide-switch styling for the "Manuell trykking" toggle. The same
    #btn-manual-toggle button is reused; .active drives the on-state so the
@@ -824,6 +826,17 @@ body.start-parked #rekke-buttons { display: none !important; }
    `animation:` declaration would clobber them — the pseudo-element
    gives each flourish its own animation timeline to play on.
    ═══════════════════════════════════════════════════════════════════ */
+
+/* Intensity dial. Three levels share ONE set of keyframes: every
+   amplitude below is written as a multiple of --fx-amp and every glow as
+   a multiple of --fx-glow, so "Rolig" and "Maks" are the same animations
+   played smaller or larger rather than three parallel implementations.
+   Only genuinely extra effects (the ones that add elements or timing
+   beats rather than scale existing ones) key off body[data-fx="maks"]. */
+body.fx-on                  { --fx-amp: 1;    --fx-glow: 1; }
+body.fx-on[data-fx="rolig"] { --fx-amp: 0.5;  --fx-glow: 0.55; }
+body.fx-on[data-fx="maks"]  { --fx-amp: 1.5;  --fx-glow: 1.7; }
+
 body.fx-on .cell::before {
   content: "";
   position: absolute;
@@ -873,21 +886,21 @@ body.fx-on .cell.latest.latest-fresh {
   }
   /* Wind up — shrink back, gathering itself. */
   22% {
-    transform: scale3d(0.78, 0.86, 1);
+    transform: scale3d(calc(1 - 0.22 * var(--fx-amp)), calc(1 - 0.14 * var(--fx-amp)), 1);
     animation-timing-function: cubic-bezier(0.1, 0.9, 0.2, 1);
   }
   /* Release — peak, stretched wider than tall, white-hot. */
   50% {
-    transform: scale3d(1.32, 1.24, 1);
-    box-shadow: 0 0 40px 11px rgba(255,110,70,0.95);
+    transform: scale3d(calc(1 + 0.32 * var(--fx-amp)), calc(1 + 0.24 * var(--fx-amp)), 1);
+    box-shadow: 0 0 calc(40px * var(--fx-glow)) calc(11px * var(--fx-glow)) rgba(255,110,70,0.95);
     text-shadow: 0 0 20px #fff, 0 0 8px #fff;
     animation-timing-function: cubic-bezier(0.35, 0, 0.3, 1);
   }
   /* Settle through a single soft squash. Movement ends here; everything
      past this point is just the glow decaying. */
   76% {
-    transform: scale3d(0.98, 1.03, 1);
-    box-shadow: 0 0 24px 5px rgba(255,110,70,0.6);
+    transform: scale3d(calc(1 - 0.02 * var(--fx-amp)), calc(1 + 0.03 * var(--fx-amp)), 1);
+    box-shadow: 0 0 calc(24px * var(--fx-glow)) calc(5px * var(--fx-glow)) rgba(255,110,70,0.6);
     text-shadow: 0 0 8px rgba(255,255,255,0.6);
     animation-timing-function: cubic-bezier(0.4, 0, 0.3, 1);
   }
@@ -897,6 +910,21 @@ body.fx-on .cell.latest.latest-fresh {
     box-shadow: 0 0 14px rgba(200,40,30,0.55);
     text-shadow: none;
   }
+}
+/* Impact frame on the pseudo-element: a hard white core that blows out at
+   the exact moment the cell reaches its peak (50% of 0.4s = 200ms) and is
+   gone before the cell has finished settling. The cell provides the
+   movement, this provides the *hit* — separating the two is what stops the
+   pop from reading as "a square that got bigger". */
+body.fx-on .cell.latest.latest-fresh::before {
+  background: radial-gradient(circle, #fff 0%, rgba(255,190,120,0.9) 38%, rgba(255,110,70,0) 74%);
+  animation: fxCallFlash 0.4s ease-out;
+}
+@keyframes fxCallFlash {
+  0%   { opacity: 0;   transform: scale(0.4); }
+  20%  { opacity: 0.3; transform: scale(0.6); }
+  50%  { opacity: 1;   transform: scale(1.5); }
+  100% { opacity: 0;   transform: scale(2.4); }
 }
 
 /* 2 ── Row just went hot (1 number away): the row does a Mexican wave.
@@ -911,10 +939,10 @@ body.fx-on .cell.fx-hot-sweep {
   z-index: 4;
 }
 @keyframes fxHotWave {
-  0%   { transform: translateY(0)     scale(1); }
-  30%  { transform: translateY(-10px) scale(1.18); }
-  62%  { transform: translateY(3px)   scale(0.96); }
-  100% { transform: translateY(0)     scale(1); }
+  0%   { transform: translateY(0) scale(1); }
+  30%  { transform: translateY(calc(-10px * var(--fx-amp))) scale(calc(1 + 0.18 * var(--fx-amp))); }
+  62%  { transform: translateY(calc(3px * var(--fx-amp)))   scale(calc(1 - 0.04 * var(--fx-amp))); }
+  100% { transform: translateY(0) scale(1); }
 }
 body.fx-on .cell.fx-hot-sweep::before {
   background: radial-gradient(circle, #fff 0%, rgba(255,214,120,0.95) 42%, rgba(255,170,40,0) 76%);
@@ -935,10 +963,10 @@ body.fx-on .cell.fx-row-done {
   z-index: 4;
 }
 @keyframes fxDoneFlip {
-  0%   { transform: perspective(320px) rotateX(0deg)   scale(1); }
-  35%  { transform: perspective(320px) rotateX(-58deg) scale(1.24); }
-  70%  { transform: perspective(320px) rotateX(14deg)  scale(0.95); }
-  100% { transform: perspective(320px) rotateX(0deg)   scale(1); }
+  0%   { transform: perspective(320px) rotateX(0deg) scale(1); }
+  35%  { transform: perspective(320px) rotateX(calc(-58deg * var(--fx-amp))) scale(calc(1 + 0.24 * var(--fx-amp))); }
+  70%  { transform: perspective(320px) rotateX(calc(14deg * var(--fx-amp)))  scale(calc(1 - 0.05 * var(--fx-amp))); }
+  100% { transform: perspective(320px) rotateX(0deg) scale(1); }
 }
 body.fx-on .cell.fx-row-done::before {
   background: radial-gradient(circle, #fff 0%, rgba(126,255,178,0.95) 42%, rgba(26,122,64,0) 78%);
@@ -953,12 +981,12 @@ body.fx-on .cell.fx-row-done::before {
 /* 4 ── Win: the whole sheet reacts. */
 body.fx-on #digital-paper.fx-win-shake { animation: fxShake 0.62s ease-in-out; }
 @keyframes fxShake {
-  0%, 100% { transform: translateX(0)    rotate(0deg); }
-  15%      { transform: translateX(-7px) rotate(-0.7deg); }
-  30%      { transform: translateX(6px)  rotate(0.6deg); }
-  45%      { transform: translateX(-5px) rotate(-0.45deg); }
-  60%      { transform: translateX(4px)  rotate(0.3deg); }
-  80%      { transform: translateX(-2px) rotate(-0.15deg); }
+  0%, 100% { transform: translateX(0) rotate(0deg); }
+  15%      { transform: translateX(calc(-7px * var(--fx-amp))) rotate(calc(-0.7deg * var(--fx-amp))); }
+  30%      { transform: translateX(calc(6px * var(--fx-amp)))  rotate(calc(0.6deg * var(--fx-amp))); }
+  45%      { transform: translateX(calc(-5px * var(--fx-amp))) rotate(calc(-0.45deg * var(--fx-amp))); }
+  60%      { transform: translateX(calc(4px * var(--fx-amp)))  rotate(calc(0.3deg * var(--fx-amp))); }
+  80%      { transform: translateX(calc(-2px * var(--fx-amp))) rotate(calc(-0.15deg * var(--fx-amp))); }
 }
 /* Outranks the .strip.has-winner rowWinPulse rule for the 0.6s the
    .fx-slam class is present, then hands the banner back to the pulse. */
@@ -970,6 +998,278 @@ body.fx-on .strip.has-winner.fx-slam .strip-id-banner {
   55%  { transform: scale(0.96) translateY(0);    opacity: 1; }
   100% { transform: scale(1);                     opacity: 1; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   GAME FEEL — the interaction layer.
+
+   Everything above reacts to the HOST. Everything below reacts to the
+   USER, plus the second-order stuff that makes a reaction feel physical
+   rather than merely visible: secondary motion on neighbouring cells,
+   a recoil on the sheet, a hit-stop before the win, weight in the
+   press-down. Same body.fx-on gate, same --fx-amp dial.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 5 ── The press. Responsiveness is the whole game here: this fires on
+   pointerdown, not click, so the cell is already moving under the finger
+   before the tap has been decided. The rotation is deliberately tiny and
+   always the same direction — a square that tilts reads as a physical
+   object being pushed; a square that only scales reads as a CSS effect. */
+body.fx-on #digital-paper.tappable .cell[data-num].fx-press {
+  transform: scale(calc(1 - 0.14 * var(--fx-amp))) rotate(calc(-1.4deg * var(--fx-amp)));
+  transition: transform 60ms cubic-bezier(0.2, 0, 0, 1);
+  z-index: 7;
+}
+/* The plain :active squash is the FX-off fallback; suppress it while the
+   richer press is running so the two don't fight over `transform`. */
+body.fx-on #digital-paper.tappable .cell[data-num]:active { transform: none; }
+
+/* ── 6 ── The stamp. Release is where the payoff lands: the cell springs
+   out of the press, past its resting size, and settles. Starting from the
+   pressed scale rather than from 1 is what makes press and release read as
+   one continuous gesture instead of two separate animations. */
+body.fx-on .cell.fx-stamp {
+  animation: fxStamp 0.42s cubic-bezier(0.25, 1.4, 0.4, 1) !important;
+  z-index: 7;
+}
+@keyframes fxStamp {
+  0%   { transform: scale(calc(1 - 0.14 * var(--fx-amp))) rotate(calc(-1.4deg * var(--fx-amp))); }
+  30%  {
+    transform: scale(calc(1 + 0.30 * var(--fx-amp))) rotate(calc(0.6deg * var(--fx-amp)));
+    box-shadow: 0 0 calc(26px * var(--fx-glow)) calc(6px * var(--fx-glow)) rgba(255,150,60,0.8);
+  }
+  62%  { transform: scale(calc(1 - 0.05 * var(--fx-amp))) rotate(0deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+body.fx-on .cell.fx-stamp::before {
+  background: radial-gradient(circle, #fff 0%, rgba(255,180,90,0.85) 40%, rgba(255,120,40,0) 76%);
+  animation: fxStampFlash 0.42s ease-out;
+}
+@keyframes fxStampFlash {
+  0%   { opacity: 0.9; transform: scale(0.2); }
+  40%  { opacity: 0.8; transform: scale(1.25); }
+  100% { opacity: 0;   transform: scale(1.9); }
+}
+
+/* ── 7 ── The un-stamp. Removing a mark should feel like the opposite of
+   making one, not like a second stamp: it collapses inward, drains to
+   grey, and has no overshoot at all. */
+body.fx-on .cell.fx-unstamp {
+  animation: fxUnstamp 0.34s cubic-bezier(0.4, 0, 0.5, 1) !important;
+  z-index: 7;
+}
+@keyframes fxUnstamp {
+  0%   { transform: scale(1); filter: none; }
+  38%  { transform: scale(calc(1 - 0.20 * var(--fx-amp))); filter: grayscale(1) brightness(1.5); }
+  100% { transform: scale(1); filter: none; }
+}
+
+/* ── 8 ── The wrong tap. Fast, high-frequency, asymmetric judder — error
+   motion has to be legibly *different* from celebration motion, so this is
+   the only effect in the file with no overshoot and no easing curve worth
+   the name. It should feel like the paper refusing. */
+body.fx-on .cell.fx-wrong-hit {
+  animation: fxWrongJudder 0.36s linear !important;
+  z-index: 7;
+}
+@keyframes fxWrongJudder {
+  0%,100% { transform: translateX(0) rotate(0deg); }
+  12%  { transform: translateX(calc(-6px * var(--fx-amp))) rotate(calc(-3deg * var(--fx-amp))); }
+  26%  { transform: translateX(calc(6px * var(--fx-amp)))  rotate(calc(3deg * var(--fx-amp))); }
+  42%  { transform: translateX(calc(-4px * var(--fx-amp))) rotate(calc(-2deg * var(--fx-amp))); }
+  58%  { transform: translateX(calc(3px * var(--fx-amp)))  rotate(calc(1.5deg * var(--fx-amp))); }
+  76%  { transform: translateX(calc(-2px * var(--fx-amp))) rotate(0deg); }
+}
+body.fx-on .cell.fx-wrong-hit::before {
+  background: radial-gradient(circle, rgba(255,60,40,0.95) 0%, rgba(200,40,30,0) 72%);
+  animation: fxWrongFlash 0.36s ease-out;
+}
+@keyframes fxWrongFlash {
+  0%   { opacity: 1; transform: scale(1.6); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+/* ── 9 ── Secondary motion. When a cell is hit, its neighbours get shoved
+   away from it a beat later. Nothing in the game state changed for those
+   cells — this exists purely so the sheet behaves like a connected surface
+   instead of 27 independent squares. --fx-nx/--fx-ny carry the direction
+   away from the impact, --fx-d the distance-based delay. */
+body.fx-on .cell.fx-nudge {
+  animation: fxNudge 0.34s cubic-bezier(0.3, 1.3, 0.5, 1) var(--fx-d, 0s) both;
+}
+@keyframes fxNudge {
+  0%   { transform: translate(0, 0) scale(1); }
+  42%  {
+    transform: translate(calc(var(--fx-nx, 0) * 3.5px * var(--fx-amp)),
+                         calc(var(--fx-ny, 0) * 3.5px * var(--fx-amp)))
+               scale(calc(1 - 0.05 * var(--fx-amp)));
+  }
+  100% { transform: translate(0, 0) scale(1); }
+}
+
+/* ── 10 ── Sheet recoil. The paper takes the hit too — a couple of pixels,
+   under a fifth of a second. Below the threshold of "did that move?" and
+   squarely at the threshold of "that felt like it landed". */
+body.fx-on #digital-paper.fx-recoil { animation: fxRecoil 0.24s cubic-bezier(0.2, 0.9, 0.3, 1); }
+@keyframes fxRecoil {
+  0%   { transform: translateY(0) scale(1); }
+  32%  { transform: translateY(calc(-2.5px * var(--fx-amp))) scale(calc(1 + 0.006 * var(--fx-amp))); }
+  100% { transform: translateY(0) scale(1); }
+}
+/* Miss — the host called a number that isn't on this sheet. A downward dip
+   instead of a lift: same gesture, wrong direction, so it reads as a small
+   disappointment without ever being mistaken for a hit. Maks only. */
+body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-out; }
+@keyframes fxMiss {
+  0%   { transform: translateY(0); }
+  40%  { transform: translateY(2px) scale(0.996); }
+  100% { transform: translateY(0); }
+}
+
+/* ── 11 ── Tension. A row one number away already pulses; this puts a
+   beacon on the specific squares you still need, so "you are close" and
+   "these are the numbers" are two different signals rather than one.
+   Rides on ::before because the cell itself is busy with rowHotMissPulse,
+   and shares its 1.6s period so the two breathe together. */
+body.fx-on .cell.row-hot[data-num]:not(.called):not(.latest):not(.fx-hot-sweep):not(.fx-row-done)::before {
+  background: radial-gradient(circle, rgba(255,214,120,0.75) 0%, rgba(255,170,40,0) 68%);
+  animation: fxBeacon 1.6s ease-in-out infinite;
+}
+@keyframes fxBeacon {
+  0%, 100% { opacity: 0;    transform: scale(0.75); }
+  50%      { opacity: 0.85; transform: scale(1.25); }
+}
+/* At Maks the whole sheet knows something is up: a slow warm breath around
+   the paper for as long as any row is one away. Ambient, not an event —
+   it's the difference between a game that reacts and a game that *waits*.
+
+   Deliberately on the WRAPPER, not on #digital-paper. An element gets one
+   `animation` property: parked on the paper this rule outranks .fx-recoil
+   and .fx-win-shake, so the sheet would stop reacting to calls at exactly
+   the point in the game where reacting matters most. The wrapper is the
+   same size and shape, and leaves the paper's slot free for impacts. */
+body.fx-on[data-fx="maks"] #paper-ring-wrap.fx-tense {
+  animation: fxTense 2.4s ease-in-out infinite;
+  border-radius: 4px;
+}
+@keyframes fxTense {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232,160,32,0); }
+  50%      { box-shadow: 0 0 26px 6px rgba(232,160,32,0.38); }
+}
+
+/* ── 12 ── A row that just warmed up (two away). The smallest sibling of
+   the hot wave — the escalation ladder is warm → hot → full, and each rung
+   has to be visibly bigger than the one below or the ladder is flat. */
+body.fx-on .cell.fx-warm-sweep {
+  animation: fxWarmLift 0.5s cubic-bezier(0.3, 1.4, 0.5, 1) var(--fx-d, 0s) both !important;
+}
+@keyframes fxWarmLift {
+  0%   { transform: translateY(0) scale(1); }
+  40%  { transform: translateY(calc(-4px * var(--fx-amp))) scale(calc(1 + 0.07 * var(--fx-amp))); }
+  100% { transform: translateY(0) scale(1); }
+}
+body.fx-on .cell.fx-warm-sweep::before {
+  background: radial-gradient(circle, rgba(255,225,160,0.8) 0%, rgba(232,160,32,0) 72%);
+  animation: fxWarmFlash 0.5s ease-out var(--fx-d, 0s) both;
+}
+@keyframes fxWarmFlash {
+  0%   { opacity: 0;   transform: scale(0.4); }
+  35%  { opacity: 0.9; transform: scale(1.1); }
+  100% { opacity: 0;   transform: scale(1.6); }
+}
+
+/* ── 13 ── Hit-stop. On a win everything on the sheet freezes for ~90ms
+   before the celebration starts. Borrowed wholesale from fighting games:
+   the pause is what gives the confetti something to be a release *from*.
+   Scoped to the paper so the toast and the FX layer keep running. */
+body.fx-on #phone-paper.fx-freeze,
+body.fx-on #phone-paper.fx-freeze * {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+
+/* ── 14 ── The winning row, after the dust settles: a shine travelling
+   across the banner, forever, because a win should stay legible as a win
+   when you look back at the sheet ten seconds later. */
+body.fx-on .strip.has-winner .strip-id-banner {
+  position: relative;
+  overflow: hidden;
+}
+body.fx-on .strip.has-winner .strip-id-banner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(105deg,
+    transparent 38%, rgba(255,255,255,0.55) 50%, transparent 62%);
+  transform: translateX(-100%);
+  animation: fxShine 2.6s ease-in-out 0.5s infinite;
+}
+@keyframes fxShine {
+  0%        { transform: translateX(-100%); }
+  45%, 100% { transform: translateX(100%); }
+}
+
+/* ── 15 ── Sheet swap. Switching game or block deals a new paper in, strip
+   by strip. Makes the tabs feel like they're moving something physical
+   rather than repainting a div. */
+body.fx-on .strip.fx-deal {
+  animation: fxDealIn 0.42s cubic-bezier(0.2, 1.2, 0.35, 1) var(--fx-d, 0s) both;
+  transform-origin: 50% 0%;
+}
+@keyframes fxDealIn {
+  0%   {
+    opacity: 0;
+    transform: perspective(700px) translateY(calc(22px * var(--fx-amp)))
+               rotateX(calc(-26deg * var(--fx-amp))) scale(calc(1 - 0.06 * var(--fx-amp)));
+  }
+  100% { opacity: 1; transform: perspective(700px) translateY(0) rotateX(0deg) scale(1); }
+}
+
+/* ── 16 ── Toggle / tab press. Cheap, applies everywhere, and the absence
+   of it is exactly why untouched web UI feels dead next to a game. */
+body.fx-on .manual-switch:active,
+body.fx-on .game-tab:active,
+body.fx-on .block-tab:active,
+body.fx-on .rekke-btn:active,
+body.fx-on .bv-overlay-btn:active {
+  transform: scale(calc(1 - 0.05 * var(--fx-amp)));
+}
+body.fx-on .manual-switch,
+body.fx-on .game-tab,
+body.fx-on .block-tab,
+body.fx-on .rekke-btn,
+body.fx-on .bv-overlay-btn {
+  transition: transform 0.14s cubic-bezier(0.25, 1.5, 0.4, 1),
+              border-color 0.15s, background 0.15s, color 0.15s;
+}
+/* The switch thumb gets a spring instead of a linear slide, and overshoots
+   the track a hair on the way in. */
+body.fx-on .manual-switch .manual-switch-thumb {
+  transition: transform 0.26s cubic-bezier(0.3, 1.8, 0.4, 1), background 0.18s;
+}
+
+/* ── 17 ── The FX layer. Particles, shockwaves and the win flash are drawn
+   in screen space rather than inside the grid: .strip sets overflow:hidden
+   (so the rounded corners clip the cells), which would slice every burst in
+   half if they were spawned in place. */
+#fx-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 1400;
+}
+#fx-layer > * {
+  position: absolute;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.fx-shock {
+  border-radius: 50%;
+  border-style: solid;
+}
+.fx-part { border-radius: 1px; }
+.fx-part.fx-round { border-radius: 50%; }
 
 /* Confetti layer — sits above the paper but below the toast (1500)
    and the settings overlays (2000) so it never blocks a message. */
@@ -2017,12 +2317,14 @@ header { padding: 7px 13px; gap: 5px 7px; }
       <div class="bv-row" id="bv-row-anim">
         <div class="bv-row-label">
           <span>Animasjoner</span>
-          <span class="bv-row-desc">Feiring når tall kalles, rekka nærmer seg og du vinner</span>
+          <span class="bv-row-desc" id="bv-anim-desc">Liv i arket — trykk, tall som kalles, rekka som nærmer seg, og seieren</span>
         </div>
-        <label class="bv-toggle">
-          <input type="checkbox" id="bv-anim-on">
-          <span class="bv-toggle-track"></span>
-        </label>
+        <div class="manual-level-seg" id="bv-anim-seg" role="group" aria-label="Animasjonsnivå">
+          <button type="button" data-fx="av">Av</button>
+          <button type="button" data-fx="rolig">Rolig</button>
+          <button type="button" data-fx="full">Full</button>
+          <button type="button" data-fx="maks">Maks</button>
+        </div>
       </div>
       <div class="bv-row" id="bv-row-call-ring">
         <div class="bv-row-label">
@@ -2256,6 +2558,10 @@ header { padding: 7px 13px; gap: 5px 7px; }
 </div>
 
 
+<!-- Screen-space layer for particles, shockwaves and the win flash. Always
+     present; nothing is ever put in it unless the FX setting is on. -->
+<div id="fx-layer" aria-hidden="true"></div>
+
 <div id="toast"></div>
 
 <!-- ══════════════════════════════════════
@@ -2331,16 +2637,33 @@ console.log('[BV] Firebase initialized');
 // FEEDBACK — vibrate + sound settings
 // ════════════════════════════════════
 const FEEDBACK_KEY = 'bv_feedback';
+// Animation intensity. 'av' is not merely "smaller" — with it selected the
+// fx-on class never goes on the body, so not one FX rule in the stylesheet
+// can match and the app behaves exactly as it did before any of this existed.
+const FX_LEVELS = ['av', 'rolig', 'full', 'maks'];
 const feedback = (() => {
-  // animations default to OFF — it's an opt-in flourish, not something to
+  // fxLevel defaults to OFF — it's an opt-in flourish, not something to
   // spring on an existing user mid-game.
-  const defaults = { vibrate: true, sound: false, strongVibrate: true, animations: false,
+  const defaults = { vibrate: true, sound: false, strongVibrate: true,
+                     animations: false, fxLevel: 'av',
                      // Countdown ring: opt-in per phone. The host only sets how
                      // long it runs; this decides whether it's drawn at all.
                      callRing: false };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}'); } catch (e) {}
-  return { ...defaults, ...saved };
+  const f = { ...defaults, ...saved };
+  // Migration from the old boolean. Anyone who had animations on gets 'full'
+  // rather than 'rolig': they opted into flourishes, and 'full' is the level
+  // this was designed around — 'rolig' exists for people who find that much.
+  //
+  // Tested against `saved`, not against the merged object: the default puts a
+  // perfectly valid 'av' in fxLevel, so a merged record NEVER looks
+  // un-migrated and every existing user would have been silently switched off.
+  if (!FX_LEVELS.includes(saved && saved.fxLevel)) {
+    f.fxLevel = f.animations ? 'full' : 'av';
+  }
+  f.animations = (f.fxLevel !== 'av');
+  return f;
 })();
 function saveFeedback() {
   try { localStorage.setItem(FEEDBACK_KEY, JSON.stringify(feedback)); } catch (e) {}
@@ -2371,11 +2694,173 @@ function playTick() {
     osc.stop(ctx.currentTime + 0.2);
   } catch (e) {}
 }
+// ── Interaction sound design ───────────────────────────────────
+// Synthesised rather than sampled: no assets to ship, and — more usefully —
+// pitch becomes a variable the game can drive. sfxCall() below raises its
+// pitch as the sheet gets closer to a win, so the sound alone tells you
+// something the paper would otherwise make you count for.
+//
+// Everything here obeys BOTH switches: feedback.sound (the user's existing
+// "Lyd ved nytt tall") and the FX level, so turning animations off leaves the
+// original single tick and nothing else.
+
+// One shared gain node keeps the whole layer quiet enough to live under a
+// bingo host's voice. Individual sounds are mixed relative to this.
+let _sfxBus = null;
+function sfxBus() {
+  const ctx = getAudioCtx();
+  if (!ctx) return null;
+  if (!_sfxBus) {
+    _sfxBus = ctx.createGain();
+    _sfxBus.gain.value = 0.5;
+    _sfxBus.connect(ctx.destination);
+  }
+  return _sfxBus;
+}
+function sfxReady() {
+  if (!feedback.sound || !fxEnabled()) return null;
+  const ctx = getAudioCtx();
+  if (!ctx) return null;
+  if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+  return ctx;
+}
+// A single enveloped oscillator. `to` sweeps the pitch, which is what turns
+// a beep into a "thock" (fast fall) or a "zip" (fast rise).
+function sfxTone(ctx, { freq, to, type = 'sine', dur = 0.15, gain = 0.2, at = 0 }) {
+  const bus = sfxBus();
+  if (!bus) return;
+  const t = ctx.currentTime + at;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t);
+  if (to && to !== freq) osc.frequency.exponentialRampToValueAtTime(Math.max(20, to), t + dur);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(gain, t + Math.min(0.012, dur * 0.15));
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(g).connect(bus);
+  osc.start(t);
+  osc.stop(t + dur + 0.02);
+}
+// Filtered white noise — the transient that makes a hit sound like contact
+// with something rather than a tone starting.
+function sfxNoise(ctx, { dur = 0.08, gain = 0.12, freq = 1800, at = 0 }) {
+  const bus = sfxBus();
+  if (!bus) return;
+  const t = ctx.currentTime + at;
+  const frames = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, frames, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < frames; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / frames);
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const filt = ctx.createBiquadFilter();
+  filt.type = 'bandpass';
+  filt.frequency.value = freq;
+  filt.Q.value = 0.8;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(filt).connect(g).connect(bus);
+  src.start(t);
+}
+
+// Pentatonic ladder — any subset of these sounds consonant together, which
+// matters because several of these can overlap on a busy call.
+const SFX_SCALE = [523.25, 587.33, 659.25, 783.99, 880.00, 1046.50, 1174.66, 1318.51];
+function sfxStep(i) { return SFX_SCALE[Math.max(0, Math.min(SFX_SCALE.length - 1, i | 0))]; }
+
+// Finger down. Deliberately almost inaudible — its job is to confirm the
+// touch registered, and anything louder becomes noise across 27 cells.
+function sfxTap() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try { sfxNoise(ctx, { dur: 0.03, gain: 0.05, freq: 2600 }); } catch (e) {}
+}
+// Mark placed. `closeness` 0..1 (1 = one number from a win) raises the pitch,
+// so marking a number that brings you closer literally sounds better.
+function sfxStamp(closeness = 0) {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    sfxNoise(ctx, { dur: 0.06, gain: 0.13, freq: 1100 });
+    sfxTone(ctx, { freq: 220, to: 90, type: 'triangle', dur: 0.11, gain: 0.16 });
+    sfxTone(ctx, { freq: sfxStep(closeness * 5), type: 'sine', dur: 0.2, gain: 0.13, at: 0.015 });
+  } catch (e) {}
+}
+// Mark removed. Falling, dull, no bell — the stamp played backwards in spirit.
+function sfxUnstamp() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try { sfxTone(ctx, { freq: 200, to: 80, type: 'sine', dur: 0.14, gain: 0.13 }); } catch (e) {}
+}
+// Wrong number. Detuned pair falling fast: dissonance is the point.
+function sfxWrong() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    sfxTone(ctx, { freq: 196, to: 82, type: 'sawtooth', dur: 0.24, gain: 0.13 });
+    sfxTone(ctx, { freq: 185, to: 78, type: 'sawtooth', dur: 0.24, gain: 0.10, at: 0.01 });
+  } catch (e) {}
+}
+// Host called a number that IS on this sheet.
+function sfxCall(closeness = 0) {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    sfxNoise(ctx, { dur: 0.05, gain: 0.10, freq: 2000 });
+    sfxTone(ctx, { freq: sfxStep(2 + closeness * 5), type: 'sine', dur: 0.26, gain: 0.16 });
+  } catch (e) {}
+}
+// Host called a number that isn't on this sheet — a short low thud, well
+// under the "hit" sound, so a miss is felt without being announced.
+function sfxMiss() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try { sfxTone(ctx, { freq: 150, to: 110, type: 'sine', dur: 0.09, gain: 0.06 }); } catch (e) {}
+}
+// A row just went two away. The quietest event that gets a sound at all —
+// one soft note, well below the hot cue it's the run-up to.
+function sfxWarm() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try { sfxTone(ctx, { freq: 523.25, type: 'triangle', dur: 0.18, gain: 0.08 }); } catch (e) {}
+}
+// A row just went one away. Rising interval = tension, not resolution.
+function sfxHot() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    sfxTone(ctx, { freq: 659.25, type: 'triangle', dur: 0.16, gain: 0.13 });
+    sfxTone(ctx, { freq: 987.77, type: 'triangle', dur: 0.3, gain: 0.13, at: 0.09 });
+  } catch (e) {}
+}
+// A row filled in. Resolves upward and stops — a full stop, not a fanfare;
+// the fanfare belongs to the win.
+function sfxRowDone() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    [523.25, 659.25, 783.99].forEach((f, i) =>
+      sfxTone(ctx, { freq: f, type: 'triangle', dur: 0.26, gain: 0.14, at: i * 0.055 }));
+  } catch (e) {}
+}
+// Win. Six notes up, then a shimmer on top, arriving after the hit-stop.
+function sfxWin() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98].forEach((f, i) =>
+      sfxTone(ctx, { freq: f, type: 'triangle', dur: 0.34, gain: 0.16, at: i * 0.075 }));
+    sfxTone(ctx, { freq: 1046.50, type: 'sine', dur: 1.1, gain: 0.11, at: 0.46 });
+    sfxTone(ctx, { freq: 1567.98, type: 'sine', dur: 1.1, gain: 0.08, at: 0.48 });
+    sfxNoise(ctx, { dur: 0.5, gain: 0.06, freq: 5200, at: 0.44 });
+  } catch (e) {}
+}
+
 // Firefox removed the Vibration API entirely (bug 1900037, ~FF129) — desktop
 // and Android both. navigator.vibrate is undefined there, so every call was
 // silently doing nothing while the settings toggle still said it was on.
 // iOS Safari has never shipped it either. Detect once and tell the user.
 const VIBRATE_SUPPORTED = typeof navigator.vibrate === 'function';
+
+// Haptics for the interaction layer. Gated on the FX level as well as the
+// user's vibrate switch, so "animasjoner av" really does mean the phone
+// behaves the way it always did.
+function fxHaptic(pattern) {
+  if (!feedback.vibrate || !VIBRATE_SUPPORTED || !fxEnabled()) return;
+  try { navigator.vibrate(pattern); } catch (e) {}
+}
 
 function vibrateShort() {
   if (!feedback.vibrate || !VIBRATE_SUPPORTED) return;
@@ -2389,7 +2874,7 @@ function vibrateStrong() {
 // ════════════════════════════════════
 // CELEBRATION FX
 // ════════════════════════════════════
-// All of this is inert unless feedback.animations is on. Triggers live in
+// All of this is inert unless feedback.fxLevel is past 'av'. Triggers live in
 // updateProximityHighlights(), which already computes every state we care
 // about (row hot / row full / strip won) on each render — the FX layer just
 // watches those values for *transitions*, so a re-render caused by Firebase
@@ -2415,6 +2900,13 @@ const _fxReducedMotion = window.matchMedia
 let _fxCatchUp = false;
 let _fxCatchUpTimer = null;
 
+// Set while a re-render is the direct result of the user tapping a cell.
+// Confirming a number in manual-play makes it the newest called number, so
+// renderCells sees a "new latest" and would fire the host-call impact on top
+// of the stamp the tap already earned — two shockwaves, two nudges, one
+// gesture. The tap owns its own feedback; this stands the call FX down.
+let _fxUserAction = false;
+
 function fxBeginCatchUp(ms = 3000) {
   _fxCatchUp = true;
   clearTimeout(_fxCatchUpTimer);
@@ -2425,10 +2917,23 @@ function fxBeginCatchUp(ms = 3000) {
 }
 
 function fxEnabled() {
-  return !!feedback.animations && !(_fxReducedMotion && _fxReducedMotion.matches);
+  return feedback.fxLevel !== 'av' && !(_fxReducedMotion && _fxReducedMotion.matches);
+}
+// The level as a name, for the handful of effects that exist only at Maks…
+function fxLevel() {
+  return fxEnabled() ? feedback.fxLevel : 'av';
+}
+// …and as a number, for the ones JS scales itself (particle counts, shake
+// distances). Mirrors the --fx-amp values in the stylesheet so a burst never
+// disagrees with the animation it's decorating.
+function fxAmp() {
+  const l = fxLevel();
+  return l === 'maks' ? 1.5 : l === 'rolig' ? 0.5 : l === 'full' ? 1 : 0;
 }
 function applyFxSetting() {
-  document.body.classList.toggle('fx-on', fxEnabled());
+  const on = fxEnabled();
+  document.body.classList.toggle('fx-on', on);
+  document.body.dataset.fx = on ? feedback.fxLevel : 'av';
 }
 // Someone flipping "reduce motion" in the OS mid-session should take effect
 // without a reload.
@@ -2447,7 +2952,7 @@ function fxOneShot(el, cls, dur) {
 
 // Staggered flash across a row — the per-cell --fx-d delay is what turns
 // nine individual flashes into one sweep travelling along the row.
-const FX_SWEEP_CLASSES = ['fx-hot-sweep', 'fx-row-done'];
+const FX_SWEEP_CLASSES = ['fx-hot-sweep', 'fx-row-done', 'fx-warm-sweep'];
 
 function fxSweepRow(cells, cls, dur) {
   const STEP = 38;   // tighter than the animation length, so the wave overlaps
@@ -2463,6 +2968,320 @@ function fxSweepRow(cells, cls, dur) {
       c.classList.remove(cls);
       c.style.removeProperty('--fx-d');
     }, dur + i * STEP);
+  });
+}
+
+// ── Screen-space primitives ────────────────────────────────────
+// Shockwaves and particles are drawn in #fx-layer rather than inside the
+// grid, because .strip sets overflow:hidden and would clip anything that
+// tried to leave the cell it came from. Coordinates are viewport
+// coordinates, which is exactly what getBoundingClientRect hands back.
+
+function fxSpawn(el, ttl) {
+  const layer = document.getElementById('fx-layer');
+  if (!layer) return null;
+  layer.appendChild(el);
+  // Same reasoning as the confetti cleanup below: a backgrounded tab never
+  // dispatches animation events, so removal can't be left to onfinish.
+  setTimeout(() => el.remove(), ttl);
+  return el;
+}
+
+// Expanding ring from the centre of a cell. The single most reliable way to
+// make a small event read as an impact — it gives the eye something moving
+// outward to follow after the cell itself has stopped.
+function fxShockwave(rect, opts = {}) {
+  const amp = fxAmp();
+  if (!amp) return;
+  const {
+    color = 'rgba(255,190,90,0.9)', spread = 3.2,
+    dur = 520, width = 2,
+  } = opts;
+  const size = Math.max(rect.width, rect.height);
+  if (!size) return;
+  const el = document.createElement('div');
+  el.className = 'fx-shock';
+  el.style.left   = (rect.left + rect.width  / 2 - size / 2) + 'px';
+  el.style.top    = (rect.top  + rect.height / 2 - size / 2) + 'px';
+  el.style.width  = size + 'px';
+  el.style.height = size + 'px';
+  el.style.borderWidth = width + 'px';
+  el.style.borderColor = color;
+  fxSpawn(el, dur + 150);
+  el.animate([
+    { transform: 'scale(0.35)', opacity: 0.95 },
+    { transform: `scale(${(1 + spread * amp).toFixed(2)})`, opacity: 0 },
+  ], { duration: dur, easing: 'cubic-bezier(0.15,0.75,0.3,1)', fill: 'forwards' });
+}
+
+// Radial particle burst. Each piece gets its own duration and spin so the
+// group never resolves into a visible ring, and a gravity term on the last
+// keyframe so they fall rather than merely stopping.
+function fxBurst(rect, opts = {}) {
+  const amp = fxAmp();
+  if (!amp) return;
+  const {
+    colors = ['#ffd76e', '#ffffff', '#ff9a3c'],
+    count = 14, speed = 90, size = 5,
+    dur = 620, gravity = 0.55, round = false,
+  } = opts;
+  const n = Math.max(3, Math.round(count * amp));
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  for (let i = 0; i < n; i++) {
+    const p = document.createElement('i');
+    p.className = 'fx-part' + (round ? ' fx-round' : '');
+    const s = size * (0.6 + Math.random() * 0.8);
+    p.style.width  = s + 'px';
+    p.style.height = (round ? s : s * (0.4 + Math.random() * 0.9)) + 'px';
+    p.style.background = colors[(Math.random() * colors.length) | 0];
+    p.style.left = (cx - s / 2) + 'px';
+    p.style.top  = (cy - s / 2) + 'px';
+    const life = dur * (0.7 + Math.random() * 0.6);
+    fxSpawn(p, life + 120);
+
+    const a  = Math.random() * Math.PI * 2;
+    const d  = speed * (0.45 + Math.random()) * amp;
+    const dx = Math.cos(a) * d;
+    const dy = Math.sin(a) * d;
+    const spin = (Math.random() < 0.5 ? -1 : 1) * (120 + Math.random() * 420);
+    p.animate([
+      { transform: 'translate(0,0) rotate(0deg) scale(1)', opacity: 1 },
+      { transform: `translate(${dx * 0.62}px, ${dy * 0.62 - 5}px) rotate(${spin * 0.5}deg) scale(0.9)`,
+        opacity: 1, offset: 0.45 },
+      { transform: `translate(${dx}px, ${dy + d * gravity}px) rotate(${spin}deg) scale(0.25)`,
+        opacity: 0 },
+    ], { duration: life, easing: 'cubic-bezier(0.2,0.7,0.4,1)', fill: 'forwards' });
+  }
+}
+
+// Full-screen wash. Reserved for the win — used anywhere else it stops
+// meaning "something enormous happened".
+function fxScreenFlash(color = '#ffffff', dur = 400) {
+  const amp = fxAmp();
+  if (!amp) return;
+  const el = document.createElement('div');
+  el.style.left = '0'; el.style.top = '0';
+  el.style.width = '100%'; el.style.height = '100%';
+  el.style.background = color;
+  el.style.opacity = '0';
+  fxSpawn(el, dur + 100);
+  el.animate([
+    { opacity: Math.min(0.85, 0.5 * amp) },
+    { opacity: 0 },
+  ], { duration: dur, easing: 'ease-out', fill: 'forwards' });
+}
+
+// ── Secondary motion ───────────────────────────────────────────
+// The cells around an impact get pushed away from it, delayed by distance.
+// Nothing about their state changed; this is here purely so the sheet reads
+// as one connected surface. It is also the single cheapest thing in this
+// file in terms of "how much more alive did that make it feel".
+function fxNudgeNeighbours(cell) {
+  const amp = fxAmp();
+  if (!amp) return;
+  const grid = cell.parentElement;
+  if (!grid || !grid.classList.contains('strip-grid')) return;
+  const cells = Array.from(grid.children);
+  const idx = cells.indexOf(cell);
+  if (idx < 0) return;
+  const cr = Math.floor(idx / 9), cc = idx % 9;
+  const reach = fxLevel() === 'maks' ? 2 : 1;
+
+  const targets = [];
+  cells.forEach((c, i) => {
+    if (c === cell) return;
+    const dr = Math.floor(i / 9) - cr;
+    const dc = (i % 9) - cc;
+    const ring = Math.max(Math.abs(dr), Math.abs(dc));
+    if (ring > reach) return;
+    targets.push({ c, dr, dc, ring });
+    c.classList.remove('fx-nudge');
+  });
+  if (!targets.length) return;
+  // One reflow for the whole group rather than one per cell — restarting the
+  // animation needs the class off and back on across a layout boundary, and
+  // doing that 24 times in a loop is 24 forced layouts.
+  void grid.offsetWidth;
+
+  targets.forEach(({ c, dr, dc, ring }) => {
+    const len = Math.hypot(dr, dc) || 1;
+    c.style.setProperty('--fx-nx', (dc / len).toFixed(3));
+    c.style.setProperty('--fx-ny', (dr / len).toFixed(3));
+    c.style.setProperty('--fx-d', (ring * 45) + 'ms');
+    c.classList.add('fx-nudge');
+    setTimeout(() => {
+      c.classList.remove('fx-nudge');
+      c.style.removeProperty('--fx-nx');
+      c.style.removeProperty('--fx-ny');
+      c.style.removeProperty('--fx-d');
+    }, 360 + ring * 45);
+  });
+}
+
+// ── Sheet-level reactions ──────────────────────────────────────
+function fxPaper(cls, dur) {
+  if (!fxEnabled()) return;
+  const p = document.getElementById('digital-paper');
+  if (p) fxOneShot(p, cls, dur);
+}
+
+// How close the sheet is to a win, 0..1, used to pitch the sound. Five or
+// more numbers out is "not close" (0); a completed row is 1. Row-by-row
+// regardless of the rekke setting — as a signal for the ear, the nearest
+// single row is the honest answer.
+function fxCloseness(gameKey) {
+  const gs = gameState[gameKey];
+  if (!gs || !gs.paperEl) return 0;
+  const base = (manualPlayMode && gs.hostCalled && gs.hostCalled.length)
+    ? gs.hostCalled : gs.called;
+  const calledSet = new Set((base || []).map(String));
+  let min = Infinity;
+  gs.paperEl.querySelectorAll('.strip').forEach(st => {
+    (st._numRows || []).forEach(cells => {
+      const m = cells.reduce((a, c) => a + (calledSet.has(c.dataset.num) ? 0 : 1), 0);
+      if (m < min) min = m;
+    });
+  });
+  if (!isFinite(min)) return 0;
+  return Math.max(0, Math.min(1, 1 - min / 5));
+}
+
+// Ambient tension: a slow warm breath around the whole sheet while any row
+// is one number away. Maks only — at lower levels the row's own pulse is
+// carrying that message and a second layer of it is just noise.
+function fxUpdateTension(gameKey) {
+  const wrap = document.getElementById('paper-ring-wrap');
+  if (!wrap) return;
+  const gs = gameState[gameKey];
+  const tense = fxLevel() === 'maks' && !!gs && !!gs.paperEl &&
+                gs.paperEl.isConnected && !!gs.paperEl.querySelector('.row-hot');
+  wrap.classList.toggle('fx-tense', tense);
+}
+
+// ── The tap ────────────────────────────────────────────────────
+// Press is bound to pointerdown, not click: the cell starts moving under
+// the finger before the browser has decided whether this is a tap, which is
+// most of what "responsive" means at this scale.
+let _fxPressed = null;
+function fxPressCell(cell) {
+  if (!fxEnabled() || !cell) return;
+  fxReleaseCell();
+  _fxPressed = cell;
+  cell.classList.add('fx-press');
+  fxHaptic(8);
+  sfxTap();
+}
+function fxReleaseCell() {
+  if (_fxPressed) _fxPressed.classList.remove('fx-press');
+  _fxPressed = null;
+}
+
+// Cell rect, or null if it isn't actually on screen — every burst below
+// checks this so a celebration on a detached or scrolled-away sheet spends
+// nothing.
+function fxRectOf(cell) {
+  if (!cell || !cell.isConnected) return null;
+  const r = cell.getBoundingClientRect();
+  return (r.width && r.height) ? r : null;
+}
+
+// A mark going down: the payoff for the press.
+function fxStampCell(cell, closeness) {
+  if (!fxEnabled()) return;
+  fxReleaseCell();
+  fxOneShot(cell, 'fx-stamp', 440);
+  const r = fxRectOf(cell);
+  if (r) {
+    fxShockwave(r, { color: 'rgba(255,170,80,0.85)', spread: 2.6, dur: 460 });
+    fxBurst(r, { colors: ['#ffd76e', '#ffffff', '#ff9a3c'], count: 10, speed: 70, size: 4 });
+  }
+  fxNudgeNeighbours(cell);
+  fxHaptic(18);
+  sfxStamp(closeness);
+}
+
+// A mark coming off. Grey, inward, no ring — deliberately unsatisfying.
+function fxUnstampCell(cell) {
+  if (!fxEnabled()) return;
+  fxReleaseCell();
+  fxOneShot(cell, 'fx-unstamp', 360);
+  const r = fxRectOf(cell);
+  if (r) fxBurst(r, { colors: ['#9aa0ac', '#c9ccd3'], count: 6, speed: 34, size: 3, dur: 420, gravity: 1.4 });
+  fxHaptic(10);
+  sfxUnstamp();
+}
+
+// The wrong number. Everything about this is the inverse of the stamp:
+// horizontal instead of radial, red instead of warm, and it shakes the
+// whole sheet so the mistake is felt beyond the square that caused it.
+function fxWrongCell(cell) {
+  if (!fxEnabled()) return;
+  fxReleaseCell();
+  fxOneShot(cell, 'fx-wrong-hit', 380);
+  const r = fxRectOf(cell);
+  if (r) fxBurst(r, { colors: ['#ff4b3a', '#c8281e'], count: 8, speed: 55, size: 4, dur: 480 });
+  fxPaper('fx-recoil', 260);
+  fxHaptic([28, 45, 28]);
+  sfxWrong();
+}
+
+// ── The call ───────────────────────────────────────────────────
+// Fired from renderCells at the one point where a genuinely new latest
+// number lands, so it inherits that function's protection against Firebase
+// re-pushing the same state.
+function fxCallLand(cell, gameKey) {
+  if (!fxEnabled()) return;
+  const r = fxRectOf(cell);
+  if (r) {
+    fxShockwave(r, { color: 'rgba(255,120,70,0.9)', spread: 3.4, dur: 560, width: 2 });
+    if (fxLevel() !== 'rolig') {
+      fxBurst(r, { colors: ['#ff9a3c', '#ffd76e', '#ffffff'], count: 12, speed: 85, size: 4 });
+    }
+  }
+  fxNudgeNeighbours(cell);
+  fxPaper('fx-recoil', 260);
+  fxUpdateTension(gameKey);
+}
+
+// Audio + haptics for a host call, hit or miss. Split from the visual above
+// because the sound has to fire even when the number isn't on this sheet —
+// the miss is an event too, just a quieter one.
+function fxCallFeedback(gameKey, num) {
+  if (!fxEnabled()) {
+    vibrateShort();
+    playTick();
+    return;
+  }
+  const gs = gameState[gameKey];
+  const onSheet = !!(gs && gs.cellMap && gs.cellMap[String(num)]);
+  if (onSheet) {
+    fxHaptic(feedback.fxLevel === 'maks' ? [14, 30, 26] : 22);
+    sfxCall(fxCloseness(gameKey));
+  } else {
+    fxHaptic(8);
+    sfxMiss();
+    if (fxLevel() === 'maks') fxPaper('fx-miss', 320);
+  }
+}
+
+// ── Sheet swap ─────────────────────────────────────────────────
+// Switching game or block deals the new paper in strip by strip, so the
+// tabs feel like they move something rather than repaint it.
+function fxDealIn(paperEl) {
+  if (!fxEnabled() || !paperEl) return;
+  const strips = paperEl.querySelectorAll('.strip');
+  strips.forEach((s, i) => {
+    s.classList.remove('fx-deal');
+    s.style.setProperty('--fx-d', (i * 55) + 'ms');
+  });
+  void paperEl.offsetWidth;
+  strips.forEach((s, i) => {
+    s.classList.add('fx-deal');
+    setTimeout(() => {
+      s.classList.remove('fx-deal');
+      s.style.removeProperty('--fx-d');
+    }, 480 + i * 55);
   });
 }
 
@@ -2521,15 +3340,56 @@ function fxConfetti(count) {
 
 // Sheet-level win reaction. Kept separate from the per-strip banner slam so
 // that two strips winning on the same call still produce ONE confetti burst.
+//
+// Structured as freeze → release rather than as one continuous flourish.
+// The ~90ms hit-stop costs nothing and does more for how big the moment
+// feels than any amount of extra confetti: the confetti is only a release
+// if there was tension to release, and the pause manufactures the tension.
 function fxWinPaper() {
   if (!fxEnabled()) return;
-  fxConfetti(90);
+  const amp = fxAmp();
   const paper = document.getElementById('digital-paper');
-  if (paper) fxOneShot(paper, 'fx-win-shake', 700);
+  const stage = document.getElementById('phone-paper');
+  const rolig = fxLevel() === 'rolig';
+
+  const release = () => {
+    if (stage) stage.classList.remove('fx-freeze');
+    fxScreenFlash('#ffffff', 420);
+    fxConfetti(Math.round(90 * amp));
+    if (paper) fxOneShot(paper, 'fx-win-shake', 700);
+    // A second wave under the first, so the screen keeps refilling instead
+    // of emptying out in one pass.
+    if (!rolig) setTimeout(() => fxConfetti(Math.round(50 * amp)), 380);
+    sfxWin();
+    fxHaptic(rolig ? [180, 70, 180] : [40, 50, 60, 50, 90, 60, 220]);
+  };
+
+  // No freeze at Rolig: the hit-stop is a loud piece of language, and the
+  // whole point of that level is not shouting.
+  if (rolig || !stage) { release(); return; }
+  stage.classList.add('fx-freeze');
+  setTimeout(release, 90);
 }
+
+// Per-strip: the banner slams in, and every cell of the winning row throws
+// gold. Staggered along the row so the eye is led across the line it just
+// completed rather than shown all nine squares at once.
 function fxWinStrip(stripEl) {
   if (!fxEnabled()) return;
   fxOneShot(stripEl, 'fx-slam', 600);
+  if (fxLevel() === 'rolig') return;
+  const winners = stripEl.querySelectorAll('.cell.row-winner');
+  winners.forEach((c, i) => {
+    setTimeout(() => {
+      const r = fxRectOf(c);
+      if (!r) return;
+      fxBurst(r, {
+        colors: ['#f5c518', '#ffffff', '#7effb2', '#e3a53a'],
+        count: 9, speed: 110, size: 5, dur: 760, round: Math.random() < 0.4,
+      });
+      if (i % 3 === 0) fxShockwave(r, { color: 'rgba(126,255,178,0.85)', spread: 3, dur: 600 });
+    }, 120 + i * 32);
+  });
 }
 
 // A win on a game whose paper isn't currently in the DOM is parked here and
@@ -4363,12 +5223,11 @@ function initPhone() {
   const vibrateOn       = document.getElementById("bv-vibrate-on");
   const soundOn         = document.getElementById("bv-sound-on");
   const strongOn        = document.getElementById("bv-strong-vibrate-on");
-  const animOn          = document.getElementById("bv-anim-on");
+  const animSeg         = document.getElementById("bv-anim-seg");
   const callRingOn      = document.getElementById("bv-call-ring-on");
   vibrateOn.checked = !!feedback.vibrate;
   soundOn.checked   = !!feedback.sound;
   strongOn.checked  = !!feedback.strongVibrate;
-  animOn.checked    = !!feedback.animations;
   if (callRingOn) callRingOn.checked = !!feedback.callRing;
   applyFxSetting();
 
@@ -4423,7 +5282,9 @@ function initPhone() {
   soundOn.addEventListener("change", () => {
     feedback.sound = soundOn.checked;
     saveFeedback();
-    if (feedback.sound) playTick(); // preview
+    // Preview whichever sound they'd actually get: the plain tick, or the
+    // pitched call tone the FX layer replaces it with.
+    if (feedback.sound) { if (fxEnabled()) sfxCall(0.4); else playTick(); }
   });
   strongOn.addEventListener("change", () => {
     feedback.strongVibrate = strongOn.checked;
@@ -4439,18 +5300,47 @@ function initPhone() {
       refreshCallRing();
     });
   }
-  animOn.addEventListener("change", () => {
-    feedback.animations = animOn.checked;
+  // Animation level. Four states rather than a switch because "how much" is
+  // genuinely a matter of taste here — the same effects that make the game
+  // feel alive on a fast phone in a noisy hall are too much in a quiet room.
+  const FX_LEVEL_DESC = {
+    av:    "Ingen effekter — arket oppfører seg helt rolig",
+    rolig: "Bare de store øyeblikkene: nytt tall, full rekke, bingo",
+    full:  "Liv i arket — trykk, tall som kalles, rekka som nærmer seg, og seieren",
+    maks:  "Alt på: partikler, skjelving, spenning i hele arket og ekstra konfetti",
+  };
+  const animDesc = document.getElementById("bv-anim-desc");
+  function paintFxSeg() {
+    animSeg.querySelectorAll("button").forEach(b =>
+      b.classList.toggle("on", b.dataset.fx === feedback.fxLevel));
+    if (animDesc) animDesc.textContent = FX_LEVEL_DESC[feedback.fxLevel] || "";
+  }
+  function setFxLevel(level) {
+    if (!FX_LEVELS.includes(level)) return;
+    feedback.fxLevel = level;
+    // Kept in sync so anything still reading the old boolean stays honest.
+    feedback.animations = (level !== 'av');
     saveFeedback();
     applyFxSetting();
+    paintFxSeg();
+    if (level === 'av') return;
+    // Preview — the setting is about how something feels, so describing it
+    // is no substitute for a sample of it.
+    const ctx = getAudioCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
     if (fxEnabled()) {
-      fxConfetti(60); // preview — show them what they just bought
-      toast("Animasjoner på", "ok", 1800);
-    } else if (animOn.checked) {
-      // Checked, but the OS asks for reduced motion, so nothing will play.
+      fxConfetti(Math.round(60 * fxAmp()));
+      fxHaptic(level === 'maks' ? [30, 40, 60] : 20);
+      sfxRowDone();
+    } else {
+      // A level is selected, but the OS asks for reduced motion, so nothing
+      // will actually play.
       toast("Systemet ditt er satt til redusert bevegelse", "warn", 3500);
     }
-  });
+  }
+  animSeg.querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => setFxLevel(b.dataset.fx)));
+  paintFxSeg();
 
   // BV error log overlay
   function renderBvErrLog() {
@@ -4527,13 +5417,30 @@ function initPhone() {
   });
 
   // Cell tap — delegated to the static paper container
-  document.getElementById("digital-paper").addEventListener("click", (e) => {
+  const paperEl = document.getElementById("digital-paper");
+  paperEl.addEventListener("click", (e) => {
     const cell = e.target.closest(".cell");
     if (!cell || !cell.dataset.num) return;
     const num = Number(cell.dataset.num);
     if (manualMode) handleManualTap(num);
     else if (manualPlayMode) handleManualPlayTap(num);
   });
+
+  // Press feedback on pointerdown rather than click. The gap between the two
+  // is where an interface either feels connected to your finger or doesn't:
+  // click doesn't fire until release, and on touch that's a good 100ms of
+  // nothing happening while you're pressing something.
+  paperEl.addEventListener("pointerdown", (e) => {
+    if (!(manualMode || manualPlayMode)) return;
+    const cell = e.target.closest(".cell");
+    if (!cell || !cell.dataset.num) return;
+    fxPressCell(cell);
+  });
+  // Any way the press can end — released, dragged off, interrupted by a
+  // system gesture — has to unwind it, or the cell stays squashed.
+  ["pointerup", "pointercancel", "pointerleave"].forEach(ev =>
+    paperEl.addEventListener(ev, fxReleaseCell));
+  window.addEventListener("blur", fxReleaseCell);
 
   // Manual-play toggle (visible only when connected)
   document.getElementById("btn-manual-toggle").addEventListener("click", () => {
@@ -5185,7 +6092,14 @@ function renderActiveGame() {
   const desiredPaper = gs.paperEl || null;
   if (wrap.firstChild !== desiredPaper) {
     wrap.innerHTML = "";
-    if (desiredPaper) wrap.appendChild(desiredPaper);
+    if (desiredPaper) {
+      wrap.appendChild(desiredPaper);
+      // The sheet genuinely changed — deal it in. Inside the swap branch on
+      // purpose: renderActiveGame runs on plenty of things that aren't a
+      // sheet change, and re-dealing the same paper on every repaint would
+      // be exhausting rather than satisfying.
+      if (!document.hidden) fxDealIn(desiredPaper);
+    }
   }
   wrap.classList.toggle("tappable", manualMode || manualPlayMode);
   // The sheet on screen just changed — re-seat the countdown ring on it.
@@ -5398,6 +6312,13 @@ function renderCells(gameKey) {
       // the 0.4s FX anticipation pop and the plain 0.4s cellPop used when
       // FX are off.
       setTimeout(() => { newLatestEl.classList.remove('latest-fresh'); }, 520);
+      // Impact layer on top of the pop. Same guards the celebrations use:
+      // only the sheet actually on screen, never during a history replay,
+      // never while the phone is locked or the app is backgrounded.
+      if (gameKey === activeGame && !document.hidden && !_fxCatchUp &&
+          !_fxUserAction && newLatestEl.isConnected) {
+        fxCallLand(newLatestEl, gameKey);
+      }
     }
   }
   gs._prevLatestNum = lastNum;
@@ -5522,20 +6443,36 @@ function handleManualPlayTap(number) {
   const calledIdx = gs.called.indexOf(number);
   const inHost = (gs.hostCalled || []).includes(number);
 
+  // What the tap did, so the FX below can react to the outcome rather than
+  // to the gesture — confirming a number and mis-tapping one are the same
+  // gesture and have to feel like opposites.
+  let outcome = null;
   if (wrongIdx !== -1) {
     // Tapping a wrong-marked cell clears it (back to neutral)
     gs.wrong.splice(wrongIdx, 1);
+    outcome = 'clear';
   } else if (inHost && calledIdx === -1) {
     // Confirm a hint → mark as latest user-confirmed
     gs.called.push(number);
+    outcome = 'mark';
   } else if (!inHost && calledIdx === -1) {
     // Wrong tap — number wasn't called
     gs.wrong.push(number);
+    outcome = 'wrong';
   }
   // else: already confirmed → no-op
 
-  renderCells(activeGame);
+  _fxUserAction = true;
+  try { renderCells(activeGame); } finally { _fxUserAction = false; }
   saveSession();
+
+  const cell = gs.cellMap[String(number)];
+  if (cell) {
+    if (outcome === 'mark')       fxStampCell(cell, fxCloseness(activeGame));
+    else if (outcome === 'wrong') fxWrongCell(cell);
+    else if (outcome === 'clear') fxUnstampCell(cell);
+    else                          fxReleaseCell();
+  }
 }
 
 // ── Manual mode entry / management ────────────────────────────
@@ -5581,6 +6518,7 @@ function handleManualTap(number) {
   if (!cell) return;
 
   const idx = gs.called.indexOf(number);
+  const marking = (idx === -1);
   if (idx === -1) {
     // Mark as new latest; demote previous latest
     if (latestCell && latestCell !== cell) {
@@ -5612,6 +6550,12 @@ function handleManualTap(number) {
 
   updateProximityHighlights(activeGame);
   saveSession();
+
+  // After updateProximityHighlights, so the pitch reflects the row this tap
+  // just changed and the stamp animation lands on top of any row highlight
+  // that was applied in the same pass.
+  if (marking) fxStampCell(cell, fxCloseness(activeGame));
+  else         fxUnstampCell(cell);
 }
 
 function addManualGame() {
@@ -5873,10 +6817,11 @@ function handleCalledNumber(number, game, rekke) {
     setTimeout(() => document.body.style.background = "var(--ink)", 150);
   }
 
-  vibrateShort();
-  playTick();
-
+  // Sound + haptics for the call. renderCells below owns the visual side.
+  // Order matters: renderCells has to run first for the pitch to reflect the
+  // number that just landed, so the feedback call sits after it.
   renderCells(target);
+  fxCallFeedback(target, num);
   if (target === activeGame) updateRekkeLabel();
   checkProximityTransition(target);
   refreshBlockTabs();
@@ -5993,8 +6938,10 @@ function reconcileGameState(gameKey, numbers, rekke) {
 
   // Haptic + tone on a new host call
   if (newCallArrived) {
-    vibrateShort();
-    playTick();
+    const gsNow = gameState[gameKey];
+    const newest = gsNow && Array.isArray(gsNow.hostCalled) && gsNow.hostCalled.length
+      ? gsNow.hostCalled[gsNow.hostCalled.length - 1] : null;
+    fxCallFeedback(gameKey, newest);
   }
   checkProximityTransition(gameKey);
 
@@ -6104,6 +7051,9 @@ function updateProximityHighlights(gameKey) {
   // Strips that won on THIS pass, collected so the sheet-level celebration
   // (confetti + shake) fires once rather than once per winning strip.
   const fxWinStrips = [];
+  // Loudest row-level event seen this pass ('warm' < 'hot' < 'full'), so the
+  // sound plays once for the sheet instead of once per strip.
+  let fxRowEvent = null;
 
   gs.paperEl.querySelectorAll(".strip").forEach(stripEl => {
     const rowArr  = stripEl._rows    || [];   // all 9 cells per row
@@ -6124,6 +7074,9 @@ function updateProximityHighlights(gameKey) {
     // Which rows ended up "hot" this pass — read by the FX layer below to
     // detect the moment a row *becomes* one away.
     const rowIsHot = [false, false, false];
+    // Same, one rung down the ladder: warm → hot → full each need their own
+    // rising edge, or the escalation has no bottom step.
+    const rowIsWarm = [false, false, false];
 
     if (rowsNeeded === 1) {
       // Rekke1: highlight every row independently based on its own missing count
@@ -6135,6 +7088,7 @@ function updateProximityHighlights(gameKey) {
         if (cls) rowArr[idx].forEach(c => c.classList.add(cls));
         if (cls === "row-winner") stripHasWinner = true;
         if (cls === "row-hot")    rowIsHot[idx] = true;
+        if (cls === "row-warm")   rowIsWarm[idx] = true;
       });
     } else {
       // Rekke 2/3: brute-force every combination of `rowsNeeded` rows and
@@ -6194,7 +7148,8 @@ function updateProximityHighlights(gameKey) {
 
         rowsToHighlight.forEach(idx => {
           rowArr[idx].forEach(c => c.classList.add(cls));
-          if (cls === "row-hot") rowIsHot[idx] = true;
+          if (cls === "row-hot")  rowIsHot[idx] = true;
+          if (cls === "row-warm") rowIsWarm[idx] = true;
         });
         if (cls === "row-winner") stripHasWinner = true;
       }
@@ -6230,9 +7185,17 @@ function updateProximityHighlights(gameKey) {
         // A row that fills up is the bigger event, so it wins the cell:
         // going 1-away → full in a single call shows only the green cascade.
         if (rowIsFull[i] && !prev.full[i]) {
-          if (onScreen) fxSweepRow(rowArr[i], 'fx-row-done', 720);
+          if (onScreen) { fxSweepRow(rowArr[i], 'fx-row-done', 720); fxRowEvent = 'full'; }
         } else if (rowIsHot[i] && !prev.hot[i]) {
-          if (onScreen) fxSweepRow(rowArr[i], 'fx-hot-sweep', 640);
+          if (onScreen) { fxSweepRow(rowArr[i], 'fx-hot-sweep', 640); fxRowEvent = fxRowEvent || 'hot'; }
+        } else if (rowIsWarm[i] && !(prev.warm && prev.warm[i]) && fxLevel() !== 'rolig') {
+          // The bottom rung, and the only one that's new: two numbers out
+          // used to just quietly change colour. Skipped at Rolig — that
+          // level is for people who want the big moments and nothing else.
+          if (onScreen) {
+            fxSweepRow(rowArr[i], 'fx-warm-sweep', 540);
+            fxRowEvent = fxRowEvent || 'warm';
+          }
         }
       }
       if (stripHasWinner && !prev.won) {
@@ -6244,14 +7207,26 @@ function updateProximityHighlights(gameKey) {
     }
     // Recorded unconditionally — including while FX are off — so switching
     // the setting on mid-game replays nothing retroactively.
-    stripEl._fxSeen = { hot: rowIsHot.slice(), full: rowIsFull, won: stripHasWinner };
+    stripEl._fxSeen = {
+      hot: rowIsHot.slice(), warm: rowIsWarm.slice(),
+      full: rowIsFull, won: stripHasWinner,
+    };
   });
 
   // One burst per call, however many strips won on it.
   if (fxWinStrips.length) {
     fxWinStrips.forEach(fxWinStrip);
     fxWinPaper();
+  } else if (fxRowEvent && !document.hidden) {
+    // One sound for the loudest thing that happened this pass, never one per
+    // strip: on a multi-strip sheet the same call can warm three rows at
+    // once, and three overlapping copies of a tone read as a glitch.
+    // Suppressed entirely on a win — the fanfare covers it.
+    if (fxRowEvent === 'full')      sfxRowDone();
+    else if (fxRowEvent === 'hot')  sfxHot();
+    else                            sfxWarm();
   }
+  if (gameKey === activeGame) fxUpdateTension(gameKey);
 }
 
 
