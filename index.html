@@ -2792,12 +2792,44 @@ function getAudioCtx() {
   }
   return _audioCtx;
 }
+// Browsers hand out a *suspended* AudioContext and only let resume() through
+// from inside a user gesture. iOS goes further and re-suspends it every time
+// the phone locks or the user switches apps — which, during a bingo game, is
+// most of the time: the sheet sits untouched for minutes between calls.
+//
+// The trap is that resume() is async, so "resume and play anyway" does not
+// work. While the context is suspended its currentTime is FROZEN, so every
+// sound scheduled in that window is scheduled for the same instant, and they
+// all fire together the moment it finally wakes. That was the bug: silence
+// through a run of calls, then one loud stack of them when the user opened
+// Innstillinger and its handler resumed the context.
+//
+// So: ask for the unlock, but never schedule anything unless the clock is
+// genuinely running. Returns a promise that settles once it is, for the
+// couple of places that want to play a sound in direct response to a tap.
+function audioUnlock() {
+  const ctx = getAudioCtx();
+  if (!ctx || ctx.state === 'running') return Promise.resolve();
+  // iOS also has a non-standard 'interrupted' state (a phone call, or another
+  // app taking the audio session). resume() clears that the same way.
+  try { return ctx.resume().catch(() => {}); } catch (e) { return Promise.resolve(); }
+}
+// Armed for the life of the page rather than once: the context can be put
+// back to sleep at any point, so every gesture is a chance to wake it. Capture
+// phase so a handler that stops propagation can't swallow the unlock, and
+// passive because this never wants to block a scroll or a tap.
+['pointerdown', 'touchend', 'keydown'].forEach(ev =>
+  document.addEventListener(ev, audioUnlock, { capture: true, passive: true }));
+// Coming back from a locked screen or another tab is the other moment the
+// context is likely to be asleep, and on desktop this alone is enough.
+document.addEventListener('visibilitychange', () => { if (!document.hidden) audioUnlock(); });
+
 function playTick() {
   if (!feedback.sound) return;
   const ctx = getAudioCtx();
   if (!ctx) return;
+  if (ctx.state !== 'running') { audioUnlock(); return; }
   try {
-    if (ctx.state === 'suspended') ctx.resume();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
@@ -2837,7 +2869,9 @@ function sfxReady() {
   if (!feedback.sound || !fxEnabled()) return null;
   const ctx = getAudioCtx();
   if (!ctx) return null;
-  if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+  // Ask for the unlock and drop this one. See audioUnlock() for why playing
+  // into a suspended context is worse than not playing at all.
+  if (ctx.state !== 'running') { audioUnlock(); return null; }
   return ctx;
 }
 // A single enveloped oscillator. `to` sweeps the pitch, which is what turns
@@ -5068,8 +5102,7 @@ function initPhone() {
     // programmatic vibrations from non-gesture contexts can fire)
     try { if (VIBRATE_SUPPORTED) navigator.vibrate(1); } catch (e) {}
     // Prime AudioContext so playTick() works from Firebase callbacks
-    const ctx = getAudioCtx();
-    if (ctx && ctx.state === 'suspended') ctx.resume();
+    audioUnlock();
     const code = document.getElementById("phone-code-input").value.trim().toUpperCase();
     if (code.length < 4) { toast("Skriv inn koden fra bingo-siden", "warn"); return; }
     connectPhone(code);
@@ -5484,9 +5517,6 @@ function initPhone() {
 
   document.getElementById("btn-bv-settings").addEventListener("click", () => {
     settingsOverlay.style.display = "flex";
-    // Resume audio on user gesture so subsequent ticks aren't blocked
-    const ctx = getAudioCtx();
-    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
   });
   document.getElementById("bv-settings-close").addEventListener("click", () => {
     settingsOverlay.style.display = "none";
@@ -5518,8 +5548,12 @@ function initPhone() {
     feedback.sound = soundOn.checked;
     saveFeedback();
     // Preview whichever sound they'd actually get: the plain tick, or the
-    // pitched call tone the FX layer replaces it with.
-    if (feedback.sound) { if (fxEnabled()) sfxCall(0.4); else playTick(); }
+    // pitched call tone the FX layer replaces it with. Waits on the unlock:
+    // if this tap is the one that wakes the context, playing straight away
+    // would land on a clock that hasn't started yet and be dropped.
+    if (feedback.sound) {
+      audioUnlock().then(() => { if (fxEnabled()) sfxCall(0.4); else playTick(); });
+    }
   });
   strongOn.addEventListener("change", () => {
     feedback.strongVibrate = strongOn.checked;
@@ -5561,12 +5595,10 @@ function initPhone() {
     if (level === 'av') return;
     // Preview — the setting is about how something feels, so describing it
     // is no substitute for a sample of it.
-    const ctx = getAudioCtx();
-    if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
     if (fxEnabled()) {
       fxConfetti(Math.round(60 * fxAmp()));
       fxHaptic(level === 'maks' ? [30, 40, 60] : 20);
-      sfxRowDone();
+      audioUnlock().then(sfxRowDone);
     } else {
       // A level is selected, but the OS asks for reduced motion, so nothing
       // will actually play.
