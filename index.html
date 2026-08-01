@@ -637,6 +637,10 @@ body.start-parked #rekke-buttons { display: none !important; }
   margin: 0 auto;
   color: #111;
   font-family: var(--mono);
+  /* Offset parent for the outgoing-sheet clone during a game-switch flip.
+     Nothing else is positioned against it, so this is inert the rest of the
+     time — but without it the clone would hang off the page wrapper. */
+  position: relative;
 }
 
 .strip {
@@ -1318,6 +1322,33 @@ body.fx-on .strip.fx-deal {
   animation: fxDealIn 0.42s cubic-bezier(0.2, 1.2, 0.35, 1) var(--fx-d, 0s) both;
   transform-origin: 50% 0%;
 }
+/* ── 15b ── Game switch: the strips turn over to reveal the next sheet.
+   Two halves of one rotation. The outgoing strip (a throwaway clone laid
+   over the new sheet) turns 0 -> -90deg and is edge-on, i.e. invisible, at
+   the moment it hands over; the incoming strip picks the same rotation up
+   at +90deg and carries it to 0. Both are turning the same direction, which
+   is what makes it read as one strip flipping rather than two swapping.
+
+   The incoming half holds its 90deg start through its animation-delay
+   (hence `both`), so a strip stays edge-on until its turn comes rather than
+   sitting there face-on waiting. */
+body.fx-on .strip.fx-flip-out {
+  animation: fxFlipOut 160ms cubic-bezier(0.5, 0, 0.85, 0.5) var(--fx-d, 0s) both;
+  backface-visibility: hidden;
+}
+@keyframes fxFlipOut {
+  0%   { transform: perspective(1100px) rotateY(0deg);   filter: brightness(1); }
+  100% { transform: perspective(1100px) rotateY(-90deg); filter: brightness(0.72); }
+}
+body.fx-on .strip.fx-flip-in {
+  animation: fxFlipIn 180ms cubic-bezier(0.15, 0.55, 0.3, 1) var(--fx-d, 0s) both;
+  backface-visibility: hidden;
+}
+@keyframes fxFlipIn {
+  0%   { transform: perspective(1100px) rotateY(90deg); filter: brightness(0.72); }
+  100% { transform: perspective(1100px) rotateY(0deg);  filter: brightness(1); }
+}
+
 @keyframes fxDealIn {
   0%   {
     opacity: 0;
@@ -3448,8 +3479,8 @@ function fxCallFeedback(gameKey, num) {
 }
 
 // ── Sheet swap ─────────────────────────────────────────────────
-// Switching game or block deals the new paper in strip by strip, so the
-// tabs feel like they move something rather than repaint it.
+// The FIRST sheet to appear has nothing to replace, so it deals in strip by
+// strip. Switching between sheets flips instead — see fxFlipSwap.
 function fxDealIn(paperEl) {
   if (!fxEnabled() || !paperEl) return;
   const strips = paperEl.querySelectorAll('.strip');
@@ -3465,6 +3496,88 @@ function fxDealIn(paperEl) {
       s.style.removeProperty('--fx-d');
     }, 480 + i * 55);
   });
+}
+
+// Switching game or block turns the strips over to reveal the new sheet.
+//
+// A flip needs a front face to turn away, but the outgoing sheet has to be
+// detached immediately — everything downstream of renderActiveGame assumes
+// the new paper is already in place. The way out is a throwaway CLONE of the
+// outgoing sheet, laid over the new one and animated out on its own. The
+// real element is cached on its own game's state and shown again later, so
+// it is never touched.
+const FX_FLIP_STEP = 40;    // per-strip stagger
+const FX_FLIP_OUT  = 160;   // must match fxFlipOut's duration
+const FX_FLIP_IN   = 180;   // must match fxFlipIn's duration
+
+let _fxGhost = null;
+
+function fxDropGhost() {
+  if (_fxGhost) { _fxGhost.remove(); _fxGhost = null; }
+}
+
+// Called BEFORE the wrapper is cleared, while the outgoing sheet can still
+// be measured. Returns null when there is nothing to flip away from, which
+// is the signal to fall back to dealing the new sheet in.
+function fxMakeFlipGhost(wrap) {
+  fxDropGhost();
+  const old = wrap.firstElementChild;
+  if (!old || !fxEnabled() || document.hidden) return null;
+  if (!old.querySelector('.strip')) return null;
+  const g = old.cloneNode(true);
+  // The clone is a still frame of the sheet being turned away, so strip the
+  // transient FX classes it copied. Left on, a call that landed a moment ago
+  // would replay its pop on the ghost mid-flip, and a hot row would carry
+  // its pulse — the outgoing sheet re-animating as it leaves.
+  g.querySelectorAll('.latest-fresh, [class*="fx-"]').forEach(el => {
+    el.classList.remove('latest-fresh');
+    Array.from(el.classList).forEach(c => {
+      if (c.indexOf('fx-') === 0) el.classList.remove(c);
+    });
+  });
+  g.style.position = 'absolute';
+  g.style.top   = old.offsetTop + 'px';
+  g.style.left  = old.offsetLeft + 'px';
+  g.style.width = old.offsetWidth + 'px';
+  g.style.pointerEvents = 'none';
+  g.style.zIndex = '3';
+  return g;
+}
+
+function fxFlipSwap(wrap, ghost, newPaper) {
+  wrap.appendChild(ghost);
+  _fxGhost = ghost;
+
+  const out = ghost.querySelectorAll('.strip');
+  const inn = newPaper.querySelectorAll('.strip');
+
+  // Sheets can hold different numbers of strips, so each side is staggered
+  // against its own index rather than paired up.
+  out.forEach((s, i) => {
+    s.style.setProperty('--fx-d', (i * FX_FLIP_STEP) + 'ms');
+  });
+  inn.forEach((s, i) => {
+    s.classList.remove('fx-deal', 'fx-flip-in');
+    s.style.setProperty('--fx-d', (i * FX_FLIP_STEP + FX_FLIP_OUT) + 'ms');
+  });
+  // One reflow for both sets, so a rapid re-switch replays from 0 rather
+  // than inheriting the tail of the previous flip.
+  void newPaper.offsetWidth;
+
+  out.forEach(s => s.classList.add('fx-flip-out'));
+  inn.forEach((s, i) => {
+    s.classList.add('fx-flip-in');
+    setTimeout(() => {
+      s.classList.remove('fx-flip-in');
+      s.style.removeProperty('--fx-d');
+    }, i * FX_FLIP_STEP + FX_FLIP_OUT + FX_FLIP_IN + 60);
+  });
+
+  const span = Math.max(out.length, inn.length) * FX_FLIP_STEP
+             + FX_FLIP_OUT + FX_FLIP_IN + 80;
+  // Guarded on identity: a switch during the flip has already replaced the
+  // ghost, and this timer must not take the new one down with it.
+  setTimeout(() => { if (_fxGhost === ghost) fxDropGhost(); }, span);
 }
 
 const FX_CONFETTI_COLORS = ['#e3a53a', '#c8281e', '#1a7a40', '#ffffff', '#9b7aff', '#f5c518'];
@@ -6280,15 +6393,25 @@ function renderActiveGame() {
   // call, which happens at exactly the moment the pop is playing.
   const desiredPaper = gs.paperEl || null;
   if (wrap.firstChild !== desiredPaper) {
+    // Snapshot the outgoing sheet while it can still be measured. Returns
+    // null when there's nothing to turn away from — a first render, or FX
+    // off — and that's the signal to deal in instead of flipping.
+    const ghost = fxMakeFlipGhost(wrap);
     wrap.innerHTML = "";
     if (desiredPaper) {
       wrap.appendChild(desiredPaper);
-      // The sheet genuinely changed — deal it in. Inside the swap branch on
-      // purpose: renderActiveGame runs on plenty of things that aren't a
-      // sheet change, and re-dealing the same paper on every repaint would
-      // be exhausting rather than satisfying.
-      if (!document.hidden) fxDealIn(desiredPaper);
+      // The sheet genuinely changed. Inside the swap branch on purpose:
+      // renderActiveGame runs on plenty of things that aren't a sheet
+      // change, and replaying this on every repaint would be exhausting
+      // rather than satisfying.
+      if (!document.hidden) {
+        if (ghost) fxFlipSwap(wrap, ghost, desiredPaper);
+        else       fxDealIn(desiredPaper);
+      }
     }
+    // A ghost that never reached fxFlipSwap was never added to the document
+    // and is not referenced by _fxGhost, so there is nothing to clean up
+    // when the incoming game has no sheet yet — it is simply dropped.
   }
   wrap.classList.toggle("tappable", manualMode || manualPlayMode);
   // The sheet on screen just changed — re-seat the countdown ring on it.
