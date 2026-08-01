@@ -2945,9 +2945,11 @@ let _fxCatchUpTimer = null;
 
 // Set while a re-render is the direct result of the user tapping a cell.
 // Confirming a number in manual-play makes it the newest called number, so
-// renderCells sees a "new latest" and would fire the host-call impact on top
-// of the stamp the tap already earned — two shockwaves, two nudges, one
-// gesture. The tap owns its own feedback; this stands the call FX down.
+// renderCells sees a "new latest" and would give the tap the whole host-call
+// treatment on top of the stamp it already earned — two shockwaves, two
+// nudges, and a cell that pops and then re-pops, all from one gesture. The
+// tap owns its feedback; this stands the entire call FX path down. See the
+// tapOwnsFeedback guard in renderCells for the pop half of it.
 let _fxUserAction = false;
 
 function fxBeginCatchUp(ms = 3000) {
@@ -6390,7 +6392,21 @@ function renderCells(gameKey) {
     if (latestChanged) setClass(cell, 'latest-fresh', false);
   });
 
-  if (latestChanged && lastNum) {
+  // Confirming a number in manual-play makes it the newest called number, so
+  // this render sees a "new latest" — but the event was a TAP, and the tap
+  // already has fxStampCell for that. Letting the call pop run too doesn't
+  // just double the feedback, it visibly stutters: fxStampCell's fxOneShot
+  // forces a reflow, which starts the anticipate pop that was added a moment
+  // ago, and then adds .fx-stamp whose !important animation replaces it and
+  // restarts the cell from frame 0. One tap, two pops.
+  //
+  // Only when the FX layer is actually on, because that is the condition
+  // under which fxStampCell does anything. With animations off, cellPop on
+  // .latest-fresh is the only acknowledgement a manual confirm ever gets, and
+  // suppressing it there would leave the tap feeling dead.
+  const tapOwnsFeedback = _fxUserAction && fxEnabled();
+
+  if (latestChanged && lastNum && !tapOwnsFeedback) {
     const newLatestEl = gs.cellMap[lastNum];
     if (newLatestEl) {
       // Force a reflow so the animation actually restarts from 0
