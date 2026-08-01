@@ -3061,9 +3061,14 @@ const FX_SWEEP_CLASSES = ['fx-hot-sweep', 'fx-row-done', 'fx-warm-sweep'];
 // that square, but the colour has to be the square's own or it reads as two
 // effects fighting over one cell.
 const FX_LATEST_SPLASH = ['#ff4b3a', '#c8281e', '#ffb0a0', '#ffffff'];
-// Beat between the wave finishing and the number's own punch. Long enough to
-// read as "and then", short enough not to feel like a separate event.
-const FX_FOCUS_GAP = 70;
+// Where in the last cell's animation the number's punch comes in, as a
+// fraction of it. Not 1.0: a sweep cell spends its final third settling back
+// to rest, with the motion that actually reads already over, so waiting for
+// the full end put an audible pause between the two beats. Coming in at
+// three-quarters overlaps that settle — the classic overlap trick, where the
+// next beat starts before the previous has fully resolved, which reads as
+// tighter rather than busier.
+const FX_FOCUS_AT = 0.75;
 
 // The number's moment, played AFTER the row has finished waving. It first ran
 // at the crest of the wave, which put the busiest thing on the sheet on top
@@ -3109,11 +3114,12 @@ function fxSweepRow(cells, cls, dur) {
     }, dur + i * STEP);
   });
 
-  // The last cell in the row is the last to finish, so that is when the wave
-  // is actually over — not `dur`, which is only how long one cell runs for.
+  // Timed off the LAST cell in the row: with a per-cell stagger the wave is
+  // still travelling long after the first cell has finished, so `dur` alone
+  // would drop the punch into the middle of it.
   if (focusCell) {
-    const sweepEnd = dur + (cells.length - 1) * STEP;
-    setTimeout(() => fxLatestFocus(focusCell), sweepEnd + FX_FOCUS_GAP);
+    setTimeout(() => fxLatestFocus(focusCell),
+               (cells.length - 1) * STEP + dur * FX_FOCUS_AT);
   }
 }
 
