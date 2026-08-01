@@ -1106,9 +1106,61 @@ body.fx-on .cell.fx-nudge {
   100% { transform: translate(0, 0) scale(1); }
 }
 
-/* ── 10 ── Sheet recoil. The paper takes the hit too — a couple of pixels,
-   under a fifth of a second. Below the threshold of "did that move?" and
-   squarely at the threshold of "that felt like it landed". */
+/* ── 10a ── Sheet punch. The paper takes the hit WHERE the hit landed: it
+   pivots about its own centre so the called number's corner is driven back
+   and the opposite corner swings up, like a board struck off-centre. A flat
+   recoil says "something happened"; this says "something happened THERE",
+   and it costs one extra pair of custom properties to do it.
+
+   --fx-hx / --fx-hy are the called cell's offset from the sheet's centre,
+   each normalised to -1..1 (JS sets them; see fxPaperPunch). The signs come
+   straight out of the CSS rotation conventions: positive rotateY drives the
+   right edge away from the viewer, positive rotateX drives the TOP edge
+   away — hence the negation on the Y term, so a number up top is pushed in
+   rather than flicked out.
+
+   The scale is there for the degenerate case: a number dead centre gives
+   hx = hy = 0 and no tilt at all, which is physically right but would leave
+   a centre hit with no reaction. Pushing the whole sheet back a touch is
+   what being punched square on actually looks like. */
+body.fx-on #digital-paper.fx-punch {
+  animation: fxPunch 0.46s cubic-bezier(0.24, 0.9, 0.32, 1);
+}
+@keyframes fxPunch {
+  0% {
+    transform: perspective(900px) rotateX(0deg) rotateY(0deg) scale(1);
+  }
+  /* Struck. Deepest point of the dent. */
+  26% {
+    transform: perspective(900px)
+      rotateX(calc(var(--fx-hy, 0) * -4.5deg * var(--fx-amp)))
+      rotateY(calc(var(--fx-hx, 0) *  4.5deg * var(--fx-amp)))
+      scale(calc(1 - 0.010 * var(--fx-amp)));
+  }
+  /* Springs back through the other side — a board that stops dead on the
+     way home reads as a slideshow, not as something with mass. */
+  58% {
+    transform: perspective(900px)
+      rotateX(calc(var(--fx-hy, 0) *  1.9deg * var(--fx-amp)))
+      rotateY(calc(var(--fx-hx, 0) * -1.9deg * var(--fx-amp)))
+      scale(calc(1 + 0.004 * var(--fx-amp)));
+  }
+  /* Second, much smaller swing back the original way. Two crossings is
+     enough to read as damping; three starts to look like a wobble. */
+  82% {
+    transform: perspective(900px)
+      rotateX(calc(var(--fx-hy, 0) * -0.7deg * var(--fx-amp)))
+      rotateY(calc(var(--fx-hx, 0) *  0.7deg * var(--fx-amp)))
+      scale(1);
+  }
+  100% {
+    transform: perspective(900px) rotateX(0deg) rotateY(0deg) scale(1);
+  }
+}
+
+/* ── 10b ── Flat recoil, kept for the wrong-tap. An error shouldn't tilt
+   the sheet toward the mistake — that reads as acknowledgement. A square
+   jolt with no direction in it reads as refusal, which is the point. */
 body.fx-on #digital-paper.fx-recoil { animation: fxRecoil 0.24s cubic-bezier(0.2, 0.9, 0.3, 1); }
 @keyframes fxRecoil {
   0%   { transform: translateY(0) scale(1); }
@@ -3126,6 +3178,32 @@ function fxPaper(cls, dur) {
   if (p) fxOneShot(p, cls, dur);
 }
 
+// Drive the sheet's tilt from where the hit actually landed. The cell's
+// centre is measured against the paper's centre and normalised to -1..1 on
+// each axis, which is exactly what the fxPunch keyframes expect: the
+// magnitude falls off toward the middle of the sheet on its own, so a number
+// near the centre barely tilts and one in a corner tilts hardest, with no
+// special-casing anywhere.
+//
+// Measured per call rather than derived from the cell's grid position: the
+// sheet holds up to six strips of varying height, so row/column indices say
+// nothing useful about where a number sits on the paper as a whole.
+function fxPaperPunch(cell) {
+  if (!fxEnabled() || !cell) return;
+  const paper = document.getElementById('digital-paper');
+  if (!paper) return;
+  const pr = paper.getBoundingClientRect();
+  const cr = cell.getBoundingClientRect();
+  if (!pr.width || !pr.height || !cr.width) { fxPaper('fx-recoil', 260); return; }
+
+  const clamp = v => (v < -1 ? -1 : v > 1 ? 1 : v);
+  const hx = clamp(((cr.left + cr.width  / 2) - (pr.left + pr.width  / 2)) / (pr.width  / 2));
+  const hy = clamp(((cr.top  + cr.height / 2) - (pr.top  + pr.height / 2)) / (pr.height / 2));
+  paper.style.setProperty('--fx-hx', hx.toFixed(3));
+  paper.style.setProperty('--fx-hy', hy.toFixed(3));
+  fxOneShot(paper, 'fx-punch', 480);
+}
+
 // How close the sheet is to a win, 0..1, used to pitch the sound. Five or
 // more numbers out is "not close" (0); a completed row is 1. Row-by-row
 // regardless of the rekke setting — as a signal for the ear, the nearest
@@ -3240,7 +3318,7 @@ function fxCallLand(cell, gameKey) {
     }
   }
   fxNudgeNeighbours(cell);
-  fxPaper('fx-recoil', 260);
+  fxPaperPunch(cell);
   fxUpdateTension(gameKey);
 }
 
@@ -3356,7 +3434,14 @@ function fxWinPaper() {
     if (stage) stage.classList.remove('fx-freeze');
     fxScreenFlash('#ffffff', 420);
     fxConfetti(Math.round(90 * amp));
-    if (paper) fxOneShot(paper, 'fx-win-shake', 700);
+    // The winning call fired its own directional punch a beat ago, and both
+    // rules sit on #digital-paper at equal specificity — so with .fx-punch
+    // still on the element the later rule (punch) would win and the sheet
+    // would tilt politely instead of shaking. Take it off; the win outranks.
+    if (paper) {
+      paper.classList.remove('fx-punch');
+      fxOneShot(paper, 'fx-win-shake', 700);
+    }
     // A second wave under the first, so the screen keeps refilling instead
     // of emptying out in one pass.
     if (!rolig) setTimeout(() => fxConfetti(Math.round(50 * amp)), 380);
