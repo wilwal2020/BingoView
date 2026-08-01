@@ -944,7 +944,13 @@ body.fx-on .cell.fx-hot-sweep {
   62%  { transform: translateY(calc(3px * var(--fx-amp)))   scale(calc(1 - 0.04 * var(--fx-amp))); }
   100% { transform: translateY(0) scale(1); }
 }
-body.fx-on .cell.fx-hot-sweep::before {
+/* :not(.latest) — the wave's gold wash is for the rest of the row only. The
+   just-called number is painted solid red, and laying a yellow glow over it
+   at the tail of the sweep muddied the one square the eye was already on.
+   The latest cell still rides the wave; it just gets a red particle splash
+   from fxSweepRow instead of a colour that fights its own. Same reasoning
+   applies to the green wash on fx-row-done below. */
+body.fx-on .cell.fx-hot-sweep:not(.latest)::before {
   background: radial-gradient(circle, #fff 0%, rgba(255,214,120,0.95) 42%, rgba(255,170,40,0) 76%);
   animation: fxHotFlash 0.62s ease-out var(--fx-d, 0s) both;
 }
@@ -968,7 +974,17 @@ body.fx-on .cell.fx-row-done {
   70%  { transform: perspective(320px) rotateX(calc(14deg * var(--fx-amp)))  scale(calc(1 - 0.05 * var(--fx-amp))); }
   100% { transform: perspective(320px) rotateX(0deg) scale(1); }
 }
-body.fx-on .cell.fx-row-done::before {
+/* Same reasoning as the gold wash above — and worse here, because green over
+   red is a straight colour clash. On a Rekke 2/3 game a completed row isn't
+   a win yet, so the row keeps its red cells rather than turning green, and
+   the flash landed right on top of them.
+
+   The second selector puts it back for the case where the row DID win: then
+   .row-winner has already painted every cell green, including the latest, so
+   the green wash belongs there and a red splash would be the thing that
+   clashes. The condition is "is this square still red", not "is it latest". */
+body.fx-on .cell.fx-row-done:not(.latest)::before,
+body.fx-on .cell.fx-row-done.latest.row-winner::before {
   background: radial-gradient(circle, #fff 0%, rgba(126,255,178,0.95) 42%, rgba(26,122,64,0) 78%);
   animation: fxDoneFlash 0.7s ease-out var(--fx-d, 0s) both;
 }
@@ -1130,31 +1146,34 @@ body.fx-on #digital-paper.fx-punch {
   0% {
     transform: perspective(900px) rotateX(0deg) rotateY(0deg) scale(1);
   }
-  /* Struck. Deepest point of the dent. */
+  /* Struck. Deepest point of the dent. The perspective is deliberately
+     shorter than the 900px this started at: a nearer vanishing point
+     exaggerates depth, so the sheet reads as being hit hard rather than
+     tipped, without needing a bigger angle to get there. */
   26% {
-    transform: perspective(900px)
-      rotateX(calc(var(--fx-hy, 0) * -4.5deg * var(--fx-amp)))
-      rotateY(calc(var(--fx-hx, 0) *  4.5deg * var(--fx-amp)))
-      scale(calc(1 - 0.010 * var(--fx-amp)));
+    transform: perspective(750px)
+      rotateX(calc(var(--fx-hy, 0) * -7.5deg * var(--fx-amp)))
+      rotateY(calc(var(--fx-hx, 0) *  7.5deg * var(--fx-amp)))
+      scale(calc(1 - 0.016 * var(--fx-amp)));
   }
   /* Springs back through the other side — a board that stops dead on the
      way home reads as a slideshow, not as something with mass. */
   58% {
-    transform: perspective(900px)
-      rotateX(calc(var(--fx-hy, 0) *  1.9deg * var(--fx-amp)))
-      rotateY(calc(var(--fx-hx, 0) * -1.9deg * var(--fx-amp)))
-      scale(calc(1 + 0.004 * var(--fx-amp)));
+    transform: perspective(750px)
+      rotateX(calc(var(--fx-hy, 0) *  3.1deg * var(--fx-amp)))
+      rotateY(calc(var(--fx-hx, 0) * -3.1deg * var(--fx-amp)))
+      scale(calc(1 + 0.006 * var(--fx-amp)));
   }
   /* Second, much smaller swing back the original way. Two crossings is
      enough to read as damping; three starts to look like a wobble. */
   82% {
-    transform: perspective(900px)
-      rotateX(calc(var(--fx-hy, 0) * -0.7deg * var(--fx-amp)))
-      rotateY(calc(var(--fx-hx, 0) *  0.7deg * var(--fx-amp)))
+    transform: perspective(750px)
+      rotateX(calc(var(--fx-hy, 0) * -1.1deg * var(--fx-amp)))
+      rotateY(calc(var(--fx-hx, 0) *  1.1deg * var(--fx-amp)))
       scale(1);
   }
   100% {
-    transform: perspective(900px) rotateX(0deg) rotateY(0deg) scale(1);
+    transform: perspective(750px) rotateX(0deg) rotateY(0deg) scale(1);
   }
 }
 
@@ -3006,6 +3025,16 @@ function fxOneShot(el, cls, dur) {
 // nine individual flashes into one sweep travelling along the row.
 const FX_SWEEP_CLASSES = ['fx-hot-sweep', 'fx-row-done', 'fx-warm-sweep'];
 
+// Red splash for the just-called cell as the sweep reaches it. Stands in for
+// the gold/green wash the CSS now withholds from .latest: the row still has
+// to visibly include that square, but the colour has to be the square's own
+// or it reads as two effects fighting over one cell.
+const FX_LATEST_SPLASH = ['#ff4b3a', '#c8281e', '#ffb0a0', '#ffffff'];
+// Both wash keyframes peak around a quarter to a third of the way in, so the
+// splash is offset to land with the crest of the wave rather than with the
+// moment the class goes on.
+const FX_SPLASH_OFFSET = 150;
+
 function fxSweepRow(cells, cls, dur) {
   const STEP = 38;   // tighter than the animation length, so the wave overlaps
   cells.forEach((c, i) => {
@@ -3016,6 +3045,21 @@ function fxSweepRow(cells, cls, dur) {
     void c.offsetWidth;
     c.style.setProperty('--fx-d', (i * STEP) + 'ms');
     c.classList.add(cls);
+    // Decided now rather than inside the timeout: by the time the wave
+    // arrives another call may have moved .latest along, and the splash
+    // belongs to the cell the sweep was about when it started.
+    //
+    // .row-winner excluded because the test is "is this square still red",
+    // not "is it the latest". A winning row has already repainted every cell
+    // green, latest included, so there it keeps the green wash and a red
+    // splash would be the thing that clashed.
+    if (c.classList.contains('latest') && !c.classList.contains('row-winner')) {
+      setTimeout(() => {
+        const r = fxRectOf(c);
+        if (r) fxBurst(r, { colors: FX_LATEST_SPLASH, count: 11, speed: 76,
+                            size: 4, dur: 560 });
+      }, i * STEP + FX_SPLASH_OFFSET);
+    }
     setTimeout(() => {
       c.classList.remove(cls);
       c.style.removeProperty('--fx-d');
