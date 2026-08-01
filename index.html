@@ -32,9 +32,9 @@ body {
   flex-direction: column;
 }
 
-/* App backdrop — a fixed gradient behind all content. Switchable from the
-   settings overlay; the choice persists in localStorage ('bv_bg').
-   Default is "Kjølig blå"; body[data-bg] selects the others. */
+/* App backdrop — a fixed gradient behind all content. The cool blue, and
+   only the cool blue: this used to be switchable between three palettes,
+   which was a setting nobody needed to be asked about. */
 body::before {
   content: "";
   position: fixed;
@@ -44,14 +44,6 @@ body::before {
   background:
     radial-gradient(120% 55% at 50% -10%, rgba(86,140,220,0.20), transparent 62%),
     linear-gradient(180deg, #101a2e, #0a1020);
-}
-body[data-bg="natt"]::before {
-  background: linear-gradient(180deg, #17243f, #0a0f1c);
-}
-body[data-bg="teal"]::before {
-  background:
-    radial-gradient(120% 55% at 50% -10%, rgba(52,176,182,0.18), transparent 62%),
-    linear-gradient(180deg, #0d2028, #07151a);
 }
 
 /* ═══════════════════════════════════
@@ -1985,11 +1977,6 @@ body.fx-on .manual-switch .manual-switch-thumb {
 }
 .bv-toggle input:checked + .bv-toggle-track { background: var(--green); }
 .bv-toggle input:checked + .bv-toggle-track::before { transform: translateX(18px); }
-/* Row for a feature this browser can't do (e.g. vibration in Firefox) */
-.bv-row.unsupported .bv-row-label > span:first-child { opacity: 0.45; }
-.bv-row.unsupported .bv-row-desc { color: #e0a33a; opacity: 1; }
-.bv-row.unsupported .bv-toggle { opacity: 0.35; }
-.bv-row.unsupported .bv-toggle-track { cursor: not-allowed; }
 .bv-overlay-actions {
   display: flex;
   justify-content: flex-end;
@@ -2007,77 +1994,6 @@ body.fx-on .manual-switch .manual-switch-thumb {
   cursor: pointer;
 }
 .bv-overlay-btn:hover { border-color: var(--gold); color: var(--gold); }
-/* Background picker — a small segmented control in the settings overlay */
-.bv-bg-seg {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-  background: #0e0e0e;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  padding: 3px;
-}
-.bv-bg-seg button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  background: transparent;
-  color: var(--dim);
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  padding: 5px 9px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.bv-bg-seg button .sw {
-  width: 13px;
-  height: 13px;
-  border-radius: 3px;
-  border: 1px solid rgba(255,255,255,0.2);
-}
-.bv-bg-seg button.on {
-  background: #242424;
-  color: var(--paper);
-  box-shadow: inset 0 0 0 1px var(--gold);
-}
-.bv-overlay-btn-danger { border-color: var(--red); color: var(--red); }
-.bv-overlay-btn-danger:hover { background: var(--red); color: #fff; }
-.bv-errlog-list {
-  max-height: 50vh;
-  overflow-y: auto;
-  background: #0e0e0e;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  padding: 6px;
-  font-size: 0.72rem;
-}
-.bv-errlog-empty {
-  padding: 22px;
-  text-align: center;
-  color: var(--dim);
-}
-.bv-errlog-entry {
-  padding: 6px 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  word-break: break-word;
-}
-.bv-errlog-entry:last-child { border-bottom: none; }
-.bv-errlog-kind {
-  color: #ff8888;
-  font-weight: 700;
-  text-transform: uppercase;
-  font-size: 0.65rem;
-  letter-spacing: 0.06em;
-}
-.bv-errlog-time { color: var(--dim); font-size: 0.65rem; margin-left: 6px; }
-.bv-errlog-msg { color: #ffd0c0; margin-top: 2px; }
-.bv-errlog-stack {
-  color: rgba(255,255,255,0.55);
-  white-space: pre-wrap;
-  margin-top: 3px;
-  font-size: 0.68rem;
-}
 
 /* ── Share Modal ──────────────────────── */
 .share-overlay {
@@ -2374,12 +2290,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
 .bv-icon-btn { border-color: var(--nav-line-2); }
 </style>
 </head>
-<body data-bg="blaa">
-<script>
-  // Apply the saved backdrop before first paint so there's no flash of the
-  // default when the user has picked another. Full wiring is set up on load.
-  try { var _bg = localStorage.getItem("bv_bg"); if (_bg === "natt" || _bg === "teal") document.body.dataset.bg = _bg; } catch (e) {}
-</script>
+<body>
 
 <!-- ══════════════════════════════════════
      PHONE SCREEN
@@ -2472,37 +2383,8 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <button type="button" data-level="normal">Normal</button>
         </div>
       </div>
-      <div class="bv-row">
-        <div class="bv-row-label">
-          <span>Bakgrunn</span>
-          <span class="bv-row-desc">Farge bak arket</span>
-        </div>
-        <div class="bv-bg-seg" id="bv-bg-seg">
-          <button type="button" data-bg="blaa"><span class="sw" style="background:linear-gradient(135deg,#5a8cdc,#101a2e)"></span>Blå</button>
-          <button type="button" data-bg="natt"><span class="sw" style="background:#17243f"></span>Natt</button>
-          <button type="button" data-bg="teal"><span class="sw" style="background:linear-gradient(135deg,#34b0b6,#0d2028)"></span>Teal</button>
-        </div>
-      </div>
-      <div class="bv-row">
-        <div class="bv-row-label"><span>Feil-logg</span><span class="bv-row-desc">Se loggede JS-feil</span></div>
-        <button id="bv-errlog-open" class="bv-overlay-btn">Vis</button>
-      </div>
       <div class="bv-overlay-actions">
         <button id="bv-settings-close" class="bv-overlay-btn">Lukk</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- BV error log overlay -->
-  <div id="bv-errlog-overlay" class="bv-overlay" style="display:none">
-    <div class="bv-overlay-card">
-      <div class="bv-overlay-title">Feil-logg</div>
-      <div id="bv-errlog-subtitle" class="bv-row-desc" style="margin-bottom:8px"></div>
-      <div id="bv-errlog-list" class="bv-errlog-list"></div>
-      <div class="bv-overlay-actions">
-        <button id="bv-errlog-copy" class="bv-overlay-btn">Kopier</button>
-        <button id="bv-errlog-clear" class="bv-overlay-btn bv-overlay-btn-danger">Tøm</button>
-        <button id="bv-errlog-close" class="bv-overlay-btn">Lukk</button>
       </div>
     </div>
   </div>
@@ -2708,6 +2590,9 @@ console.log('[BV] Firebase initialized');
 // ════════════════════════════════════
 // ERROR CAPTURE — ring buffer of last 50
 // ════════════════════════════════════
+// The Feil-logg overlay that used to read this is gone from Innstillinger;
+// the buffer stays because it costs nothing and still survives a reload,
+// which a console doesn't. Read it with bvErrorLog.get().
 (function () {
   const KEY = 'bv_errorLog';
   const MAX = 50;
@@ -2729,9 +2614,6 @@ console.log('[BV] Firebase initialized');
       extra: extra || null,
     });
     write(list);
-    if (typeof window.__bvErrLogChanged === 'function') {
-      try { window.__bvErrLogChanged(); } catch (e) {}
-    }
   }
   window.addEventListener('error', e => {
     record('error', e.message, e.error && e.error.stack, {
@@ -2744,7 +2626,7 @@ console.log('[BV] Firebase initialized');
   });
   window.bvErrorLog = {
     get: read,
-    clear: () => { write([]); if (typeof window.__bvErrLogChanged === 'function') window.__bvErrLogChanged(); },
+    clear: () => write([]),
     record,
   };
 })();
@@ -2758,13 +2640,15 @@ const FEEDBACK_KEY = 'bv_feedback';
 // can match and the app behaves exactly as it did before any of this existed.
 const FX_LEVELS = ['av', 'rolig', 'full', 'maks'];
 const feedback = (() => {
-  // fxLevel defaults to OFF — it's an opt-in flourish, not something to
-  // spring on an existing user mid-game.
-  const defaults = { vibrate: true, sound: false, strongVibrate: true,
-                     animations: false, fxLevel: 'av',
-                     // Countdown ring: opt-in per phone. The host only sets how
-                     // long it runs; this decides whether it's drawn at all.
-                     callRing: false };
+  // The full experience out of the box. These were all conservative opt-ins
+  // while the FX layer was new; it isn't new any more, and a first-time user
+  // who has to go hunting through Innstillinger to find the good version of
+  // the app has already had the worse one.
+  const defaults = { vibrate: true, sound: true, strongVibrate: true,
+                     animations: true, fxLevel: 'maks',
+                     // The host only sets how long the countdown runs; this
+                     // decides whether it's drawn on this phone at all.
+                     callRing: true };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}'); } catch (e) {}
   const f = { ...defaults, ...saved };
@@ -2772,11 +2656,20 @@ const feedback = (() => {
   // rather than 'rolig': they opted into flourishes, and 'full' is the level
   // this was designed around — 'rolig' exists for people who find that much.
   //
-  // Tested against `saved`, not against the merged object: the default puts a
-  // perfectly valid 'av' in fxLevel, so a merged record NEVER looks
-  // un-migrated and every existing user would have been silently switched off.
+  // Read off `saved`, never the merged object: the merge fills fxLevel in from
+  // the defaults, so a merged record never looks un-migrated and every
+  // existing user would be silently re-derived.
+  //
+  // The old boolean has to actually be PRESENT to be honoured. Without that
+  // test a first-time user — who has neither field — looks like someone whose
+  // animations were off, and gets "migrated" straight off the default above.
+  // Anything else with no usable fxLevel (a fresh record, or a corrupted one)
+  // lands on the default, which also keeps a junk value from reaching
+  // body[data-fx], where it would match no rule at all.
   if (!FX_LEVELS.includes(saved && saved.fxLevel)) {
-    f.fxLevel = f.animations ? 'full' : 'av';
+    f.fxLevel = typeof (saved && saved.animations) === 'boolean'
+      ? (saved.animations ? 'full' : 'av')
+      : defaults.fxLevel;
   }
   f.animations = (f.fxLevel !== 'av');
   return f;
@@ -5487,7 +5380,6 @@ function initPhone() {
 
   // BV settings overlay (sound / vibrate)
   const settingsOverlay = document.getElementById("bv-settings-overlay");
-  const errlogOverlay   = document.getElementById("bv-errlog-overlay");
   const vibrateOn       = document.getElementById("bv-vibrate-on");
   const soundOn         = document.getElementById("bv-sound-on");
   const strongOn        = document.getElementById("bv-strong-vibrate-on");
@@ -5500,18 +5392,17 @@ function initPhone() {
   applyFxSetting();
 
   // No Vibration API in this browser (Firefox removed it; iOS Safari never had
-  // it). Grey the toggles out and say why, instead of leaving them switched on
-  // and pretending they do something.
+  // it). Take the rows out entirely rather than showing them greyed out with an
+  // explanation: on an iPhone that explanation is permanent, and a setting that
+  // can never be switched on is just two lines of noise above the ones that
+  // work. The toggles stay off so nothing downstream thinks it can vibrate.
   if (!VIBRATE_SUPPORTED) {
     [["bv-row-vibrate", vibrateOn], ["bv-row-strong-vibrate", strongOn]]
       .forEach(([rowId, input]) => {
         const row = document.getElementById(rowId);
-        if (!row) return;
-        row.classList.add("unsupported");
+        if (row) row.style.display = "none";
         input.checked  = false;
         input.disabled = true;
-        row.querySelector(".bv-row-desc").textContent =
-          "Nettleseren din støtter ikke vibrasjon — bruk Chrome på Android";
       });
   }
 
@@ -5522,20 +5413,6 @@ function initPhone() {
     settingsOverlay.style.display = "none";
   });
 
-  // Background picker (Kjølig blå / Ren natt / Teal) — persists in localStorage
-  const bgSeg = document.getElementById("bv-bg-seg");
-  if (bgSeg) {
-    const VALID = ["blaa", "natt", "teal"];
-    const applyBg = (v) => {
-      if (!VALID.includes(v)) v = "blaa";
-      document.body.dataset.bg = v;
-      bgSeg.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.bg === v));
-      try { localStorage.setItem("bv_bg", v); } catch (e) {}
-    };
-    applyBg(document.body.dataset.bg || "blaa");
-    bgSeg.querySelectorAll("button").forEach(b =>
-      b.addEventListener("click", () => applyBg(b.dataset.bg)));
-  }
   settingsOverlay.addEventListener("click", e => {
     if (e.target === settingsOverlay) settingsOverlay.style.display = "none";
   });
@@ -5608,72 +5485,6 @@ function initPhone() {
   animSeg.querySelectorAll("button").forEach(b =>
     b.addEventListener("click", () => setFxLevel(b.dataset.fx)));
   paintFxSeg();
-
-  // BV error log overlay
-  function renderBvErrLog() {
-    const list = (window.bvErrorLog && window.bvErrorLog.get()) || [];
-    document.getElementById("bv-errlog-subtitle").textContent =
-      list.length === 0 ? "Ingen feil registrert" :
-      list.length === 1 ? "1 feil registrert" :
-                          `${list.length} feil registrert`;
-    const wrap = document.getElementById("bv-errlog-list");
-    wrap.innerHTML = "";
-    if (!list.length) {
-      wrap.innerHTML = '<div class="bv-errlog-empty">Alt fungerer som det skal.</div>';
-      return;
-    }
-    list.slice().reverse().forEach(err => {
-      const e = document.createElement("div");
-      e.className = "bv-errlog-entry";
-      const time = new Date(err.ts).toLocaleString('no-NO');
-      e.innerHTML =
-        `<div><span class="bv-errlog-kind">${err.kind || 'error'}</span><span class="bv-errlog-time">${time}</span></div>` +
-        `<div class="bv-errlog-msg"></div>` +
-        (err.stack ? `<div class="bv-errlog-stack"></div>` : '');
-      e.querySelector('.bv-errlog-msg').textContent = err.msg || '';
-      if (err.stack) e.querySelector('.bv-errlog-stack').textContent = err.stack;
-      wrap.appendChild(e);
-    });
-  }
-  window.__bvErrLogChanged = () => {
-    if (errlogOverlay.style.display === 'flex') renderBvErrLog();
-  };
-  document.getElementById("bv-errlog-open").addEventListener("click", () => {
-    settingsOverlay.style.display = "none";
-    errlogOverlay.style.display = "flex";
-    renderBvErrLog();
-  });
-  document.getElementById("bv-errlog-close").addEventListener("click", () => {
-    errlogOverlay.style.display = "none";
-  });
-  errlogOverlay.addEventListener("click", e => {
-    if (e.target === errlogOverlay) errlogOverlay.style.display = "none";
-  });
-  document.getElementById("bv-errlog-clear").addEventListener("click", () => {
-    if (window.bvErrorLog) window.bvErrorLog.clear();
-    renderBvErrLog();
-  });
-  document.getElementById("bv-errlog-copy").addEventListener("click", () => {
-    const list = (window.bvErrorLog && window.bvErrorLog.get()) || [];
-    const text = JSON.stringify(list, null, 2);
-    const btn = document.getElementById("bv-errlog-copy");
-    const orig = btn.textContent;
-    const finish = (ok) => {
-      btn.textContent = ok ? "Kopiert ✓" : "Feil";
-      setTimeout(() => { btn.textContent = orig; }, 1500);
-    };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(() => finish(true), () => finish(false));
-    } else {
-      try {
-        const ta = document.createElement('textarea');
-        ta.value = text; document.body.appendChild(ta); ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        finish(true);
-      } catch (e) { finish(false); }
-    }
-  });
 
   // Manual play entry
   document.getElementById("btn-manual-play").addEventListener("click", enterManualMode);
