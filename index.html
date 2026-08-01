@@ -3062,13 +3062,17 @@ const FX_SWEEP_CLASSES = ['fx-hot-sweep', 'fx-row-done', 'fx-warm-sweep'];
 // effects fighting over one cell.
 const FX_LATEST_SPLASH = ['#ff4b3a', '#c8281e', '#ffb0a0', '#ffffff'];
 // Where in the last cell's animation the number's punch comes in, as a
-// fraction of it. Not 1.0: a sweep cell spends its final third settling back
-// to rest, with the motion that actually reads already over, so waiting for
-// the full end put an audible pause between the two beats. Coming in at
-// three-quarters overlaps that settle — the classic overlap trick, where the
-// next beat starts before the previous has fully resolved, which reads as
-// tighter rather than busier.
-const FX_FOCUS_AT = 0.75;
+// fraction of it. Not 1.0: a sweep cell spends its whole back half easing
+// home with the motion that actually reads already over, so waiting for the
+// full end put dead air between the two beats. Overlapping that tail is the
+// classic trick — the next beat starts before the previous has resolved,
+// which reads as tighter rather than busier.
+//
+// Roughly the floor for this value. Both sweep keyframes put their peak at
+// 30-35%; drop much below 0.5 and the punch starts landing on the crest of
+// the wave instead of its tail, which is the busy overlap this was moved
+// out of in the first place.
+const FX_FOCUS_AT = 0.55;
 
 // The number's moment, played AFTER the row has finished waving. It first ran
 // at the crest of the wave, which put the busiest thing on the sheet on top
