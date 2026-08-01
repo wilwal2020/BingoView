@@ -471,7 +471,8 @@ body.start-parked #rekke-buttons { display: none !important; }
   box-shadow: inset 0 0 0 1px var(--gold);
 }
 /* Four options instead of two — tighten up so the row still fits a phone. */
-#bv-anim-seg button { padding: 5px 7px; font-size: 0.67rem; }
+#bv-anim-seg button,
+#bv-reveal-seg button { padding: 5px 7px; font-size: 0.67rem; }
 
 /* Slide-switch styling for the "Manuell trykking" toggle. The same
    #btn-manual-toggle button is reused; .active drives the on-state so the
@@ -2383,6 +2384,18 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <button type="button" data-level="normal">Normal</button>
         </div>
       </div>
+      <div class="bv-row" id="bv-row-manual-reveal">
+        <div class="bv-row-label">
+          <span>Avslør tallet etter</span>
+          <span class="bv-row-desc">På Normal: rammer tallet hvis du ikke har funnet det selv innen da</span>
+        </div>
+        <div class="manual-level-seg" id="bv-reveal-seg" role="group" aria-label="Tid før tallet avsløres">
+          <button type="button" data-sec="0">Av</button>
+          <button type="button" data-sec="3">3s</button>
+          <button type="button" data-sec="5">5s</button>
+          <button type="button" data-sec="10">10s</button>
+        </div>
+      </div>
       <div class="bv-overlay-actions">
         <button id="bv-settings-close" class="bv-overlay-btn">Lukk</button>
       </div>
@@ -3893,6 +3906,32 @@ try {
   const _lvl = localStorage.getItem('bv_manual_level');
   if (_lvl === 'easy' || _lvl === 'normal') manualPlayLevel = _lvl;
 } catch (e) {}
+
+// How long Normal holds out before framing the number anyway. Finding it
+// yourself is the whole point of Normal, but a number you genuinely cannot
+// spot doesn't just cost you that call — you're still hunting for it when the
+// next one lands, and the game gets away from you. This gives in after a
+// while. 0 is "never", which is what Normal used to do unconditionally.
+const MANUAL_REVEAL_SECS = [0, 3, 5, 10];
+let manualRevealSec = 5;
+try {
+  const _rv = parseInt(localStorage.getItem('bv_manual_reveal'), 10);
+  if (MANUAL_REVEAL_SECS.includes(_rv)) manualRevealSec = _rv;
+} catch (e) {}
+// Pending re-render for a reveal that hasn't come due yet. One timer, not one
+// per game: only the sheet on screen can be waiting on it, and switching tabs
+// re-renders anyway, which re-arms it for whatever that game is waiting on.
+let _revealTimer = null;
+function cancelRevealTimer() {
+  if (_revealTimer) { clearTimeout(_revealTimer); _revealTimer = null; }
+}
+function scheduleReveal(ms) {
+  cancelRevealTimer();
+  _revealTimer = setTimeout(() => {
+    _revealTimer = null;
+    renderCells(activeGame);
+  }, Math.max(50, ms));
+}
 
 let activeGame = 'blue';          // currently displayed game on phone
 let currentGame = null;           // the game the main site (iPad) is on
@@ -5528,10 +5567,17 @@ function initPhone() {
   });
 
   // Lett / Normal picker for manual trykking (settings overlay)
+  const revealSeg = document.getElementById("bv-reveal-seg");
+  if (revealSeg) {
+    revealSeg.querySelectorAll("button").forEach(b =>
+      b.addEventListener("click", () => setManualRevealSec(Number(b.dataset.sec))));
+    setManualRevealSec(manualRevealSec);   // paint the saved choice
+  }
   const levelSeg = document.getElementById("manual-level-seg");
   if (levelSeg) {
     levelSeg.querySelectorAll("button").forEach(b =>
       b.addEventListener("click", () => setManualPlayLevel(b.dataset.level)));
+    // After the reveal picker, so this also sets that row's initial visibility.
     setManualPlayLevel(manualPlayLevel);   // paint the saved choice
   }
 
@@ -6343,17 +6389,39 @@ function renderCells(gameKey) {
   const awaySet    = new Set((gs.awayCalled || []).map(Number));
   const wrongSet   = new Set((gs.wrong || []).map(String));
 
-  // Manual-play hint sets. Only "Lett" points at the unconfirmed number —
-  // in "Normal" the whole point is that the user has to find it themselves.
+  // Manual-play hint sets. "Lett" frames the unconfirmed number straight
+  // away; "Normal" leaves you to find it, then gives in after
+  // manualRevealSec and shows exactly what Lett would have.
   let hintRedNum = null;
   const hintYellowSet = new Set();
-  if (manualPlayMode && manualPlayLevel === 'easy' &&
-      Array.isArray(gs.hostCalled) && gs.hostCalled.length) {
+  if (manualPlayMode && Array.isArray(gs.hostCalled) && gs.hostCalled.length) {
     const confirmed = new Set(calledList);
     const unconfirmed = gs.hostCalled.filter(n => !confirmed.has(n));
-    if (unconfirmed.length) {
-      hintRedNum = String(unconfirmed[unconfirmed.length - 1]);
-      unconfirmed.slice(0, -1).forEach(n => hintYellowSet.add(String(n)));
+    if (!unconfirmed.length) {
+      gs._revealNum = null;
+    } else {
+      const newest = unconfirmed[unconfirmed.length - 1];
+      // The clock is keyed to the NUMBER, not to this render. renderCells runs
+      // again for all sorts of unrelated reasons — a jackpot push, a tab
+      // switch, another Firebase listener firing — and restarting the wait on
+      // each of those would mean the reveal never arrives on a busy sheet.
+      if (gs._revealNum !== newest) {
+        gs._revealNum = newest;
+        gs._revealSince = Date.now();
+      }
+      let show = (manualPlayLevel === 'easy');
+      if (!show && manualRevealSec > 0) {
+        const left = manualRevealSec * 1000 - (Date.now() - gs._revealSince);
+        if (left <= 0) show = true;
+        // Only the sheet on screen books the wake-up. A background game's
+        // reveal resolves from the elapsed time whenever it's next rendered,
+        // which is the moment it becomes visible.
+        else if (gameKey === activeGame) scheduleReveal(left);
+      }
+      if (show) {
+        hintRedNum = String(newest);
+        unconfirmed.slice(0, -1).forEach(n => hintYellowSet.add(String(n)));
+      }
     }
   }
 
@@ -6467,8 +6535,35 @@ function setManualPlayLevel(level) {
     seg.querySelectorAll('button').forEach(b =>
       b.classList.toggle('on', b.dataset.level === next));
   }
+  // The delay only means anything on Normal — on Lett the number is framed
+  // from the start, so there is nothing to wait for.
+  const revealRow = document.getElementById('bv-row-manual-reveal');
+  if (revealRow) revealRow.style.display = (next === 'normal') ? '' : 'none';
 
-  if (changed) getGameIds().forEach(g => renderCells(g));
+  if (changed) {
+    cancelRevealTimer();
+    getGameIds().forEach(g => renderCells(g));
+  }
+}
+
+function setManualRevealSec(sec) {
+  const next = MANUAL_REVEAL_SECS.includes(sec) ? sec : 5;
+  const changed = (next !== manualRevealSec);
+  manualRevealSec = next;
+  try { localStorage.setItem('bv_manual_reveal', String(next)); } catch (e) {}
+
+  const seg = document.getElementById('bv-reveal-seg');
+  if (seg) {
+    seg.querySelectorAll('button').forEach(b =>
+      b.classList.toggle('on', Number(b.dataset.sec) === next));
+  }
+
+  // Re-render rather than just re-arming: shortening the delay past what a
+  // number has already been waiting should reveal it now, not at the old time.
+  if (changed) {
+    cancelRevealTimer();
+    getGameIds().forEach(g => renderCells(g));
+  }
 }
 
 function setAwayMode(on) {
@@ -6501,6 +6596,9 @@ function setManualPlayMode(on) {
   // Mutually exclusive with "Markér nye" — turn that off first
   if (on && awayMode) setAwayMode(false);
   manualPlayMode = on;
+  // Nothing left to reveal either way: turning it on re-snapshots what counts
+  // as confirmed below, turning it off auto-confirms the lot.
+  cancelRevealTimer();
 
   const btn = document.getElementById('btn-manual-toggle');
   if (btn) {
