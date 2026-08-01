@@ -3285,6 +3285,11 @@ function fxStampCell(cell, closeness) {
     fxBurst(r, { colors: ['#ffd76e', '#ffffff', '#ff9a3c'], count: 10, speed: 70, size: 4 });
   }
   fxNudgeNeighbours(cell);
+  // Same order as fxCallLand — nudge the neighbours, then tip the sheet away
+  // from where the hit landed. A stamp you place yourself has more claim to
+  // move the paper than one the host calls at you, and without this a WRONG
+  // tap jolted the sheet (fx-recoil) while a correct one left it dead still.
+  fxPaperPunch(cell);
   fxHaptic(18);
   sfxStamp(closeness);
 }
