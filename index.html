@@ -951,9 +951,9 @@ body.fx-on .cell.fx-hot-sweep {
 /* :not(.latest) — the wave's gold wash is for the rest of the row only. The
    just-called number is painted solid red, and laying a yellow glow over it
    at the tail of the sweep muddied the one square the eye was already on.
-   The latest cell still rides the wave; it just gets a red particle splash
-   from fxSweepRow instead of a colour that fights its own. Same reasoning
-   applies to the green wash on fx-row-done below. */
+   The cell still rides the wave, so the row reads as complete; it simply
+   keeps its own colour while doing it. Same applies to the green wash on
+   fx-row-done below. */
 body.fx-on .cell.fx-hot-sweep:not(.latest)::before {
   background: radial-gradient(circle, #fff 0%, rgba(255,214,120,0.95) 42%, rgba(255,170,40,0) 76%);
   animation: fxHotFlash 0.62s ease-out var(--fx-d, 0s) both;
@@ -963,11 +963,6 @@ body.fx-on .cell.fx-hot-sweep:not(.latest)::before {
   25%  { opacity: 1; transform: scale(1.3); }
   100% { opacity: 0; transform: scale(1.9); }
 }
-
-/* The number's moment at the tail of a sweep is carried by the red particle
-   splash alone — see fxLatestFocus. It used to scale-and-glow the cell as
-   well; the cell had already popped once when the call landed, and popping
-   it again a beat later was one gesture too many for the same square. */
 
 /* 3 ── Row completely filled: each cell flips over in sequence, like the
    row is being stamped shut one square at a time. */
@@ -990,8 +985,9 @@ body.fx-on .cell.fx-row-done {
 
    The second selector puts it back for the case where the row DID win: then
    .row-winner has already painted every cell green, including the latest, so
-   the green wash belongs there and a red splash would be the thing that
-   clashes. The condition is "is this square still red", not "is it latest". */
+   the green wash matches the cell underneath it and there is nothing to
+   withhold. The condition is "is this square still red", not "is it the
+   latest". */
 body.fx-on .cell.fx-row-done:not(.latest)::before,
 body.fx-on .cell.fx-row-done.latest.row-winner::before {
   background: radial-gradient(circle, #fff 0%, rgba(126,255,178,0.95) 42%, rgba(26,122,64,0) 78%);
@@ -3061,50 +3057,12 @@ function fxOneShot(el, cls, dur) {
 // nine individual flashes into one sweep travelling along the row.
 const FX_SWEEP_CLASSES = ['fx-hot-sweep', 'fx-row-done', 'fx-warm-sweep'];
 
-// Red splash for the just-called cell, standing in for the gold/green wash
-// the CSS now withholds from .latest: the row still has to visibly include
-// that square, but the colour has to be the square's own or it reads as two
-// effects fighting over one cell.
-const FX_LATEST_SPLASH = ['#ff4b3a', '#c8281e', '#ffb0a0', '#ffffff'];
-// Where in the last cell's animation the number's punch comes in, as a
-// fraction of it. Not 1.0: a sweep cell spends its whole back half easing
-// home with the motion that actually reads already over, so waiting for the
-// full end put dead air between the two beats. Overlapping that tail is the
-// classic trick — the next beat starts before the previous has resolved,
-// which reads as tighter rather than busier.
-//
-// Roughly the floor for this value. Both sweep keyframes put their peak at
-// 30-35%; drop much below 0.5 and the punch starts landing on the crest of
-// the wave instead of its tail, which is the busy overlap this was moved
-// out of in the first place.
-const FX_FOCUS_AT = 0.55;
-
-// The number's moment, played AFTER the row has finished waving. It first ran
-// at the crest of the wave, which put the busiest thing on the sheet on top
-// of the second busiest and left nowhere for the eye to settle. Sequencing
-// them — row reacts, then the number that caused it — costs nothing and is
-// the whole difference between busy and deliberate.
-//
-// Particles only. The cell itself used to pop again here, which was a second
-// pop on a square that had already popped when the call landed a moment
-// before; the splash marks the spot without restating it.
-function fxLatestFocus(cell) {
-  // Re-checked here rather than trusted from a second ago: on a fast host
-  // another number can land inside the sweep, and splashing a cell that is no
-  // longer the latest would be pointing at the wrong square. The new call
-  // brings its own feedback, so dropping this one is the right outcome.
-  if (!fxEnabled() || !cell.isConnected ||
-      !cell.classList.contains('latest') ||
-      cell.classList.contains('row-winner')) return;
-  const r = fxRectOf(cell);
-  if (r) fxBurst(r, { colors: FX_LATEST_SPLASH, count: 12, speed: 80,
-                      size: 4, dur: 580 });
-  fxHaptic(14);
-}
-
+// The sweep is the whole effect now. The just-called cell rides the wave
+// with the rest of the row but takes no colour wash and no closing beat of
+// its own — it already popped when the call landed, and the wave passing
+// over it is enough to say the row includes it.
 function fxSweepRow(cells, cls, dur) {
   const STEP = 38;   // tighter than the animation length, so the wave overlaps
-  let focusCell = null;
   cells.forEach((c, i) => {
     // Drop BOTH sweep classes, not just this one: a row that goes hot and
     // then fills on the very next call would otherwise still be carrying the
@@ -3113,26 +3071,11 @@ function fxSweepRow(cells, cls, dur) {
     void c.offsetWidth;
     c.style.setProperty('--fx-d', (i * STEP) + 'ms');
     c.classList.add(cls);
-    // .row-winner excluded because the test is "is this square still red",
-    // not "is it the latest". A winning row has already repainted every cell
-    // green, latest included, so there it keeps the green wash, and the win
-    // celebration owns the moment the sweep ends.
-    if (c.classList.contains('latest') && !c.classList.contains('row-winner')) {
-      focusCell = c;
-    }
     setTimeout(() => {
       c.classList.remove(cls);
       c.style.removeProperty('--fx-d');
     }, dur + i * STEP);
   });
-
-  // Timed off the LAST cell in the row: with a per-cell stagger the wave is
-  // still travelling long after the first cell has finished, so `dur` alone
-  // would drop the punch into the middle of it.
-  if (focusCell) {
-    setTimeout(() => fxLatestFocus(focusCell),
-               (cells.length - 1) * STEP + dur * FX_FOCUS_AT);
-  }
 }
 
 // ── Screen-space primitives ────────────────────────────────────
