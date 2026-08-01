@@ -572,31 +572,17 @@ body.start-parked #rekke-buttons { display: none !important; }
      stutter on iOS. The brass line reads perfectly well without it. */
 }
 
-/* ── Countdown cue ──────────────────────────────────────────────
-   The ring is a heads-up, not a tension device. It stays plain brass for
-   the whole cycle and gets exactly one beat, shortly before the call: the
-   line warms and swells once, then the number arrives.
+/* ── Countdown fuse ─────────────────────────────────────────────
+   The ring reads as a fuse: the point where the line ends is where it's
+   burning, and it throws a few embers as it goes. Nothing is drawn AT that
+   point — the sparks are the only thing marking it, which is what keeps
+   this subtle. An earlier attempt put a bright dash there and it read as an
+   object stuck on the ring rather than as the line being consumed.
 
-   This deliberately replaced a three-stage escalation (amber, then red,
-   then a per-second heartbeat). Escalation tells you to brace; the ring's
-   whole job is to let you glance at it and know a number is coming. One
-   soft cue does that, and a ramp toward panic actively works against it. */
-body.fx-on #call-ring-rect { transition: stroke 0.6s linear, stroke-width 0.6s linear; }
-body.fx-on #call-ring.ring-cue #call-ring-rect {
-  stroke: #ffd98a;
-  stroke-width: 3.6;
-}
-/* One breath, played once — not a loop. A repeating pulse is what turns a
-   reminder into a countdown, which is the thing being avoided here. */
-body.fx-on:not([data-fx="rolig"]) #call-ring.ring-cue {
-  animation: ringCueSwell 0.9s ease-out;
-  transform-origin: 50% 50%;
-}
-@keyframes ringCueSwell {
-  0%   { transform: scale(1); }
-  35%  { transform: scale(calc(1 + 0.010 * var(--fx-amp))); }
-  100% { transform: scale(1); }
-}
+   The embers themselves live in #fx-layer, in screen space, so there is no
+   CSS for them here — see the fuse emitter in the countdown section of the
+   script. The ring's own stroke never changes colour: escalating it turns a
+   reminder into a countdown, which is the opposite of the job. */
 
 /* Host is past due. Not an alarm — the opposite: the ring backs off and
    waits, so a late call reads as "still coming" rather than as a countdown
@@ -3503,7 +3489,9 @@ function serverNow() { return Date.now() + _serverOffset; }
 let _ringTimers  = [];
 let _ringCycleId = null;   // game|callIndex of the cycle currently drawn
 
-const RING_PHASES = ['ring-cue', 'ring-overdue', 'ring-hit'];
+// The ring has no "getting close" state any more — the fuse carries that.
+// These are the two things it still needs to be able to say.
+const RING_PHASES = ['ring-overdue', 'ring-hit'];
 
 function clearRingTimers() {
   _ringTimers.forEach(clearTimeout);
@@ -3518,6 +3506,7 @@ function ringPhase(cls) {
 
 function hideCallRing() {
   if (_ringAnim) { try { _ringAnim.cancel(); } catch (e) {} _ringAnim = null; }
+  stopFuse();
   clearRingTimers();
   _ringKey = null;
   _ringCycleId = null;
@@ -3600,6 +3589,137 @@ function ringCue() {
   fxHaptic(12);
 }
 
+// ── The fuse ───────────────────────────────────────────────────
+// The ring's leading edge is treated as a burning point that throws a few
+// embers as it travels. Nothing is drawn at the point itself — the sparks
+// are the only thing marking it, which is the whole reason this reads as a
+// line being consumed rather than as a marker sliding along a track.
+//
+// Driven by an interval rather than rAF, and positioned from the clock
+// rather than from the ring's animation: one getPointAtLength every 160ms
+// is nothing, whereas a per-frame read of an animating SVG path would force
+// layout on every frame of a 45-second countdown.
+
+const FUSE_STEP = 160;   // ms between emissions
+
+let _fuseTimer = null;
+let _fuseCycle = null;   // { from, to, callAt, dur }
+let _fuseParity = 0;     // lets Rolig emit on every other step
+
+function stopFuse() {
+  if (_fuseTimer) { clearInterval(_fuseTimer); _fuseTimer = null; }
+  _fuseCycle = null;
+}
+
+function startFuse(from, to, callAt, dur) {
+  stopFuse();
+  if (!fxEnabled()) return;
+  _fuseCycle = { from, to, callAt, dur };
+  _fuseParity = 0;
+  _fuseTimer = setInterval(fuseEmit, FUSE_STEP);
+}
+
+// Where the line currently ends, in viewport coordinates, plus the outward
+// direction at that point. The drawn arc always runs [0, L - offset], so
+// (L - offset) is the burning point for both directions of travel.
+function fuseTip(offset) {
+  const rect = document.getElementById('call-ring-rect');
+  if (!rect || !_ringLen) return null;
+  const m = rect.getScreenCTM();
+  if (!m) return null;
+  const at = s => {
+    const p = rect.getPointAtLength(Math.max(0, Math.min(_ringLen, s)));
+    return { x: m.a * p.x + m.c * p.y + m.e, y: m.b * p.x + m.d * p.y + m.f };
+  };
+
+  const s = _ringLen - offset;
+  let here, back, fwd;
+  try { here = at(s); back = at(s - 1); fwd = at(s + 1); }
+  catch (e) { return null; }
+
+  // Outward normal, taken from the path's own tangent. An earlier version
+  // used centre -> point instead, on the theory that a rounded rectangle is
+  // close enough — it isn't. On a tall sheet the ring is far from square, and
+  // on the long vertical edges that shortcut is out by up to 60 degrees, which
+  // sends embers skidding ALONG the line instead of off it. Three
+  // getPointAtLength calls six times a second is not worth being wrong about.
+  const tx = fwd.x - back.x, ty = fwd.y - back.y;
+  const tl = Math.hypot(tx, ty) || 1;
+  let nx = ty / tl, ny = -tx / tl;
+  // Two normals per tangent; keep whichever points away from the middle.
+  const box = rect.getBoundingClientRect();
+  const cx = box.left + box.width / 2;
+  const cy = box.top + box.height / 2;
+  if (nx * (here.x - cx) + ny * (here.y - cy) < 0) { nx = -nx; ny = -ny; }
+
+  return { x: here.x, y: here.y, nx, ny };
+}
+
+function fuseEmit() {
+  if (!_fuseCycle) { stopFuse(); return; }
+  const svg = document.getElementById('call-ring');
+  if (!svg || !svg.classList.contains('on') || !fxEnabled()) { stopFuse(); return; }
+  // Nothing to see and nothing to spend: a backgrounded tab keeps the
+  // interval alive (throttled) but must not pile up embers nobody watched.
+  if (document.hidden) return;
+
+  const { from, to, callAt, dur } = _fuseCycle;
+  const elapsed = serverNow() - callAt;
+  if (!(elapsed >= 0) || elapsed >= dur) { stopFuse(); return; }
+
+  const offset = from + (to - from) * (elapsed / dur);
+  const tip = fuseTip(offset);
+  if (!tip) return;
+
+  _fuseParity++;
+  // Rolig halves the rate rather than changing the look — the fuse is
+  // already the quiet option, so the calm level just wants less of it.
+  if (fxLevel() === 'rolig' && (_fuseParity % 2)) return;
+
+  // The last stretch gets slightly busier. This is the only escalation left
+  // in the ring, and it stays inside the metaphor: a fuse burning down does
+  // spit a bit more as it goes, and it never becomes a different colour or
+  // a different rhythm.
+  const hot = (dur - elapsed) <= ringCueLead(dur);
+  const count = hot ? 2 : 1;
+  const colors = hot
+    ? ['#fff2cf', '#ffd98a', '#ffb347']
+    : ['#ffd98a', '#ffb347', '#e3a53a'];
+
+  for (let i = 0; i < count; i++) fuseEmber(tip, colors, hot);
+}
+
+function fuseEmber(tip, colors, hot) {
+  const amp = fxAmp();
+  const size = (1.8 + Math.random() * 1.6) * (hot ? 1.15 : 1);
+  const p = document.createElement('i');
+  p.className = 'fx-part fx-round';
+  p.style.width = p.style.height = size.toFixed(1) + 'px';
+  p.style.background = colors[(Math.random() * colors.length) | 0];
+  p.style.left = (tip.x - size / 2) + 'px';
+  p.style.top  = (tip.y - size / 2) + 'px';
+  p.style.opacity = '0';
+  const life = 420 + Math.random() * 380;
+  fxSpawn(p, life + 120);
+
+  // Drift outward from the ring, with a spread either side of the normal so
+  // the stream never looks like a single straight jet, plus enough gravity
+  // that the embers fall away rather than simply stopping.
+  const spread = (Math.random() - 0.5) * 1.1;
+  const dirX = tip.nx + spread * -tip.ny;
+  const dirY = tip.ny + spread *  tip.nx;
+  const speed = (7 + Math.random() * 14) * amp;
+  const gx = dirX * speed;
+  const gy = dirY * speed + (10 + Math.random() * 16);
+
+  p.animate([
+    { transform: 'translate(0,0) scale(1)', opacity: hot ? 0.9 : 0.75 },
+    { transform: `translate(${(gx * 0.55).toFixed(1)}px, ${(gy * 0.45).toFixed(1)}px) scale(0.8)`,
+      opacity: 0.5, offset: 0.55 },
+    { transform: `translate(${gx.toFixed(1)}px, ${gy.toFixed(1)}px) scale(0.2)`, opacity: 0 },
+  ], { duration: life, easing: 'cubic-bezier(0.25,0.6,0.45,1)', fill: 'forwards' });
+}
+
 function applyCallRing(callAt, callIndex) {
   const svg  = document.getElementById('call-ring');
   const rect = document.getElementById('call-ring-rect');
@@ -3651,6 +3771,7 @@ function applyCallRing(callAt, callIndex) {
   // give, and it used to just sit there looking finished.
   if (elapsed >= dur) {
     rect.style.strokeDashoffset = to;
+    stopFuse();                       // burnt out; nothing left to throw
     if (fxEnabled()) ringPhase('ring-overdue');
     return;
   }
@@ -3667,14 +3788,14 @@ function applyCallRing(callAt, callIndex) {
     // animating. Still conveys roughly where the cycle stands.
   }
 
-  if (!fxEnabled()) return;
+  if (!fxEnabled()) { stopFuse(); return; }
 
-  // ── The cue ──
-  // Scheduled from `remaining`, never from whatever is currently showing, so
-  // a phone joining mid-cycle lands in the right state: if the lead time has
-  // already passed it cues immediately rather than replaying the wait.
+  // Light the fuse. It positions itself from the same clock the ring
+  // animation uses, so a phone joining mid-cycle picks up the burning point
+  // wherever it actually is rather than starting over.
+  startFuse(from, to, callAt || (serverNow() - elapsed), dur);
+
   const remaining = dur - elapsed;
-  const lead = ringCueLead(dur);
 
   // A new call restarting the cycle is the one beat in the loop that had no
   // feedback at all — the ring simply teleported back to full.
@@ -3682,14 +3803,17 @@ function applyCallRing(callAt, callIndex) {
     fxOneShot(svg, 'ring-hit', 520);
   }
 
-  const enterCue = () => { ringPhase('ring-cue'); ringCue(); };
+  // One soft note shortly before the call. The fuse carries the visual side
+  // on its own, so this is the whole of the audible heads-up — and if the
+  // lead has already passed it fires now rather than replaying the wait.
+  const lead = ringCueLead(dur);
   if (remaining > lead) {
-    _ringTimers.push(setTimeout(enterCue, remaining - lead));
+    _ringTimers.push(setTimeout(ringCue, remaining - lead));
   } else {
-    enterCue();
+    ringCue();
   }
-  // The ring holds the cue look until the call lands; if the host is late it
-  // hands over to the overdue state instead of sitting there mid-gesture.
+  // Fuse reaches the end and the call hasn't come: hand over to the overdue
+  // state rather than leaving a dead ring at full or empty.
   _ringTimers.push(setTimeout(() => ringPhase('ring-overdue'), remaining));
 }
 
