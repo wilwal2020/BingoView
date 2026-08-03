@@ -1247,6 +1247,20 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
 #paper-canvas-wrap.fx-arriving > .paper-toolbar,
 #paper-canvas-wrap.fx-arriving > #paper-header { display: none; }
 
+/* …and the same for everything outside the panel. The sheet panel is only
+   ever the slice left over after the name field, the two tab rows and the
+   code bar have taken theirs — which is why the block sat in the middle
+   third of the screen with the top of the app visible above it and the
+   bottom below. All of it is out for the duration, so the block has the
+   screen.
+   !important because these are toggled through inline display, which would
+   otherwise win. */
+body.fx-arrival #user-name-row,
+body.fx-arrival #block-tabs,
+body.fx-arrival #game-tabs,
+body.fx-arrival #rekke-buttons,
+body.fx-arrival #phone-code-display { display: none !important; }
+
 /* ── 11 ── Tension. A row one number away already pulses; this puts a
    beacon on the specific squares you still need, so "you are close" and
    "these are the numbers" are two different signals rather than one.
@@ -3612,9 +3626,34 @@ let _fxPendingArrival = null;
 // sheet-swap animations down while the papers are flying in under their own.
 let _fxArrivalTouring = false;
 
+// The session chrome arrives in its own time: "Manuell trykking", "Markér
+// nye", the code bar and the rekke label are all put up by connectPhone once
+// its verification comes back, and the rekke banner waits on the host's first
+// state push after that. Deal the papers before any of that lands and it all
+// pops in afterwards, shoving the sheet around — so the tour waits to be told
+// the session has settled.
+let _fxArrivalReady = false;
+let _fxArrivalReadyTimer = null;
+
 function fxQueueArrival(blockIdx) {
   if (blockIdx == null || blockIdx < 0) return;
   _fxPendingArrival = blockIdx;
+  _fxArrivalReady = false;
+  clearTimeout(_fxArrivalReadyTimer);
+  // Safety net. A host that never answers must not strand the user on an
+  // empty block forever — deal the papers anyway and let the chrome catch up.
+  _fxArrivalReadyTimer = setTimeout(fxArrivalSettled, 7000);
+}
+
+// Called once the connection has resolved, either way. The short delay is for
+// the first Firebase snapshot that follows it, which is what fills in the
+// rekke banner and the stats row.
+function fxArrivalSettled() {
+  clearTimeout(_fxArrivalReadyTimer);
+  _fxArrivalReadyTimer = null;
+  if (_fxArrivalReady) return;
+  _fxArrivalReady = true;
+  setTimeout(fxFlushArrival, 260);
 }
 
 // Make the empty block fill the sheet area, and put that area on screen.
@@ -3651,6 +3690,7 @@ function fxFillPaperArea() {
 // playing to nobody.
 function fxFlushArrival() {
   if (_fxPendingArrival == null) return;
+  if (!_fxArrivalReady) return;
   if (document.getElementById('phone-connect').style.display !== 'none') return;
   const blockIdx = _fxPendingArrival;
   // Cleared BEFORE the tour runs: the tour switches papers, every switch
@@ -3698,6 +3738,7 @@ function fxArrivalTour(blockIdx) {
     _fxArrivalTouring = false;
     tray.classList.remove('fx-awaiting');
     tray.style.removeProperty('min-height');
+    document.body.classList.remove('fx-arrival');
     if (scroller) {
       scroller.classList.remove('fx-arriving');
       scroller.scrollTop = 0;
@@ -3718,13 +3759,15 @@ function fxArrivalTour(blockIdx) {
   // clips the panel, so the measurement below gets the whole area and nothing
   // above the block can resize under it mid-flight.
   if (scroller) scroller.classList.add('fx-arriving');
+  document.body.classList.add('fx-arrival');
   fxFillPaperArea();
 
   // Stage the stack. Absolutely positioned so they overlap in place and the
   // tray keeps the height fx-awaiting gives it; z-index ascending so each
   // lands on top of the one before, leaving paper 1 face up at the end.
   tray.innerHTML = '';
-  const STAGE_PROPS = ['position', 'left', 'right', 'top', 'opacity', 'will-change', 'z-index'];
+  const STAGE_PROPS = ['position', 'left', 'right', 'top', 'opacity', 'will-change',
+                       'z-index', '--strip-id-bg', '--strip-id-fg'];
   const staged = order.map((g, i) => {
     const el = gs[g].paperEl;
     // Set property by property rather than through cssText: these are the
@@ -3737,6 +3780,14 @@ function fxArrivalTour(blockIdx) {
     el.style.opacity = '0';
     el.style.willChange = 'transform, opacity';
     el.style.zIndex = String(i + 1);
+    // Each paper wears its OWN game's colours. renderActiveGame sets these on
+    // #digital-paper, which every sheet inherits from — fine when only one is
+    // ever in there, but the whole stack is now, so all four came out in the
+    // active game's palette. Set on the sheet, each overrides for its own
+    // subtree.
+    const def = getGame(g) || {};
+    el.style.setProperty('--strip-id-bg', def.stripIdBg || '#f0ede4');
+    el.style.setProperty('--strip-id-fg', def.stripIdFg || '#333');
     tray.appendChild(el);
     return el;
   });
@@ -5179,7 +5230,9 @@ function receiveSharedPaper(result, codeParam) {
   const code = (result.code || codeParam || '').trim().toUpperCase();
   if (code) {
     document.getElementById("phone-code-input").value = code;
-    setTimeout(() => connectPhone(code), 300);
+    // .finally, not .then: a host that's gone still has to release the tour,
+    // or the papers sit staged behind an empty block until the safety net.
+    setTimeout(() => { connectPhone(code).finally(fxArrivalSettled); }, 300);
   } else {
     // Papers but no session to join — the user does have to type a code, so
     // the form has to come back. initPhone hides it for share links on the
@@ -6566,6 +6619,7 @@ function renderActiveGame() {
   // the moment it appears, not only once the papers start arriving.
   const canvasWrap = document.getElementById('paper-canvas-wrap');
   if (canvasWrap) canvasWrap.classList.toggle('fx-arriving', awaiting);
+  document.body.classList.toggle('fx-arrival', awaiting);
 
   // Mid-tour the tray holds every paper at once, staged and animating. A swap
   // here would tear that stack out from under the flights — and this function
