@@ -2965,6 +2965,14 @@ let _fxCatchUpTimer = null;
 // tapOwnsFeedback guard in renderCells for the pop half of it.
 let _fxUserAction = false;
 
+// Set while a bulk re-sync rewrites what counts as confirmed — switching
+// manual play off marks every outstanding host number at once. renderCells
+// suppresses the call FX inside manualPlayMode on its own, but by the time
+// that re-sync renders, the mode flag has already been cleared, so it needs
+// saying explicitly or the last number the host called pops as if it had just
+// arrived. See the bookkeeping guard in renderCells.
+let _fxSilentSync = false;
+
 function fxBeginCatchUp(ms = 3000) {
   _fxCatchUp = true;
   clearTimeout(_fxCatchUpTimer);
@@ -6479,7 +6487,17 @@ function renderCells(gameKey) {
   // suppressing it there would leave the tap feeling dead.
   const tapOwnsFeedback = _fxUserAction && fxEnabled();
 
-  if (latestChanged && lastNum && !tapOwnsFeedback) {
+  // In manual play the newest CONFIRMED number is what renderCells paints as
+  // "latest", and confirming is not calling. When the user leaves a number
+  // untapped, the next call sweeps it up via autoConfirmManualPlay — so the
+  // sheet would announce "new number!" over a number the host called a while
+  // ago and the user never entered. Bookkeeping, not an event.
+  //
+  // Excludes the user's own tap, which is handled by tapOwnsFeedback just
+  // above and must keep its cellPop when the FX layer is off.
+  const bookkeeping = (manualPlayMode || _fxSilentSync) && !_fxUserAction;
+
+  if (latestChanged && lastNum && !tapOwnsFeedback && !bookkeeping) {
     const newLatestEl = gs.cellMap[lastNum];
     if (newLatestEl) {
       // Force a reflow so the animation actually restarts from 0
@@ -6638,7 +6656,9 @@ function setManualPlayMode(on) {
     });
   }
 
-  getGameIds().forEach(g => renderCells(g));
+  _fxSilentSync = true;
+  try { getGameIds().forEach(g => renderCells(g)); }
+  finally { _fxSilentSync = false; }
   saveSession();
 }
 
