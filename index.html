@@ -1261,6 +1261,33 @@ body.fx-arrival #game-tabs,
 body.fx-arrival #rekke-buttons,
 body.fx-arrival #phone-code-display { display: none !important; }
 
+/* Coming back out of it. `display` can't be transitioned, so all of this
+   reclaims its space in a single frame no matter what — but it can arrive
+   rather than simply appear. Everything above the sheet drops in from
+   slightly high, the code bar comes up from below, and the block shrinks to
+   its own size underneath them (see land(), which eases min-height for the
+   same 420ms). Layout-driven and therefore a terrible idea during the
+   flights; by this point nothing else is running. */
+body.fx-settling #user-name-row,
+body.fx-settling #block-tabs,
+body.fx-settling #game-tabs,
+body.fx-settling #rekke-buttons,
+body.fx-settling .paper-toolbar,
+body.fx-settling #paper-header {
+  animation: fxChromeIn 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+body.fx-settling #phone-code-display {
+  animation: fxChromeUp 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes fxChromeIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes fxChromeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
 /* ── 11 ── Tension. A row one number away already pulses; this puts a
    beacon on the specific squares you still need, so "you are close" and
    "these are the numbers" are two different signals rather than one.
@@ -3701,6 +3728,7 @@ function fxFlushArrival() {
 
 const FX_ARRIVE_FLIGHT = 720;   // one paper's flight
 const FX_ARRIVE_LEAD   = 140;   // breathing room before the first one starts
+const FX_SETTLE        = 420;   // block shrinking back / chrome coming in
 
 // A block arrives as a set of papers — one per game — and this deals them in
 // the way you'd be handed them: paper 4, 3, 2, 1, ending on the one about to
@@ -3735,15 +3763,41 @@ function fxArrivalTour(blockIdx) {
   // Every exit goes through here: drop the staging, put the toolbar and stats
   // row back, and hand over to a normal render.
   const land = () => {
+    // The height the block has been holding. Kept so it can be eased down
+    // rather than dropped, which is what made the hand-back feel abrupt.
+    const heldHeight = tray.style.minHeight;
+
     _fxArrivalTouring = false;
     tray.classList.remove('fx-awaiting');
-    tray.style.removeProperty('min-height');
     document.body.classList.remove('fx-arrival');
     if (scroller) {
       scroller.classList.remove('fx-arriving');
       scroller.scrollTop = 0;
     }
     if (first) selectActiveGame(first);
+
+    tray.style.removeProperty('min-height');
+    if (!heldHeight || !fxEnabled()) return;
+
+    // Ease the block down from the height it was holding instead of dropping
+    // it in one frame, with the chrome fading in over the top (fx-settling).
+    // Animated rather than transitioned: the resting style is already correct
+    // above, so there is no inline height left behind to clean up, and a
+    // transition would need the old value to still be applied first.
+    //
+    // This one IS layout-driven, unlike the flights — but by now nothing else
+    // is running, and it is the difference between the page arriving and the
+    // page snapping into existence.
+    document.body.classList.add('fx-settling');
+    // A gentle standard ease, NOT the springy curve the flights use: that one
+    // front-loads so hard that 95% of the collapse is over by the halfway
+    // point, which reads as a snap followed by a crawl. This one is roughly
+    // half done at half time, which is what "settling" looks like.
+    tray.animate(
+      [{ minHeight: heldHeight }, { minHeight: '0px' }],
+      { duration: FX_SETTLE, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }
+    );
+    setTimeout(() => document.body.classList.remove('fx-settling'), FX_SETTLE + 60);
   };
   if (!first) { land(); return; }
   if (!fxEnabled()) { land(); return; }
@@ -3794,58 +3848,68 @@ function fxArrivalTour(blockIdx) {
   // One forced layout for the whole stack, paid here instead of once per beat.
   void tray.offsetWidth;
 
-  // Each paper's entry vector is its own, so a run reads as papers being
-  // tossed onto a table rather than one animation repeated. Distances are
-  // absolute rather than dial-scaled, like every other whole-sheet movement.
-  staged.forEach((el, i) => {
-    const side = Math.random() < 0.5 ? -1 : 1;
-    const x = Math.round(side * (155 + Math.random() * 110));
-    const y = Math.round((Math.random() - 0.45) * 210);
-    const r = side * (11 + Math.random() * 17);
-    el.animate([
-      { opacity: 0, transform: `translate(${x}px, ${y}px) rotate(${r.toFixed(1)}deg) scale(0.7)` },
-      { opacity: 1, offset: 0.18 },
-      // Still loose: a third of the way home and still turning. Without this
-      // beat the paper travels a straight line and reads as a slide.
-      { transform: `translate(${(x * 0.36).toFixed(0)}px, ${(y * 0.36).toFixed(0)}px) ` +
-                   `rotate(${(r * 0.45).toFixed(1)}deg) scale(0.88)`, offset: 0.46 },
-      // Through the mark and a shade past square, so it lands rather than stops.
-      { transform: `translate(${(-x * 0.045).toFixed(0)}px, ${(-y * 0.045).toFixed(0)}px) ` +
-                   `rotate(${(-r * 0.07).toFixed(1)}deg) scale(1.025)`, offset: 0.8 },
-      { opacity: 1, transform: 'none' },
-    ], {
-      duration: FX_ARRIVE_FLIGHT,
-      delay: FX_ARRIVE_LEAD + i * step,
-      easing: 'cubic-bezier(0.18, 0.86, 0.24, 1)',
-      fill: 'both',
+  const launch = () => {
+    // Each paper's entry vector is its own, so a run reads as papers being
+    // tossed onto a table rather than one animation repeated. Distances are
+    // absolute rather than dial-scaled, like every other whole-sheet movement.
+    staged.forEach((el, i) => {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const x = Math.round(side * (155 + Math.random() * 110));
+      const y = Math.round((Math.random() - 0.45) * 210);
+      const r = side * (11 + Math.random() * 17);
+      el.animate([
+        { opacity: 0, transform: `translate(${x}px, ${y}px) rotate(${r.toFixed(1)}deg) scale(0.7)` },
+        { opacity: 1, offset: 0.18 },
+        // Still loose: a third of the way home and still turning. Without this
+        // beat the paper travels a straight line and reads as a slide.
+        { transform: `translate(${(x * 0.36).toFixed(0)}px, ${(y * 0.36).toFixed(0)}px) ` +
+                     `rotate(${(r * 0.45).toFixed(1)}deg) scale(0.88)`, offset: 0.46 },
+        // Through the mark and a shade past square, so it lands rather than stops.
+        { transform: `translate(${(-x * 0.045).toFixed(0)}px, ${(-y * 0.045).toFixed(0)}px) ` +
+                     `rotate(${(-r * 0.07).toFixed(1)}deg) scale(1.025)`, offset: 0.8 },
+        { opacity: 1, transform: 'none' },
+      ], {
+        duration: FX_ARRIVE_FLIGHT,
+        delay: FX_ARRIVE_LEAD + i * step,
+        easing: 'cubic-bezier(0.18, 0.86, 0.24, 1)',
+        fill: 'both',
+      });
     });
-  });
 
-  // Sound and haptics still need timers, but a few oscillators cost nothing
-  // next to a game switch — and crucially the flights are already scheduled,
-  // so a late timer can't stall one.
-  order.forEach((g, i) => {
+    // Sound and haptics still need timers, but a few oscillators cost nothing
+    // next to a game switch — and crucially the flights are already scheduled,
+    // so a late timer can't stall one.
+    order.forEach((g, i) => {
+      setTimeout(() => {
+        sfxSlotSheet(i);
+        fxHaptic(14);
+      }, FX_ARRIVE_LEAD + i * step + FX_ARRIVE_FLIGHT * 0.72);
+    });
+
+    // Tear the staging down and hand over to a single real render. No confetti:
+    // this is a delivery, not a win, and the sheet coming to rest in front of
+    // you is the whole reward.
     setTimeout(() => {
-      sfxSlotSheet(i);
-      fxHaptic(14);
-    }, FX_ARRIVE_LEAD + i * step + FX_ARRIVE_FLIGHT * 0.72);
-  });
+      staged.forEach(el => {
+        el.getAnimations().forEach(a => a.cancel());
+        STAGE_PROPS.forEach(p => el.style.removeProperty(p));
+      });
+      land();
+      audioUnlock().then(sfxShareArrive);
+      fxHaptic([26, 70, 26, 60, 40]);
+      const sheet = tray.firstElementChild;
+      const rect  = sheet && fxRectOf(sheet);
+      if (rect) fxShockwave(rect, { color: 'rgba(232,178,74,0.9)', spread: 1.4, dur: 620, width: 2 });
+    }, FX_ARRIVE_LEAD + (order.length - 1) * step + FX_ARRIVE_FLIGHT + 40);
+  };
 
-  // Tear the staging down and hand over to a single real render. No confetti:
-  // this is a delivery, not a win, and the sheet coming to rest in front of
-  // you is the whole reward.
-  setTimeout(() => {
-    staged.forEach(el => {
-      el.getAnimations().forEach(a => a.cancel());
-      STAGE_PROPS.forEach(p => el.style.removeProperty(p));
-    });
-    land();
-    audioUnlock().then(sfxShareArrive);
-    fxHaptic([26, 70, 26, 60, 40]);
-    const sheet = tray.firstElementChild;
-    const rect  = sheet && fxRectOf(sheet);
-    if (rect) fxShockwave(rect, { color: 'rgba(232,178,74,0.9)', spread: 1.4, dur: 620, width: 2 });
-  }, FX_ARRIVE_LEAD + (order.length - 1) * step + FX_ARRIVE_FLIGHT + 40);
+  // Held two frames. Staging four sheets puts ~650 cells into the document at
+  // once, and laying them out is only half the cost — the browser still has to
+  // RASTER them, which on a phone is the slowest thing in this sequence.
+  // Launching in the same frame meant the first flight was racing that raster,
+  // which is the chop right as the link opens. Two frames guarantees the stack
+  // has been through a full layout-and-paint before anything starts moving.
+  requestAnimationFrame(() => requestAnimationFrame(launch));
 }
 
 // Sheet-level win reaction. Kept separate from the per-strip banner slam so
