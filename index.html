@@ -1229,12 +1229,23 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
    coming in from somewhere different, and scheduling them up front with
    delays is what keeps the main thread out of the sequence. */
 
-/* #paper-canvas-wrap is the scroll container, and a transformed element still
-   contributes to scrollable overflow — so papers flying in from a couple of
-   hundred pixels out hand it scroll range it doesn't normally have, and the
-   view drifts under them. Clipped for the length of the tour, which is also
-   the one stretch where nobody should be scrolling anyway. */
+/* The arriving state of the sheet panel.
+
+   The toolbar and the stats row are taken out for the duration rather than
+   scrolled past. Scrolling them off was fragile in both directions: the
+   toolbar is EMPTY until the connection settles — "Manuell trykking" and
+   "Markér nye" are hidden until then and .paper-toolbar collapses to nothing
+   while they are — so it grows by ~78px partway through the arrival and
+   shoves everything down. Removing them means the block simply owns the whole
+   panel from the first frame, with no scroll to get right and nothing above it
+   left to change size.
+
+   overflow is clipped too: a transformed element still contributes to
+   scrollable overflow, so papers flying in from a couple of hundred pixels
+   out would otherwise hand the panel scroll range it doesn't normally have. */
 #paper-canvas-wrap.fx-arriving { overflow: hidden; }
+#paper-canvas-wrap.fx-arriving > .paper-toolbar,
+#paper-canvas-wrap.fx-arriving > #paper-header { display: none; }
 
 /* ── 11 ── Tension. A row one number away already pulses; this puts a
    beacon on the specific squares you still need, so "you are close" and
@@ -3614,51 +3625,23 @@ function fxQueueArrival(blockIdx) {
 // those two rows live INSIDE the scroll container, above the block, so
 // scrolling them off is what gives the block the whole screen instead of the
 // half below them.
+// Sized rather than left to vh: mobile browser chrome makes vh unreliable.
+// With .fx-arriving on the panel the toolbar and stats row are out of the
+// flow, so the block's share of it is simply the whole thing — no scrolling
+// involved, and nothing above it that can change height underneath it.
 function fxFillPaperArea() {
   const tray     = document.getElementById('digital-paper');
   const scroller = document.getElementById('paper-canvas-wrap');
   if (!tray || !scroller) return;
-
-  // The FULL visible height, not the part below the toolbar: the scroll below
-  // pushes the toolbar off, so the block ends up owning all of it. Sizing to
-  // the gap under the toolbar and then scrolling that toolbar away leaves the
-  // block short by exactly the toolbar's height.
-  const avail = scroller.clientHeight - 10;
+  // clientHeight includes the panel's padding, so subtract it rather than
+  // guessing a margin — get this wrong and the block overhangs by those few
+  // pixels, which is enough to leave the panel scrollable during the arrival.
+  const cs   = getComputedStyle(scroller);
+  const pad  = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+  const avail = scroller.clientHeight - pad;
   if (avail < 200) return;          // not laid out yet, or no room worth using
   tray.style.minHeight = Math.round(avail) + 'px';
-
-  // Sized first, then scrolled — the scroll needs the extra height to exist
-  // before there is anywhere to scroll to.
-  fxPinPaperArea();
-  fxWatchPaperArea();
-}
-
-// Straight to the bottom rather than to a measured offset. With the block
-// sized to fill, the only thing above it is the toolbar and the stats row, so
-// the bottom of the scroll IS the block sitting at the top — same result, but
-// it can't be computed wrong and it doesn't care what those rows measure.
-function fxPinPaperArea() {
-  const scroller = document.getElementById('paper-canvas-wrap');
-  if (scroller) scroller.scrollTop = scroller.scrollHeight;
-}
-
-// …and the rows above the block DO change height, a second or so in. The
-// "Manuell trykking" and "Markér nye" buttons are hidden until the connection
-// settles, and .paper-toolbar collapses to nothing while both are — so the
-// moment they appear the block gets pushed down and the whole thing looks
-// like it scrolled on its own. Re-pin whenever that happens.
-let _fxPaperAreaObs = null;
-function fxWatchPaperArea() {
-  if (typeof ResizeObserver !== 'function') return;
-  fxUnwatchPaperArea();
-  const targets = [document.querySelector('.paper-toolbar'),
-                   document.getElementById('paper-header')].filter(Boolean);
-  if (!targets.length) return;
-  _fxPaperAreaObs = new ResizeObserver(() => fxPinPaperArea());
-  targets.forEach(t => _fxPaperAreaObs.observe(t));
-}
-function fxUnwatchPaperArea() {
-  if (_fxPaperAreaObs) { _fxPaperAreaObs.disconnect(); _fxPaperAreaObs = null; }
+  scroller.scrollTop = 0;
 }
 
 // Called from renderActiveGame once a sheet is actually in the DOM. The
@@ -3709,24 +3692,17 @@ function fxArrivalTour(blockIdx) {
 
   const scroller = document.getElementById('paper-canvas-wrap');
 
-  // Every exit goes through here: drop the staging, put the real paper up.
+  // Every exit goes through here: drop the staging, put the toolbar and stats
+  // row back, and hand over to a normal render.
   const land = () => {
     _fxArrivalTouring = false;
-    fxUnwatchPaperArea();
     tray.classList.remove('fx-awaiting');
     tray.style.removeProperty('min-height');
-    if (scroller) scroller.classList.remove('fx-arriving');
-    if (first) selectActiveGame(first);
-    // The placeholder height is gone, so the sheet is back to its own size.
-    // Keep the block at the top of the view rather than wherever dropping
-    // that height left the scroll — but only as far as the content allows,
-    // which the browser clamps for us.
-    const ringWrap = document.getElementById('paper-ring-wrap');
-    if (scroller && ringWrap) {
-      const delta = ringWrap.getBoundingClientRect().top
-                  - scroller.getBoundingClientRect().top;
-      if (delta > 1) scroller.scrollTop += delta;
+    if (scroller) {
+      scroller.classList.remove('fx-arriving');
+      scroller.scrollTop = 0;
     }
+    if (first) selectActiveGame(first);
   };
   if (!first) { land(); return; }
   if (!fxEnabled()) { land(); return; }
@@ -3738,8 +3714,9 @@ function fxArrivalTour(blockIdx) {
 
   _fxArrivalTouring = true;
   tray.classList.add('fx-awaiting');   // holds the block open under the stack
-  // Clip the scroller before anything moves: the flights would otherwise hand
-  // it scroll range and the view would drift under them.
+  // Before anything moves: takes the toolbar and stats row out of the flow and
+  // clips the panel, so the measurement below gets the whole area and nothing
+  // above the block can resize under it mid-flight.
   if (scroller) scroller.classList.add('fx-arriving');
   fxFillPaperArea();
 
@@ -6584,6 +6561,11 @@ function renderActiveGame() {
   // render again underneath us.
   const awaiting = (_fxPendingArrival != null) || _fxArrivalTouring;
   wrap.classList.toggle('fx-awaiting', awaiting);
+  // Same treatment for the panel around it, and for the whole waiting period
+  // rather than just the tour: the empty block should cover the screen from
+  // the moment it appears, not only once the papers start arriving.
+  const canvasWrap = document.getElementById('paper-canvas-wrap');
+  if (canvasWrap) canvasWrap.classList.toggle('fx-arriving', awaiting);
 
   // Mid-tour the tray holds every paper at once, staged and animating. A swap
   // here would tear that stack out from under the flights — and this function
