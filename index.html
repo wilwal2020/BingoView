@@ -1212,24 +1212,24 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
    padding, and the arrival reads as the page assembling itself rather than as
    papers filling a block that was already sitting there waiting. Not scoped
    to body.fx-on: an empty screen while the link loads is wrong whether or not
-   the user wants animations. */
+   the user wants animations.
+
+   No transition on the height: min-height is a layout property, so easing it
+   re-runs layout on every frame — and it would do so at exactly the moment
+   the first paper is in flight. It snaps instead, under the paper landing on
+   top of it. */
 #digital-paper.fx-awaiting {
   min-height: 46vh;
-  transition: min-height 0.3s ease;
 }
 
 /* ── 10c ── Arrival. A paper from a shared block flying into place. Run
    once per game in the block, one after another — see fxArrivalTour.
 
-   This sits on the SHEET (gs.paperEl), not on #digital-paper. During a paper
-   switch the outgoing ghost is a sibling inside that container, so animating
-   the container would carry the ghost along with the incoming sheet and the
-   flip would go nowhere. On the sheet itself, the two move independently:
-   the old one flips away while the new one slides in past it.
-
-   The strips are busy with fx-flip-in on their own timeline, and their
-   transforms compose with this one — the sheet arrives as a whole while its
-   strips are still turning over inside it.
+   This sits on the SHEET (gs.paperEl), not on #digital-paper: the container
+   is the empty block being filled and has to stay put, and it's also where
+   the flip ghost lives, so moving it would carry that along too. The tour
+   suppresses the flip anyway — the flight is the whole transition — so
+   nothing else is moving while this runs.
 
    The entry vector is set per paper from JS (--fx-in-x/y/r) rather than
    fixed here, so a run of them reads as papers being tossed onto a table
@@ -1239,6 +1239,11 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
    moving reads as the paper being thrown rather than placed. */
 body.fx-on #digital-paper > .fx-slot-in {
   animation: fxSlotIn 0.72s cubic-bezier(0.18, 0.86, 0.24, 1);
+  /* A sheet is ~160 bordered cells. Transforming that subtree without a layer
+     of its own repaints all of it every frame; promoting it means one raster
+     and then pure compositing. Scoped to the transient class on purpose — a
+     permanent will-change would keep the layer alive for the whole game. */
+  will-change: transform, opacity;
 }
 @keyframes fxSlotIn {
   /* Somewhere else entirely, turned over and small. */
@@ -1264,16 +1269,26 @@ body.fx-on #digital-paper > .fx-slot-in {
 }
 
 /* The brass confirmation that it landed. On the wrapper, which is the same
-   size and shape and animates nothing else — a glow needs no transform, so
-   it can't fight the slide or the flip. */
-body.fx-on #paper-ring-wrap.fx-arrive-glow {
-  animation: fxArriveGlow 0.62s ease-out;
+   size and shape and takes no transform, so it can't fight the flight.
+
+   The shadow is STATIC and only opacity animates. Animating box-shadow
+   itself re-paints a large blurred area every frame, on the main thread,
+   for the whole 0.62s a paper is in the air — opacity on a pseudo-element
+   is a compositor property and costs nothing. (fxTense above still animates
+   its shadow, but that one is a slow ambient pulse with nothing else
+   running; this fires during the busiest moment in the app.) */
+body.fx-on #paper-ring-wrap.fx-arrive-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
   border-radius: 6px;
+  box-shadow: 0 0 calc(34px * var(--fx-glow)) calc(5px * var(--fx-glow)) rgba(232,178,74,0.72);
+  animation: fxArriveGlow 0.62s ease-out;
 }
 @keyframes fxArriveGlow {
-  0%   { box-shadow: 0 0 0 0 rgba(232,178,74,0); }
-  38%  { box-shadow: 0 0 calc(34px * var(--fx-glow)) calc(5px * var(--fx-glow)) rgba(232,178,74,0.72); }
-  100% { box-shadow: 0 0 0 0 rgba(232,178,74,0); }
+  0%, 100% { opacity: 0; }
+  38%      { opacity: 1; }
 }
 
 /* ── 11 ── Tension. A row one number away already pulses; this puts a
@@ -3724,7 +3739,13 @@ function fxArrivalTour(blockIdx) {
       // often already active. The flight runs either way — it plays on
       // whatever sheet is standing there, so paper 1 still arrives.
       if (activeGame !== g) selectActiveGame(g);
-      fxSlotSheetIn();
+      // Waited out rather than started here. That swap rebuilds ~160 cells,
+      // re-runs renderCells and repaints every tab row, and fxOneShot then
+      // forces a synchronous reflow on top of it. Starting the flight in the
+      // same task means its opening frames are dropped while all that
+      // finishes, which is exactly what the stutter was. Two frames: the
+      // first lands before the swap is painted, the second after it.
+      requestAnimationFrame(() => requestAnimationFrame(fxSlotSheetIn));
       sfxSlotSheet(i);
       fxHaptic(14);
     }, i * step);
