@@ -1254,20 +1254,32 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
    bottom below. All of it is out for the duration, so the block has the
    screen.
    !important because these are toggled through inline display, which would
-   otherwise win. */
+   otherwise win.
+
+   The header's action row goes with them, so opening a link shows the
+   wordmark and nothing else. It used to come up as "BingoView / ⚙ / Navn",
+   then swap "Navn" out for "Nullstill alt" and "Del ark" the moment the block
+   loaded — three states before the papers had even started arriving. One
+   state now: the wordmark, then the whole app at the end. */
+body.fx-arrival .hdr-row-actions,
 body.fx-arrival #user-name-row,
 body.fx-arrival #block-tabs,
 body.fx-arrival #game-tabs,
 body.fx-arrival #rekke-buttons,
 body.fx-arrival #phone-code-display { display: none !important; }
 
-/* Coming back out of it. `display` can't be transitioned, so all of this
-   reclaims its space in a single frame no matter what — but it can arrive
-   rather than simply appear. Everything above the sheet drops in from
-   slightly high, the code bar comes up from below, and the block shrinks to
-   its own size underneath them (see land(), which eases min-height for the
-   same 420ms). Layout-driven and therefore a terrible idea during the
-   flights; by this point nothing else is running. */
+/* Coming back out of it. `display` can't be transitioned, so every one of
+   these reclaims its space in a single frame no matter what — and the block
+   loses its held height in that same frame. That layout change is deliberately
+   NOT animated: easing the block's height down looked right but re-laid out
+   ~650 cells on every frame for the whole 420ms, which is what made the
+   hand-back lag.
+
+   So the layout lands at once and only transform and opacity move over it.
+   Everything above the sheet drops in from slightly high, the code bar comes
+   up from below, and the sheet itself settles down into the space it just gave
+   up. All compositor work, over a layout that has already finished. */
+body.fx-settling .hdr-row-actions,
 body.fx-settling #user-name-row,
 body.fx-settling #block-tabs,
 body.fx-settling #game-tabs,
@@ -1279,6 +1291,11 @@ body.fx-settling #paper-header {
 body.fx-settling #phone-code-display {
   animation: fxChromeUp 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
+/* The sheet's share of it. Starts high — where it was a frame ago, before the
+   chrome above pushed it down — and comes to rest. */
+body.fx-settling #paper-ring-wrap {
+  animation: fxSheetSettle 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
 @keyframes fxChromeIn {
   from { opacity: 0; transform: translateY(-10px); }
   to   { opacity: 1; transform: none; }
@@ -1286,6 +1303,10 @@ body.fx-settling #phone-code-display {
 @keyframes fxChromeUp {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: none; }
+}
+@keyframes fxSheetSettle {
+  from { transform: translateY(-22px); }
+  to   { transform: none; }
 }
 
 /* ── 11 ── Tension. A row one number away already pulses; this puts a
@@ -3652,6 +3673,11 @@ let _fxPendingArrival = null;
 // True for the length of the tour. renderActiveGame reads it to stand its own
 // sheet-swap animations down while the papers are flying in under their own.
 let _fxArrivalTouring = false;
+// Set the instant we know this page load came from a share link, which is
+// before the payload has even been decoded. The stripped-back header depends
+// on being in place for the FIRST paint — anything later and the user still
+// catches the app assembling itself.
+let _fxShareEntry = false;
 
 // The session chrome arrives in its own time: "Manuell trykking", "Markér
 // nye", the code bar and the rekke label are all put up by connectPhone once
@@ -3768,6 +3794,7 @@ function fxArrivalTour(blockIdx) {
     const heldHeight = tray.style.minHeight;
 
     _fxArrivalTouring = false;
+    _fxShareEntry = false;
     tray.classList.remove('fx-awaiting');
     document.body.classList.remove('fx-arrival');
     if (scroller) {
@@ -3779,24 +3806,13 @@ function fxArrivalTour(blockIdx) {
     tray.style.removeProperty('min-height');
     if (!heldHeight || !fxEnabled()) return;
 
-    // Ease the block down from the height it was holding instead of dropping
-    // it in one frame, with the chrome fading in over the top (fx-settling).
-    // Animated rather than transitioned: the resting style is already correct
-    // above, so there is no inline height left behind to clean up, and a
-    // transition would need the old value to still be applied first.
-    //
-    // This one IS layout-driven, unlike the flights — but by now nothing else
-    // is running, and it is the difference between the page arriving and the
-    // page snapping into existence.
+    // The layout change itself happens in this one frame and is NOT animated.
+    // Easing the block's height down looked right but cost a full re-layout of
+    // ~650 cells on every frame for the whole 420ms, which is what made the
+    // hand-back lag. The smoothing is transform and opacity only — the chrome
+    // slides in, the sheet settles down into the space it just lost — so the
+    // compositor carries it and the layout is already finished underneath.
     document.body.classList.add('fx-settling');
-    // A gentle standard ease, NOT the springy curve the flights use: that one
-    // front-loads so hard that 95% of the collapse is over by the halfway
-    // point, which reads as a snap followed by a crawl. This one is roughly
-    // half done at half time, which is what "settling" looks like.
-    tray.animate(
-      [{ minHeight: heldHeight }, { minHeight: '0px' }],
-      { duration: FX_SETTLE, easing: 'cubic-bezier(0.4, 0, 0.2, 1)' }
-    );
     setTimeout(() => document.body.classList.remove('fx-settling'), FX_SETTLE + 60);
   };
   if (!first) { land(); return; }
@@ -5453,6 +5469,9 @@ function syncStartBackBtn() {
 // ends here — without it the user is left staring at a blank screen with
 // nothing to tap.
 function showConnectScreen() {
+  // Giving up on the share link also means giving the app its header back.
+  _fxShareEntry = false;
+  document.body.classList.remove('fx-arrival');
   document.getElementById("phone-connect").style.display = "flex";
 }
 
@@ -5470,6 +5489,12 @@ function initPhone() {
   const _q = new URLSearchParams(location.search);
   const _shareEntry = !!(_q.get('p') || _q.get('s')) && !!(_q.get('c') || _q.get('s'));
   document.getElementById("phone-connect").style.display = _shareEntry ? "none" : "flex";
+  // Strip the header down to the wordmark from the first paint. Set here
+  // rather than when the arrival is queued: the payload still has to be
+  // decoded (or fetched, for a ?s= link), and everything that happens in
+  // between was showing through.
+  _fxShareEntry = _shareEntry;
+  if (_shareEntry) document.body.classList.add('fx-arrival');
   document.getElementById("phone-upload").style.display  = "none";
 
   // Wordmark → start screen, and the back link out of it
@@ -6683,7 +6708,10 @@ function renderActiveGame() {
   // the moment it appears, not only once the papers start arriving.
   const canvasWrap = document.getElementById('paper-canvas-wrap');
   if (canvasWrap) canvasWrap.classList.toggle('fx-arriving', awaiting);
-  document.body.classList.toggle('fx-arrival', awaiting);
+  // _fxShareEntry keeps it on through the gap between the page loading and the
+  // arrival being queued — a render landing in that window would otherwise
+  // hand the header back for a moment.
+  document.body.classList.toggle('fx-arrival', awaiting || _fxShareEntry);
 
   // Mid-tour the tray holds every paper at once, staged and animating. A swap
   // here would tear that stack out from under the flights — and this function
