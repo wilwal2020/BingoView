@@ -1207,35 +1207,51 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
   100% { transform: translateY(0); }
 }
 
-/* ── 10c ── Arrival. Someone shared a block with you and it just landed.
-   The strips deal themselves in on their own timeline (fxDealIn, which runs
-   on .strip), so this is free to take the sheet as a whole: it settles up
-   out of a slight shrink, overshoots once, and holds.
+/* ── 10c ── Arrival. A block someone shared with you sliding into place.
+   Used one block at a time when a link brings several — see fxArrivalTour.
 
-   Split across two elements for the same reason the tension ring is: an
-   element gets one `animation`, and #digital-paper's slot is spoken for by
-   every impact in the game. The paper takes the movement; the wrapper, which
-   is the same size and shape, takes the glow — so neither has to wait for
-   the other and an arriving sheet can still react to a call landing on it.
+   This sits on the SHEET (gs.paperEl), not on #digital-paper. During a block
+   switch the outgoing ghost is a sibling inside that container, so animating
+   the container would carry the ghost along with the incoming sheet and the
+   flip would go nowhere. On the sheet itself, the two move independently:
+   the old one flips away while the new one slides in past it.
+
+   The strips are busy with fx-flip-in on their own timeline, and their
+   transforms compose with this one — the sheet arrives as a whole while its
+   strips are still turning over inside it.
 
    Rides --fx-sheet-amp rather than the dial, like the punch and the shake:
-   this moves the whole sheet, and at Maks a bigger version of it reads as
-   the paper lurching rather than arriving. */
-body.fx-on #digital-paper.fx-arrive {
-  animation: fxArrive 0.85s cubic-bezier(0.22, 1, 0.3, 1);
+   at Maks a bigger version of this reads as the paper being thrown rather
+   than placed. */
+body.fx-on #digital-paper > .fx-slot-in {
+  animation: fxSlotIn 0.62s cubic-bezier(0.2, 1.05, 0.3, 1);
 }
-@keyframes fxArrive {
-  0%   { transform: scale(calc(1 - 0.06  * var(--fx-sheet-amp))); }
-  55%  { transform: scale(calc(1 + 0.015 * var(--fx-sheet-amp))); }
-  100% { transform: scale(1); }
+@keyframes fxSlotIn {
+  0% {
+    opacity: 0;
+    transform: translateX(calc(58px * var(--fx-sheet-amp)))
+               scale(calc(1 - 0.05 * var(--fx-sheet-amp)));
+  }
+  /* Past centre and back: a sheet that stops dead on its mark reads as a
+     slide transition, not as something being slotted home. */
+  62% {
+    opacity: 1;
+    transform: translateX(calc(-7px * var(--fx-sheet-amp)))
+               scale(calc(1 + 0.012 * var(--fx-sheet-amp)));
+  }
+  100% { opacity: 1; transform: none; }
 }
+
+/* The brass confirmation that it landed. On the wrapper, which is the same
+   size and shape and animates nothing else — a glow needs no transform, so
+   it can't fight the slide or the flip. */
 body.fx-on #paper-ring-wrap.fx-arrive-glow {
-  animation: fxArriveGlow 0.85s ease-out;
+  animation: fxArriveGlow 0.62s ease-out;
   border-radius: 6px;
 }
 @keyframes fxArriveGlow {
   0%   { box-shadow: 0 0 0 0 rgba(232,178,74,0); }
-  30%  { box-shadow: 0 0 calc(38px * var(--fx-glow)) calc(6px * var(--fx-glow)) rgba(232,178,74,0.72); }
+  38%  { box-shadow: 0 0 calc(34px * var(--fx-glow)) calc(5px * var(--fx-glow)) rgba(232,178,74,0.72); }
   100% { box-shadow: 0 0 0 0 rgba(232,178,74,0); }
 }
 
@@ -2940,6 +2956,16 @@ function sfxWin() {
 // four notes walking up out of it and a tone left ringing on top. Four notes
 // where the win has six, and no noise shimmer to close — a gift showing up
 // must never sound bigger than a bingo.
+// One block landing during the arrival tour. Walks up the pentatonic ladder
+// with the block index, so four blocks slotting in is an ascending figure
+// rather than the same click four times — the ear counts them for you.
+function sfxSlotBlock(i) {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    sfxNoise(ctx, { dur: 0.05, gain: 0.07, freq: 1400 });
+    sfxTone(ctx, { freq: sfxStep(i), type: 'triangle', dur: 0.22, gain: 0.12 });
+  } catch (e) {}
+}
 function sfxShareArrive() {
   const ctx = sfxReady(); if (!ctx) return;
   try {
@@ -3463,7 +3489,10 @@ function fxMakeFlipGhost(wrap) {
   // transient FX classes it copied. Left on, a call that landed a moment ago
   // would replay its pop on the ghost mid-flip, and a hot row would carry
   // its pulse — the outgoing sheet re-animating as it leaves.
-  g.querySelectorAll('.latest-fresh, [class*="fx-"]').forEach(el => {
+  // The clone root too, not just its descendants — querySelectorAll skips it,
+  // and the sheet itself carries fx-slot-in during an arrival. A ghost made
+  // while that was still on would slide away as it flipped.
+  [g, ...g.querySelectorAll('.latest-fresh, [class*="fx-"]')].forEach(el => {
     el.classList.remove('latest-fresh');
     Array.from(el.classList).forEach(c => {
       if (c.indexOf('fx-') === 0) el.classList.remove(c);
@@ -3579,32 +3608,96 @@ function fxConfetti(count) {
 // Deliberately smaller than a win. The reference point is the row-complete
 // cascade, not the bingo: receiving a block is a good moment, but the game
 // hasn't been won and the flourish must not claim it has.
-function fxSharedArrival(blockCount) {
-  // Both self-guard on the user's settings — sfxReady wants sound AND the FX
-  // layer, fxHaptic wants vibration AND the FX layer — so neither needs the
-  // check repeated here. The unlock is worth attempting even though this
-  // usually runs on a cold page load with no gesture behind it: browsers that
-  // allow it get the sound, the rest silently skip it and the visual carries.
-  audioUnlock().then(sfxShareArrive);
-  fxHaptic([26, 70, 26, 60, 40]);
-  if (!fxEnabled()) return;
+// The arrival can't play when the blocks land: the import happens on a cold
+// page load with the code-entry screen still covering everything, and the
+// paper only surfaces once connectPhone gets through. So it's parked here and
+// flushed by renderActiveGame, the same way a win on an off-screen sheet is.
+let _fxPendingArrival = null;
 
-  const paper = document.getElementById('digital-paper');
+function fxQueueArrival(blockIdxs) {
+  if (!blockIdxs || !blockIdxs.length) return;
+  _fxPendingArrival = blockIdxs.slice();
+}
+
+// Called from renderActiveGame once a sheet is actually in the DOM. The
+// connect screen is checked too: renderActiveGame shows #phone-paper without
+// hiding #phone-connect, and while both are up the code entry is what fills
+// the screen — which is exactly how the first version of this ended up
+// playing to nobody.
+function fxFlushArrival() {
+  if (!_fxPendingArrival) return;
+  if (document.getElementById('phone-connect').style.display !== 'none') return;
+  const idxs = _fxPendingArrival;
+  // Cleared BEFORE the tour runs: the tour switches blocks, every switch
+  // re-enters renderActiveGame, and a flag still set here would recurse.
+  _fxPendingArrival = null;
+  fxArrivalTour(idxs);
+}
+
+// One block sliding home.
+function fxSlotBlockIn() {
+  const sheet = document.getElementById('digital-paper').firstElementChild;
   const wrap  = document.getElementById('paper-ring-wrap');
-  if (paper) fxOneShot(paper, 'fx-arrive', 900);
-  if (wrap)  fxOneShot(wrap, 'fx-arrive-glow', 900);
+  if (sheet) fxOneShot(sheet, 'fx-slot-in', 640);
+  if (wrap)  fxOneShot(wrap, 'fx-arrive-glow', 640);
+}
 
-  // Held back until the sheet has finished assembling itself. Strips deal in
-  // over 0.42s at a 55ms stagger, so a six-strip block is still landing at
-  // ~0.7s; confetti thrown over that reads as two things happening at once
-  // rather than one thing arriving. More of it for a multi-block link, since
-  // that genuinely is a bigger delivery.
-  const amp = fxAmp();
+// Walk the blocks that just arrived, one at a time — 1, 2, 3, 4 — then come
+// back to the first, which is the one about to be played. Showing the user
+// what they received beats dropping them on the last block of a link with no
+// idea the other three exist.
+function fxArrivalTour(idxs) {
+  const live = idxs.filter(i => i >= 0 && i < blocks.length);
+  const first = live[0];
+  if (first == null) return;
+
+  // With animations off there is no tour, but the destination still matters:
+  // put them on the block they'll actually play rather than wherever the
+  // import happened to leave the pointer.
+  if (!fxEnabled()) {
+    if (first !== activeBlockIdx) switchBlock(first);
+    return;
+  }
+
+  // Tight enough that four blocks don't outstay their welcome, loose enough
+  // that each one is a separate event rather than a blur. A link carrying a
+  // pile of blocks tightens further so the tour stays under a few seconds.
+  const step = live.length > 4 ? 520 : 760;
+
+  live.forEach((idx, i) => {
+    setTimeout(() => {
+      if (idx >= blocks.length) return;
+      if (idx !== activeBlockIdx) switchBlock(idx);
+      fxSlotBlockIn();
+      sfxSlotBlock(i);
+      fxHaptic(14);
+    }, i * step);
+  });
+
+  // Back to the first. Skipped for a single block — it's already there, and
+  // re-slotting the same sheet reads as a stutter rather than a return.
+  const backAt = live.length * step;
+  if (live.length > 1) {
+    setTimeout(() => {
+      if (first < blocks.length && first !== activeBlockIdx) {
+        switchBlock(first);
+        fxSlotBlockIn();
+      }
+    }, backAt);
+  }
+
+  // The payoff, on the sheet they'll play — after the last movement has
+  // settled, so it reads as the end of one sequence rather than a competing
+  // event. More confetti for a multi-block link: that is a bigger delivery.
   setTimeout(() => {
-    fxConfetti(Math.round((blockCount > 1 ? 70 : 45) * amp));
-    const r = paper && fxRectOf(paper);
+    audioUnlock().then(sfxShareArrive);
+    fxHaptic([26, 70, 26, 60, 40]);
+    const amp = fxAmp();
+    fxConfetti(Math.round((live.length > 1 ? 70 : 45) * amp));
+    const sheet = document.getElementById('digital-paper').firstElementChild;
+    const r = sheet && fxRectOf(sheet);
     if (r) fxShockwave(r, { color: 'rgba(232,178,74,0.9)', spread: 1.5, dur: 620, width: 2 });
-  }, 480);
+  }, backAt + (live.length > 1 ? 360 : 300));
 }
 
 // Sheet-level win reaction. Kept separate from the per-strip banner slam so
@@ -4910,6 +5003,10 @@ function receiveSharedPaper(result, codeParam) {
   // it just never made it in front of the person receiving the block, and
   // "3 ark fra Kari" is a different experience from "3 ark".
   let senderName = '';
+  // Which slots the arriving blocks landed in, in link order. The tour walks
+  // these; recorded here because a block can either reuse the empty active
+  // slot or be pushed on the end, so the indices aren't contiguous by luck.
+  const arrivedIdxs = [];
   result.blocks.forEach((entry) => {
     const games = entry.games || {};
     const gameCount = Object.keys(games).length;
@@ -4941,6 +5038,7 @@ function receiveSharedPaper(result, codeParam) {
       activeBlockIdx = blocks.length - 1;
       gameState = blocks[activeBlockIdx].gameState;
     }
+    arrivedIdxs.push(activeBlockIdx);
     Object.entries(games).forEach(([g, strips]) => {
       if (gameState[g] && Array.isArray(strips)) {
         gameState[g].strips = strips;
@@ -4975,7 +5073,7 @@ function receiveSharedPaper(result, codeParam) {
         ? `${importedBlocks} blokker (${totalArk} ark)${from} importert!`
         : `${totalArk} ark${from} importert!`,
       'ok', 4000);
-    fxSharedArrival(importedBlocks);
+    fxQueueArrival(arrivedIdxs);
   }
   // Auto-connect if session code provided
   const code = (result.code || codeParam || '').trim().toUpperCase();
@@ -6370,6 +6468,10 @@ function renderActiveGame() {
     // A win that landed while this sheet was off-screen (auto-switch to the
     // winning game) gets its celebration now that the paper is in the DOM.
     fxFlushPending();
+    // Likewise a shared block that arrived while the connect screen was still
+    // covering the app — which is every share link, since the import runs
+    // before connectPhone has surfaced the paper.
+    fxFlushArrival();
   } else {
     document.getElementById("phone-paper").style.display  = "none";
     document.getElementById("phone-upload").style.display = "flex";
