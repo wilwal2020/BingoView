@@ -1229,28 +1229,12 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
    coming in from somewhere different, and scheduling them up front with
    delays is what keeps the main thread out of the sequence. */
 
-/* The brass confirmation that it landed. On the wrapper, which is the same
-   size and shape and takes no transform, so it can't fight the flight.
-
-   The shadow is STATIC and only opacity animates. Animating box-shadow
-   itself re-paints a large blurred area every frame, on the main thread,
-   for the whole 0.62s a paper is in the air — opacity on a pseudo-element
-   is a compositor property and costs nothing. (fxTense above still animates
-   its shadow, but that one is a slow ambient pulse with nothing else
-   running; this fires during the busiest moment in the app.) */
-body.fx-on #paper-ring-wrap.fx-arrive-glow::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: 6px;
-  box-shadow: 0 0 calc(34px * var(--fx-glow)) calc(5px * var(--fx-glow)) rgba(232,178,74,0.72);
-  animation: fxArriveGlow 0.62s ease-out;
-}
-@keyframes fxArriveGlow {
-  0%, 100% { opacity: 0; }
-  38%      { opacity: 1; }
-}
+/* #paper-canvas-wrap is the scroll container, and a transformed element still
+   contributes to scrollable overflow — so papers flying in from a couple of
+   hundred pixels out hand it scroll range it doesn't normally have, and the
+   view drifts under them. Clipped for the length of the tour, which is also
+   the one stretch where nobody should be scrolling anyway. */
+#paper-canvas-wrap.fx-arriving { overflow: hidden; }
 
 /* ── 11 ── Tension. A row one number away already pulses; this puts a
    beacon on the specific squares you still need, so "you are close" and
@@ -3622,6 +3606,34 @@ function fxQueueArrival(blockIdx) {
   _fxPendingArrival = blockIdx;
 }
 
+// Make the empty block fill the sheet area, and put that area on screen.
+//
+// Measured rather than set in vh: mobile browser chrome makes vh unreliable,
+// and the toolbar and stats row above the sheet take a different bite out of
+// the space on every phone. The scroll is the other half of the same idea —
+// those two rows live INSIDE the scroll container, above the block, so
+// scrolling them off is what gives the block the whole screen instead of the
+// half below them.
+function fxFillPaperArea() {
+  const tray     = document.getElementById('digital-paper');
+  const scroller = document.getElementById('paper-canvas-wrap');
+  const ringWrap = document.getElementById('paper-ring-wrap');
+  if (!tray || !scroller || !ringWrap) return;
+
+  // The FULL visible height, not the part below the toolbar: the scroll below
+  // pushes the toolbar off, so the block ends up owning all of it. Sizing to
+  // the gap under the toolbar and then scrolling that toolbar away leaves the
+  // block short by exactly the toolbar's height.
+  const avail = scroller.clientHeight - 10;
+  if (avail < 200) return;          // not laid out yet, or no room worth using
+  tray.style.minHeight = Math.round(avail) + 'px';
+
+  // Sized first, then scrolled — the scroll needs the extra height to exist
+  // before there is anywhere to scroll to.
+  const delta = ringWrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+  if (delta > 1) scroller.scrollTop += delta;
+}
+
 // Called from renderActiveGame once a sheet is actually in the DOM. The
 // connect screen is checked too: renderActiveGame shows #phone-paper without
 // hiding #phone-connect, and while both are up the code entry is what fills
@@ -3668,10 +3680,14 @@ function fxArrivalTour(blockIdx) {
   const first = games[0];
   const tray  = document.getElementById('digital-paper');
 
+  const scroller = document.getElementById('paper-canvas-wrap');
+
   // Every exit goes through here: drop the staging, put the real paper up.
   const land = () => {
     _fxArrivalTouring = false;
     tray.classList.remove('fx-awaiting');
+    tray.style.removeProperty('min-height');
+    if (scroller) scroller.classList.remove('fx-arriving');
     if (first) selectActiveGame(first);
   };
   if (!first) { land(); return; }
@@ -3684,6 +3700,10 @@ function fxArrivalTour(blockIdx) {
 
   _fxArrivalTouring = true;
   tray.classList.add('fx-awaiting');   // holds the block open under the stack
+  // Clip the scroller before anything moves: the flights would otherwise hand
+  // it scroll range and the view would drift under them.
+  if (scroller) scroller.classList.add('fx-arriving');
+  fxFillPaperArea();
 
   // Stage the stack. Absolutely positioned so they overlap in place and the
   // tray keeps the height fx-awaiting gives it; z-index ascending so each
@@ -3735,15 +3755,13 @@ function fxArrivalTour(blockIdx) {
     });
   });
 
-  // Sound, haptics and the landing glow still need timers, but a class toggle
-  // and a few oscillators cost nothing next to a game switch — and crucially
-  // the flights are already scheduled, so a late timer can't stall one.
-  const wrap = document.getElementById('paper-ring-wrap');
+  // Sound and haptics still need timers, but a few oscillators cost nothing
+  // next to a game switch — and crucially the flights are already scheduled,
+  // so a late timer can't stall one.
   order.forEach((g, i) => {
     setTimeout(() => {
       sfxSlotSheet(i);
       fxHaptic(14);
-      if (wrap) fxOneShot(wrap, 'fx-arrive-glow', 700);
     }, FX_ARRIVE_LEAD + i * step + FX_ARRIVE_FLIGHT * 0.72);
   });
 
@@ -6582,6 +6600,10 @@ function renderActiveGame() {
     document.getElementById("phone-paper").style.display = "flex";
     // inline-flex, not block: the button lays out an icon beside its label.
     document.getElementById("btn-share-paper").style.display = "inline-flex";
+
+    // Size the waiting block now that #phone-paper is actually displayed —
+    // measured any earlier it would all come back zero.
+    if (awaiting) fxFillPaperArea();
 
     // Re-paint cells (called/latest + manual-play hints/wrong if applicable)
     renderCells(activeGame);
