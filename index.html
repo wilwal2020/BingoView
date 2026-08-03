@@ -1222,51 +1222,12 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
   min-height: 46vh;
 }
 
-/* ── 10c ── Arrival. A paper from a shared block flying into place. Run
-   once per game in the block, one after another — see fxArrivalTour.
-
-   This sits on the SHEET (gs.paperEl), not on #digital-paper: the container
-   is the empty block being filled and has to stay put, and it's also where
-   the flip ghost lives, so moving it would carry that along too. The tour
-   suppresses the flip anyway — the flight is the whole transition — so
-   nothing else is moving while this runs.
-
-   The entry vector is set per paper from JS (--fx-in-x/y/r) rather than
-   fixed here, so a run of them reads as papers being tossed onto a table
-   rather than one animation repeated four times. Those distances are fixed
-   in JS rather than scaled by the intensity dial, for the same reason the
-   punch and the shake are: at Maks, a bigger version of a whole sheet
-   moving reads as the paper being thrown rather than placed. */
-body.fx-on #digital-paper > .fx-slot-in {
-  animation: fxSlotIn 0.72s cubic-bezier(0.18, 0.86, 0.24, 1);
-  /* A sheet is ~160 bordered cells. Transforming that subtree without a layer
-     of its own repaints all of it every frame; promoting it means one raster
-     and then pure compositing. Scoped to the transient class on purpose — a
-     permanent will-change would keep the layer alive for the whole game. */
-  will-change: transform, opacity;
-}
-@keyframes fxSlotIn {
-  /* Somewhere else entirely, turned over and small. */
-  0% {
-    opacity: 0;
-    transform: translate(var(--fx-in-x, 0px), var(--fx-in-y, 0px))
-               rotate(var(--fx-in-r, 0deg)) scale(0.7);
-  }
-  18% { opacity: 1; }
-  /* Still loose: a third of the way home and still turning. This beat is the
-     whole difference between "flying around" and "sliding in from the edge" —
-     without it the paper travels a straight line and reads as a transition. */
-  46% {
-    transform: translate(calc(var(--fx-in-x, 0px) * 0.36), calc(var(--fx-in-y, 0px) * 0.36))
-               rotate(calc(var(--fx-in-r, 0deg) * 0.45)) scale(0.88);
-  }
-  /* Through the mark and a shade past square, so it lands rather than stops. */
-  80% {
-    transform: translate(calc(var(--fx-in-x, 0px) * -0.045), calc(var(--fx-in-y, 0px) * -0.045))
-               rotate(calc(var(--fx-in-r, 0deg) * -0.07)) scale(1.025);
-  }
-  100% { opacity: 1; transform: none; }
-}
+/* ── 10c ── Arrival. The papers flying in are driven from JS via the Web
+   Animations API rather than from a class here — see fxArrivalTour. They are
+   staged all at once and their keyframes carry a per-paper entry vector, so
+   there is nothing for a stylesheet rule to hang on: every one of them is
+   coming in from somewhere different, and scheduling them up front with
+   delays is what keeps the main thread out of the sequence. */
 
 /* The brass confirmation that it landed. On the wrapper, which is the same
    size and shape and takes no transform, so it can't fight the flight.
@@ -3525,9 +3486,9 @@ function fxMakeFlipGhost(wrap) {
   // transient FX classes it copied. Left on, a call that landed a moment ago
   // would replay its pop on the ghost mid-flip, and a hot row would carry
   // its pulse — the outgoing sheet re-animating as it leaves.
-  // The clone root too, not just its descendants — querySelectorAll skips it,
-  // and the sheet itself carries fx-slot-in during an arrival. A ghost made
-  // while that was still on would slide away as it flipped.
+  // The clone root too, not just its descendants: querySelectorAll skips it,
+  // so a class sitting on the sheet element itself would ride along and the
+  // ghost would re-animate as it turned away.
   [g, ...g.querySelectorAll('.latest-fresh, [class*="fx-"]')].forEach(el => {
     el.classList.remove('latest-fresh');
     Array.from(el.classList).forEach(c => {
@@ -3676,32 +3637,26 @@ function fxFlushArrival() {
   fxArrivalTour(blockIdx);
 }
 
-// One paper flying home. The direction it comes in from is randomised per
-// paper — a fixed vector would have all four arrive along the same line,
-// which is a transition rather than a delivery. Sides alternate at random so
-// consecutive papers rarely enter from the same edge.
-//
-// Distances are absolute rather than dial-scaled: this is a whole sheet
-// moving, and the same reasoning that pinned the punch and the shake to a
-// fixed amplitude applies here.
-function fxSlotSheetIn() {
-  const sheet = document.getElementById('digital-paper').firstElementChild;
-  const wrap  = document.getElementById('paper-ring-wrap');
-  if (sheet) {
-    const side = Math.random() < 0.5 ? -1 : 1;
-    sheet.style.setProperty('--fx-in-x', Math.round(side * (155 + Math.random() * 110)) + 'px');
-    sheet.style.setProperty('--fx-in-y', Math.round((Math.random() - 0.45) * 210) + 'px');
-    sheet.style.setProperty('--fx-in-r', (side * (11 + Math.random() * 17)).toFixed(1) + 'deg');
-    fxOneShot(sheet, 'fx-slot-in', 760);
-  }
-  if (wrap)  fxOneShot(wrap, 'fx-arrive-glow', 760);
-}
+const FX_ARRIVE_FLIGHT = 720;   // one paper's flight
+const FX_ARRIVE_LEAD   = 140;   // breathing room before the first one starts
 
 // A block arrives as a set of papers — one per game — and this deals them in
-// the way you'd be handed them: paper 1, 2, 3, 4, then back to the first,
-// which is the one about to be played. Landing on whichever game the import
-// happened to leave the pointer on tells the user nothing about what they
-// actually received.
+// the way you'd be handed them: paper 4, 3, 2, 1, ending on the one about to
+// be played.
+//
+// Every paper is staged in the tray UP FRONT and the whole sequence is handed
+// to the compositor in one go. The obvious way to write this — switch to each
+// game on a timer and animate whatever sheet lands — is what made it choppy:
+// each beat ran a real game switch, and a real game switch is a DOM swap plus
+// renderCells over every square plus a full rebuild of both tab rows plus the
+// countdown ring's geometry. That is a big chunk of main-thread work landing
+// four times in the middle of an animation, and no amount of deferring it by
+// a frame changes the fact that it is happening at all.
+//
+// None of it is needed to show someone what they were sent. The sheets are
+// already built; stacking them and animating transforms means one layout pass
+// for the lot, then nothing on the main thread until the tour is over and the
+// real game switch happens once.
 function fxArrivalTour(blockIdx) {
   // The tour is about the papers, but they live in a block, so make sure
   // we're standing on the right one before reading them off it.
@@ -3709,63 +3664,104 @@ function fxArrivalTour(blockIdx) {
     switchBlock(blockIdx);
   }
   const gs = gameState;
-  const games = getGameIds().filter(g => gs[g] && gs[g].strips);
+  const games = getGameIds().filter(g => gs[g] && gs[g].strips && gs[g].paperEl);
   const first = games[0];
-  if (!first) return;
+  const tray  = document.getElementById('digital-paper');
 
-  // With animations off there is no tour, but the destination still matters:
-  // put them on the paper they'll actually play.
-  if (!fxEnabled()) {
-    if (activeGame !== first) selectActiveGame(first);
-    return;
-  }
+  // Every exit goes through here: drop the staging, put the real paper up.
+  const land = () => {
+    _fxArrivalTouring = false;
+    tray.classList.remove('fx-awaiting');
+    if (first) selectActiveGame(first);
+  };
+  if (!first) { land(); return; }
+  if (!fxEnabled()) { land(); return; }
 
-  // Counted DOWN — paper 4, 3, 2, 1. Dealing upward meant finishing on
-  // whichever paper happened to be last and then jumping back to the front,
-  // and that jump read as a correction rather than as part of the sequence.
-  // Counting down, the last one to land is the one the game starts on.
+  // Counted DOWN — paper 4, 3, 2, 1 — so the last to land is the one the game
+  // starts on, rather than finishing on an arbitrary paper and jumping back.
   const order = games.slice().reverse();
-
-  // Tight enough that four papers don't outstay their welcome, loose enough
-  // that each is a separate event rather than a blur. A block carrying more
-  // than that tightens further so the tour stays under a few seconds.
-  const step = order.length > 4 ? 520 : 780;
+  const step  = order.length > 4 ? 520 : 780;
 
   _fxArrivalTouring = true;
+  tray.classList.add('fx-awaiting');   // holds the block open under the stack
 
-  order.forEach((g, i) => {
-    setTimeout(() => {
-      // Only a genuine change swaps the sheet; the paper the tour ends on is
-      // often already active. The flight runs either way — it plays on
-      // whatever sheet is standing there, so paper 1 still arrives.
-      if (activeGame !== g) selectActiveGame(g);
-      // Waited out rather than started here. That swap rebuilds ~160 cells,
-      // re-runs renderCells and repaints every tab row, and fxOneShot then
-      // forces a synchronous reflow on top of it. Starting the flight in the
-      // same task means its opening frames are dropped while all that
-      // finishes, which is exactly what the stutter was. Two frames: the
-      // first lands before the swap is painted, the second after it.
-      requestAnimationFrame(() => requestAnimationFrame(fxSlotSheetIn));
-      sfxSlotSheet(i);
-      fxHaptic(14);
-    }, i * step);
+  // Stage the stack. Absolutely positioned so they overlap in place and the
+  // tray keeps the height fx-awaiting gives it; z-index ascending so each
+  // lands on top of the one before, leaving paper 1 face up at the end.
+  tray.innerHTML = '';
+  const STAGE_PROPS = ['position', 'left', 'right', 'top', 'opacity', 'will-change', 'z-index'];
+  const staged = order.map((g, i) => {
+    const el = gs[g].paperEl;
+    // Set property by property rather than through cssText: these are the
+    // real sheet elements the game goes on using, and cssText would wipe
+    // anything already inline on them.
+    el.style.position = 'absolute';
+    el.style.left = '0';
+    el.style.right = '0';
+    el.style.top = '0';
+    el.style.opacity = '0';
+    el.style.willChange = 'transform, opacity';
+    el.style.zIndex = String(i + 1);
+    tray.appendChild(el);
+    return el;
+  });
+  // One forced layout for the whole stack, paid here instead of once per beat.
+  void tray.offsetWidth;
+
+  // Each paper's entry vector is its own, so a run reads as papers being
+  // tossed onto a table rather than one animation repeated. Distances are
+  // absolute rather than dial-scaled, like every other whole-sheet movement.
+  staged.forEach((el, i) => {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = Math.round(side * (155 + Math.random() * 110));
+    const y = Math.round((Math.random() - 0.45) * 210);
+    const r = side * (11 + Math.random() * 17);
+    el.animate([
+      { opacity: 0, transform: `translate(${x}px, ${y}px) rotate(${r.toFixed(1)}deg) scale(0.7)` },
+      { opacity: 1, offset: 0.18 },
+      // Still loose: a third of the way home and still turning. Without this
+      // beat the paper travels a straight line and reads as a slide.
+      { transform: `translate(${(x * 0.36).toFixed(0)}px, ${(y * 0.36).toFixed(0)}px) ` +
+                   `rotate(${(r * 0.45).toFixed(1)}deg) scale(0.88)`, offset: 0.46 },
+      // Through the mark and a shade past square, so it lands rather than stops.
+      { transform: `translate(${(-x * 0.045).toFixed(0)}px, ${(-y * 0.045).toFixed(0)}px) ` +
+                   `rotate(${(-r * 0.07).toFixed(1)}deg) scale(1.025)`, offset: 0.8 },
+      { opacity: 1, transform: 'none' },
+    ], {
+      duration: FX_ARRIVE_FLIGHT,
+      delay: FX_ARRIVE_LEAD + i * step,
+      easing: 'cubic-bezier(0.18, 0.86, 0.24, 1)',
+      fill: 'both',
+    });
   });
 
-  // Rides the last paper landing rather than arriving as a beat of its own:
-  // by then paper 1 is on screen and the sequence is already over. No
-  // confetti — this is a delivery, not a win, and the sheet coming to rest
-  // in front of you is the whole reward.
+  // Sound, haptics and the landing glow still need timers, but a class toggle
+  // and a few oscillators cost nothing next to a game switch — and crucially
+  // the flights are already scheduled, so a late timer can't stall one.
+  const wrap = document.getElementById('paper-ring-wrap');
+  order.forEach((g, i) => {
+    setTimeout(() => {
+      sfxSlotSheet(i);
+      fxHaptic(14);
+      if (wrap) fxOneShot(wrap, 'fx-arrive-glow', 700);
+    }, FX_ARRIVE_LEAD + i * step + FX_ARRIVE_FLIGHT * 0.72);
+  });
+
+  // Tear the staging down and hand over to a single real render. No confetti:
+  // this is a delivery, not a win, and the sheet coming to rest in front of
+  // you is the whole reward.
   setTimeout(() => {
-    // Released here, not in the last step: the flight is still settling, and
-    // a re-render arriving in that window would otherwise flip the sheet out
-    // from under it.
-    _fxArrivalTouring = false;
+    staged.forEach(el => {
+      el.getAnimations().forEach(a => a.cancel());
+      STAGE_PROPS.forEach(p => el.style.removeProperty(p));
+    });
+    land();
     audioUnlock().then(sfxShareArrive);
     fxHaptic([26, 70, 26, 60, 40]);
-    const sheet = document.getElementById('digital-paper').firstElementChild;
-    const r = sheet && fxRectOf(sheet);
-    if (r) fxShockwave(r, { color: 'rgba(232,178,74,0.9)', spread: 1.4, dur: 620, width: 2 });
-  }, (order.length - 1) * step + 320);
+    const sheet = tray.firstElementChild;
+    const rect  = sheet && fxRectOf(sheet);
+    if (rect) fxShockwave(rect, { color: 'rgba(232,178,74,0.9)', spread: 1.4, dur: 620, width: 2 });
+  }, FX_ARRIVE_LEAD + (order.length - 1) * step + FX_ARRIVE_FLIGHT + 40);
 }
 
 // Sheet-level win reaction. Kept separate from the per-strip banner slam so
@@ -6530,11 +6526,16 @@ function renderActiveGame() {
   // to game 4, spoiling a sequence whose whole point is to count down TO
   // paper 1. Toggled up here, before anything below can flush the arrival and
   // render again underneath us.
-  const awaiting = (_fxPendingArrival != null);
+  const awaiting = (_fxPendingArrival != null) || _fxArrivalTouring;
   wrap.classList.toggle('fx-awaiting', awaiting);
 
+  // Mid-tour the tray holds every paper at once, staged and animating. A swap
+  // here would tear that stack out from under the flights — and this function
+  // runs on plenty of things that keep happening during those three seconds
+  // (a call landing, the connection settling). The tour owns the tray until
+  // it hands back through land().
   const desiredPaper = awaiting ? null : (gs.paperEl || null);
-  if (wrap.firstChild !== desiredPaper) {
+  if (!_fxArrivalTouring && wrap.firstChild !== desiredPaper) {
     // Snapshot the outgoing sheet while it can still be measured. Returns
     // null when there's nothing to turn away from — a first render, or FX
     // off — and that's the signal to deal in instead of flipping.
