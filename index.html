@@ -1207,10 +1207,10 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
   100% { transform: translateY(0); }
 }
 
-/* ── 10c ── Arrival. A block someone shared with you sliding into place.
-   Used one block at a time when a link brings several — see fxArrivalTour.
+/* ── 10c ── Arrival. A paper from a shared block sliding into place. Run
+   once per game in the block, one after another — see fxArrivalTour.
 
-   This sits on the SHEET (gs.paperEl), not on #digital-paper. During a block
+   This sits on the SHEET (gs.paperEl), not on #digital-paper. During a paper
    switch the outgoing ghost is a sibling inside that container, so animating
    the container would carry the ghost along with the incoming sheet and the
    flip would go nowhere. On the sheet itself, the two move independently:
@@ -2956,10 +2956,10 @@ function sfxWin() {
 // four notes walking up out of it and a tone left ringing on top. Four notes
 // where the win has six, and no noise shimmer to close — a gift showing up
 // must never sound bigger than a bingo.
-// One block landing during the arrival tour. Walks up the pentatonic ladder
-// with the block index, so four blocks slotting in is an ascending figure
-// rather than the same click four times — the ear counts them for you.
-function sfxSlotBlock(i) {
+// One paper landing during the arrival tour. Walks up the pentatonic ladder
+// with its position, so four papers slotting in is an ascending figure rather
+// than the same click four times — the ear counts them for you.
+function sfxSlotSheet(i) {
   const ctx = sfxReady(); if (!ctx) return;
   try {
     sfxNoise(ctx, { dur: 0.05, gain: 0.07, freq: 1400 });
@@ -3608,15 +3608,18 @@ function fxConfetti(count) {
 // Deliberately smaller than a win. The reference point is the row-complete
 // cascade, not the bingo: receiving a block is a good moment, but the game
 // hasn't been won and the flourish must not claim it has.
-// The arrival can't play when the blocks land: the import happens on a cold
+// The arrival can't play when the block lands: the import happens on a cold
 // page load with the code-entry screen still covering everything, and the
 // paper only surfaces once connectPhone gets through. So it's parked here and
 // flushed by renderActiveGame, the same way a win on an off-screen sheet is.
+//
+// Holds the block that arrived, not its papers — the games are read off it at
+// tour time so the tour can't be working from a list that has since changed.
 let _fxPendingArrival = null;
 
-function fxQueueArrival(blockIdxs) {
-  if (!blockIdxs || !blockIdxs.length) return;
-  _fxPendingArrival = blockIdxs.slice();
+function fxQueueArrival(blockIdx) {
+  if (blockIdx == null || blockIdx < 0) return;
+  _fxPendingArrival = blockIdx;
 }
 
 // Called from renderActiveGame once a sheet is actually in the DOM. The
@@ -3625,79 +3628,87 @@ function fxQueueArrival(blockIdxs) {
 // the screen — which is exactly how the first version of this ended up
 // playing to nobody.
 function fxFlushArrival() {
-  if (!_fxPendingArrival) return;
+  if (_fxPendingArrival == null) return;
   if (document.getElementById('phone-connect').style.display !== 'none') return;
-  const idxs = _fxPendingArrival;
-  // Cleared BEFORE the tour runs: the tour switches blocks, every switch
+  const blockIdx = _fxPendingArrival;
+  // Cleared BEFORE the tour runs: the tour switches papers, every switch
   // re-enters renderActiveGame, and a flag still set here would recurse.
   _fxPendingArrival = null;
-  fxArrivalTour(idxs);
+  fxArrivalTour(blockIdx);
 }
 
-// One block sliding home.
-function fxSlotBlockIn() {
+// One paper sliding home.
+function fxSlotSheetIn() {
   const sheet = document.getElementById('digital-paper').firstElementChild;
   const wrap  = document.getElementById('paper-ring-wrap');
   if (sheet) fxOneShot(sheet, 'fx-slot-in', 640);
   if (wrap)  fxOneShot(wrap, 'fx-arrive-glow', 640);
 }
 
-// Walk the blocks that just arrived, one at a time — 1, 2, 3, 4 — then come
-// back to the first, which is the one about to be played. Showing the user
-// what they received beats dropping them on the last block of a link with no
-// idea the other three exist.
-function fxArrivalTour(idxs) {
-  const live = idxs.filter(i => i >= 0 && i < blocks.length);
-  const first = live[0];
-  if (first == null) return;
+// A block arrives as a set of papers — one per game — and this deals them in
+// the way you'd be handed them: paper 1, 2, 3, 4, then back to the first,
+// which is the one about to be played. Landing on whichever game the import
+// happened to leave the pointer on tells the user nothing about what they
+// actually received.
+function fxArrivalTour(blockIdx) {
+  // The tour is about the papers, but they live in a block, so make sure
+  // we're standing on the right one before reading them off it.
+  if (blockIdx >= 0 && blockIdx < blocks.length && blockIdx !== activeBlockIdx) {
+    switchBlock(blockIdx);
+  }
+  const gs = gameState;
+  const games = getGameIds().filter(g => gs[g] && gs[g].strips);
+  const first = games[0];
+  if (!first) return;
 
   // With animations off there is no tour, but the destination still matters:
-  // put them on the block they'll actually play rather than wherever the
-  // import happened to leave the pointer.
+  // put them on the paper they'll actually play.
   if (!fxEnabled()) {
-    if (first !== activeBlockIdx) switchBlock(first);
+    if (activeGame !== first) selectActiveGame(first);
     return;
   }
 
-  // Tight enough that four blocks don't outstay their welcome, loose enough
-  // that each one is a separate event rather than a blur. A link carrying a
-  // pile of blocks tightens further so the tour stays under a few seconds.
-  const step = live.length > 4 ? 520 : 760;
+  // Tight enough that four papers don't outstay their welcome, loose enough
+  // that each is a separate event rather than a blur. A block carrying more
+  // than that tightens further so the tour stays under a few seconds.
+  const step = games.length > 4 ? 520 : 760;
 
-  live.forEach((idx, i) => {
+  games.forEach((g, i) => {
     setTimeout(() => {
-      if (idx >= blocks.length) return;
-      if (idx !== activeBlockIdx) switchBlock(idx);
-      fxSlotBlockIn();
-      sfxSlotBlock(i);
+      // Only a genuine change swaps the sheet; the first paper is usually
+      // already the active one. The slide runs either way — it plays on
+      // whatever sheet is standing there, so paper 1 still arrives.
+      if (activeGame !== g) selectActiveGame(g);
+      fxSlotSheetIn();
+      sfxSlotSheet(i);
       fxHaptic(14);
     }, i * step);
   });
 
-  // Back to the first. Skipped for a single block — it's already there, and
-  // re-slotting the same sheet reads as a stutter rather than a return.
-  const backAt = live.length * step;
-  if (live.length > 1) {
+  // Back to the first. Skipped when there's only one paper — it's already
+  // there, and re-slotting the same sheet reads as a stutter, not a return.
+  const backAt = games.length * step;
+  if (games.length > 1) {
     setTimeout(() => {
-      if (first < blocks.length && first !== activeBlockIdx) {
-        switchBlock(first);
-        fxSlotBlockIn();
+      if (activeGame !== first) {
+        selectActiveGame(first);
+        fxSlotSheetIn();
       }
     }, backAt);
   }
 
-  // The payoff, on the sheet they'll play — after the last movement has
+  // The payoff, on the paper they'll play — after the last movement has
   // settled, so it reads as the end of one sequence rather than a competing
-  // event. More confetti for a multi-block link: that is a bigger delivery.
+  // event. More confetti for a block of several papers: a bigger delivery.
   setTimeout(() => {
     audioUnlock().then(sfxShareArrive);
     fxHaptic([26, 70, 26, 60, 40]);
     const amp = fxAmp();
-    fxConfetti(Math.round((live.length > 1 ? 70 : 45) * amp));
+    fxConfetti(Math.round((games.length > 1 ? 70 : 45) * amp));
     const sheet = document.getElementById('digital-paper').firstElementChild;
     const r = sheet && fxRectOf(sheet);
     if (r) fxShockwave(r, { color: 'rgba(232,178,74,0.9)', spread: 1.5, dur: 620, width: 2 });
-  }, backAt + (live.length > 1 ? 360 : 300));
+  }, backAt + (games.length > 1 ? 360 : 300));
 }
 
 // Sheet-level win reaction. Kept separate from the per-strip banner slam so
@@ -5003,10 +5014,10 @@ function receiveSharedPaper(result, codeParam) {
   // it just never made it in front of the person receiving the block, and
   // "3 ark fra Kari" is a different experience from "3 ark".
   let senderName = '';
-  // Which slots the arriving blocks landed in, in link order. The tour walks
-  // these; recorded here because a block can either reuse the empty active
-  // slot or be pushed on the end, so the indices aren't contiguous by luck.
-  const arrivedIdxs = [];
+  // Where the first arriving block landed — the one the tour deals its papers
+  // out of. Recorded rather than assumed because a block either reuses the
+  // empty active slot or is pushed on the end.
+  let arrivedBlockIdx = -1;
   result.blocks.forEach((entry) => {
     const games = entry.games || {};
     const gameCount = Object.keys(games).length;
@@ -5038,7 +5049,7 @@ function receiveSharedPaper(result, codeParam) {
       activeBlockIdx = blocks.length - 1;
       gameState = blocks[activeBlockIdx].gameState;
     }
-    arrivedIdxs.push(activeBlockIdx);
+    if (arrivedBlockIdx < 0) arrivedBlockIdx = activeBlockIdx;
     Object.entries(games).forEach(([g, strips]) => {
       if (gameState[g] && Array.isArray(strips)) {
         gameState[g].strips = strips;
@@ -5073,7 +5084,7 @@ function receiveSharedPaper(result, codeParam) {
         ? `${importedBlocks} blokker (${totalArk} ark)${from} importert!`
         : `${totalArk} ark${from} importert!`,
       'ok', 4000);
-    fxQueueArrival(arrivedIdxs);
+    fxQueueArrival(arrivedBlockIdx);
   }
   // Auto-connect if session code provided
   const code = (result.code || codeParam || '').trim().toUpperCase();
