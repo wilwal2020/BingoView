@@ -1207,7 +1207,18 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
   100% { transform: translateY(0); }
 }
 
-/* ── 10c ── Arrival. A paper from a shared block sliding into place. Run
+/* The empty block a shared link lands in, held open until its papers have
+   been dealt. Without a height an empty tray collapses to a sliver of its own
+   padding, and the arrival reads as the page assembling itself rather than as
+   papers filling a block that was already sitting there waiting. Not scoped
+   to body.fx-on: an empty screen while the link loads is wrong whether or not
+   the user wants animations. */
+#digital-paper.fx-awaiting {
+  min-height: 46vh;
+  transition: min-height 0.3s ease;
+}
+
+/* ── 10c ── Arrival. A paper from a shared block flying into place. Run
    once per game in the block, one after another — see fxArrivalTour.
 
    This sits on the SHEET (gs.paperEl), not on #digital-paper. During a paper
@@ -3626,6 +3637,9 @@ function fxConfetti(count) {
 // Holds the block that arrived, not its papers — the games are read off it at
 // tour time so the tour can't be working from a list that has since changed.
 let _fxPendingArrival = null;
+// True for the length of the tour. renderActiveGame reads it to stand its own
+// sheet-swap animations down while the papers are flying in under their own.
+let _fxArrivalTouring = false;
 
 function fxQueueArrival(blockIdx) {
   if (blockIdx == null || blockIdx < 0) return;
@@ -3702,6 +3716,8 @@ function fxArrivalTour(blockIdx) {
   // than that tightens further so the tour stays under a few seconds.
   const step = order.length > 4 ? 520 : 780;
 
+  _fxArrivalTouring = true;
+
   order.forEach((g, i) => {
     setTimeout(() => {
       // Only a genuine change swaps the sheet; the paper the tour ends on is
@@ -3719,6 +3735,10 @@ function fxArrivalTour(blockIdx) {
   // confetti — this is a delivery, not a win, and the sheet coming to rest
   // in front of you is the whole reward.
   setTimeout(() => {
+    // Released here, not in the last step: the flight is still settling, and
+    // a re-render arriving in that window would otherwise flip the sheet out
+    // from under it.
+    _fxArrivalTouring = false;
     audioUnlock().then(sfxShareArrive);
     fxHaptic([26, 70, 26, 60, 40]);
     const sheet = document.getElementById('digital-paper').firstElementChild;
@@ -5084,6 +5104,10 @@ function receiveSharedPaper(result, codeParam) {
   const nameInput = document.getElementById("user-name-input");
   if (nameInput) nameInput.value = blocks[activeBlockIdx].userName || '';
   publishUserName();
+  // Queued BEFORE the first render, so that render leaves the sheet out and
+  // shows the empty block instead. Queue it afterwards and the user gets a
+  // full look at paper 1 before the tour starts counting down to it.
+  if (importedBlocks > 0) fxQueueArrival(arrivedBlockIdx);
   showGameTabs();
   refreshBlockTabs();
   renderActiveGame();
@@ -5100,7 +5124,6 @@ function receiveSharedPaper(result, codeParam) {
         ? `${importedBlocks} blokker (${totalArk} ark)${from} importert!`
         : `${totalArk} ark${from} importert!`,
       'ok', 4000);
-    fxQueueArrival(arrivedBlockIdx);
   }
   // Auto-connect if session code provided
   const code = (result.code || codeParam || '').trim().toUpperCase();
@@ -6480,12 +6503,28 @@ function renderActiveGame() {
   // wrapper unconditionally restarted the new-number pop from zero whenever
   // this ran mid-animation — e.g. the auto-switch to a game that just got a
   // call, which happens at exactly the moment the pop is playing.
-  const desiredPaper = gs.paperEl || null;
+  // A shared block that hasn't been dealt in yet leaves the sheet OUT. The
+  // empty paper is the placeholder the papers fly into — and painting the
+  // real paper 1 here was what made the arrival open on game 1 and then jump
+  // to game 4, spoiling a sequence whose whole point is to count down TO
+  // paper 1. Toggled up here, before anything below can flush the arrival and
+  // render again underneath us.
+  const awaiting = (_fxPendingArrival != null);
+  wrap.classList.toggle('fx-awaiting', awaiting);
+
+  const desiredPaper = awaiting ? null : (gs.paperEl || null);
   if (wrap.firstChild !== desiredPaper) {
     // Snapshot the outgoing sheet while it can still be measured. Returns
     // null when there's nothing to turn away from — a first render, or FX
     // off — and that's the signal to deal in instead of flipping.
-    const ghost = fxMakeFlipGhost(wrap);
+    //
+    // Skipped entirely mid-arrival: there, the paper flying in IS the
+    // transition. Running the flip as well put a ghost sheet turning away and
+    // a set of strips flipping in underneath a sheet tumbling in from
+    // off-screen — three animations on one change.
+    let ghost = null;
+    if (_fxArrivalTouring) fxDropGhost();
+    else ghost = fxMakeFlipGhost(wrap);
     wrap.innerHTML = "";
     if (desiredPaper) {
       wrap.appendChild(desiredPaper);
@@ -6493,7 +6532,7 @@ function renderActiveGame() {
       // renderActiveGame runs on plenty of things that aren't a sheet
       // change, and replaying this on every repaint would be exhausting
       // rather than satisfying.
-      if (!document.hidden) {
+      if (!document.hidden && !_fxArrivalTouring) {
         if (ghost) fxFlipSwap(wrap, ghost, desiredPaper);
         else       fxDealIn(desiredPaper);
       }
