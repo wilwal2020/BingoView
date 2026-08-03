@@ -1220,24 +1220,34 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
    transforms compose with this one — the sheet arrives as a whole while its
    strips are still turning over inside it.
 
-   Rides --fx-sheet-amp rather than the dial, like the punch and the shake:
-   at Maks a bigger version of this reads as the paper being thrown rather
-   than placed. */
+   The entry vector is set per paper from JS (--fx-in-x/y/r) rather than
+   fixed here, so a run of them reads as papers being tossed onto a table
+   rather than one animation repeated four times. Those distances are fixed
+   in JS rather than scaled by the intensity dial, for the same reason the
+   punch and the shake are: at Maks, a bigger version of a whole sheet
+   moving reads as the paper being thrown rather than placed. */
 body.fx-on #digital-paper > .fx-slot-in {
-  animation: fxSlotIn 0.62s cubic-bezier(0.2, 1.05, 0.3, 1);
+  animation: fxSlotIn 0.72s cubic-bezier(0.18, 0.86, 0.24, 1);
 }
 @keyframes fxSlotIn {
+  /* Somewhere else entirely, turned over and small. */
   0% {
     opacity: 0;
-    transform: translateX(calc(58px * var(--fx-sheet-amp)))
-               scale(calc(1 - 0.05 * var(--fx-sheet-amp)));
+    transform: translate(var(--fx-in-x, 0px), var(--fx-in-y, 0px))
+               rotate(var(--fx-in-r, 0deg)) scale(0.7);
   }
-  /* Past centre and back: a sheet that stops dead on its mark reads as a
-     slide transition, not as something being slotted home. */
-  62% {
-    opacity: 1;
-    transform: translateX(calc(-7px * var(--fx-sheet-amp)))
-               scale(calc(1 + 0.012 * var(--fx-sheet-amp)));
+  18% { opacity: 1; }
+  /* Still loose: a third of the way home and still turning. This beat is the
+     whole difference between "flying around" and "sliding in from the edge" —
+     without it the paper travels a straight line and reads as a transition. */
+  46% {
+    transform: translate(calc(var(--fx-in-x, 0px) * 0.36), calc(var(--fx-in-y, 0px) * 0.36))
+               rotate(calc(var(--fx-in-r, 0deg) * 0.45)) scale(0.88);
+  }
+  /* Through the mark and a shade past square, so it lands rather than stops. */
+  80% {
+    transform: translate(calc(var(--fx-in-x, 0px) * -0.045), calc(var(--fx-in-y, 0px) * -0.045))
+               rotate(calc(var(--fx-in-r, 0deg) * -0.07)) scale(1.025);
   }
   100% { opacity: 1; transform: none; }
 }
@@ -3637,12 +3647,25 @@ function fxFlushArrival() {
   fxArrivalTour(blockIdx);
 }
 
-// One paper sliding home.
+// One paper flying home. The direction it comes in from is randomised per
+// paper — a fixed vector would have all four arrive along the same line,
+// which is a transition rather than a delivery. Sides alternate at random so
+// consecutive papers rarely enter from the same edge.
+//
+// Distances are absolute rather than dial-scaled: this is a whole sheet
+// moving, and the same reasoning that pinned the punch and the shake to a
+// fixed amplitude applies here.
 function fxSlotSheetIn() {
   const sheet = document.getElementById('digital-paper').firstElementChild;
   const wrap  = document.getElementById('paper-ring-wrap');
-  if (sheet) fxOneShot(sheet, 'fx-slot-in', 640);
-  if (wrap)  fxOneShot(wrap, 'fx-arrive-glow', 640);
+  if (sheet) {
+    const side = Math.random() < 0.5 ? -1 : 1;
+    sheet.style.setProperty('--fx-in-x', Math.round(side * (155 + Math.random() * 110)) + 'px');
+    sheet.style.setProperty('--fx-in-y', Math.round((Math.random() - 0.45) * 210) + 'px');
+    sheet.style.setProperty('--fx-in-r', (side * (11 + Math.random() * 17)).toFixed(1) + 'deg');
+    fxOneShot(sheet, 'fx-slot-in', 760);
+  }
+  if (wrap)  fxOneShot(wrap, 'fx-arrive-glow', 760);
 }
 
 // A block arrives as a set of papers — one per game — and this deals them in
@@ -3668,15 +3691,21 @@ function fxArrivalTour(blockIdx) {
     return;
   }
 
+  // Counted DOWN — paper 4, 3, 2, 1. Dealing upward meant finishing on
+  // whichever paper happened to be last and then jumping back to the front,
+  // and that jump read as a correction rather than as part of the sequence.
+  // Counting down, the last one to land is the one the game starts on.
+  const order = games.slice().reverse();
+
   // Tight enough that four papers don't outstay their welcome, loose enough
   // that each is a separate event rather than a blur. A block carrying more
   // than that tightens further so the tour stays under a few seconds.
-  const step = games.length > 4 ? 520 : 760;
+  const step = order.length > 4 ? 520 : 780;
 
-  games.forEach((g, i) => {
+  order.forEach((g, i) => {
     setTimeout(() => {
-      // Only a genuine change swaps the sheet; the first paper is usually
-      // already the active one. The slide runs either way — it plays on
+      // Only a genuine change swaps the sheet; the paper the tour ends on is
+      // often already active. The flight runs either way — it plays on
       // whatever sheet is standing there, so paper 1 still arrives.
       if (activeGame !== g) selectActiveGame(g);
       fxSlotSheetIn();
@@ -3685,30 +3714,17 @@ function fxArrivalTour(blockIdx) {
     }, i * step);
   });
 
-  // Back to the first. Skipped when there's only one paper — it's already
-  // there, and re-slotting the same sheet reads as a stutter, not a return.
-  const backAt = games.length * step;
-  if (games.length > 1) {
-    setTimeout(() => {
-      if (activeGame !== first) {
-        selectActiveGame(first);
-        fxSlotSheetIn();
-      }
-    }, backAt);
-  }
-
-  // The payoff, on the paper they'll play — after the last movement has
-  // settled, so it reads as the end of one sequence rather than a competing
-  // event. More confetti for a block of several papers: a bigger delivery.
+  // Rides the last paper landing rather than arriving as a beat of its own:
+  // by then paper 1 is on screen and the sequence is already over. No
+  // confetti — this is a delivery, not a win, and the sheet coming to rest
+  // in front of you is the whole reward.
   setTimeout(() => {
     audioUnlock().then(sfxShareArrive);
     fxHaptic([26, 70, 26, 60, 40]);
-    const amp = fxAmp();
-    fxConfetti(Math.round((games.length > 1 ? 70 : 45) * amp));
     const sheet = document.getElementById('digital-paper').firstElementChild;
     const r = sheet && fxRectOf(sheet);
-    if (r) fxShockwave(r, { color: 'rgba(232,178,74,0.9)', spread: 1.5, dur: 620, width: 2 });
-  }, backAt + (games.length > 1 ? 360 : 300));
+    if (r) fxShockwave(r, { color: 'rgba(232,178,74,0.9)', spread: 1.4, dur: 620, width: 2 });
+  }, (order.length - 1) * step + 320);
 }
 
 // Sheet-level win reaction. Kept separate from the per-strip banner slam so
@@ -5091,6 +5107,11 @@ function receiveSharedPaper(result, codeParam) {
   if (code) {
     document.getElementById("phone-code-input").value = code;
     setTimeout(() => connectPhone(code), 300);
+  } else {
+    // Papers but no session to join — the user does have to type a code, so
+    // the form has to come back. initPhone hides it for share links on the
+    // assumption one is coming; this is where that assumption is checked.
+    showConnectScreen();
   }
 }
 
@@ -5238,9 +5259,27 @@ function syncStartBackBtn() {
   if (btn) btn.style.display = _homeReturn ? "block" : "none";
 }
 
-function initPhone() {
-  // Show the code-entry screen first
+// Put the code-entry form back. Every route that gives up on a share link
+// ends here — without it the user is left staring at a blank screen with
+// nothing to tap.
+function showConnectScreen() {
   document.getElementById("phone-connect").style.display = "flex";
+}
+
+function initPhone() {
+  // A share link is a different entry point: the user tapped someone's link
+  // or scanned their QR, and the code rides along with it. They never type
+  // anything, so putting the code-entry form up for the second or two until
+  // connectPhone lands is a login screen shown to nobody — and it sits on top
+  // of the arriving papers, which is what made the arrival invisible.
+  //
+  // Only skipped when there is actually a code to connect with. A ?p= link
+  // without one still needs the form, because the user does have to type a
+  // code; ?s= is assumed to carry its own and is put right if it turns out
+  // not to. Every failure path below calls showConnectScreen().
+  const _q = new URLSearchParams(location.search);
+  const _shareEntry = !!(_q.get('p') || _q.get('s')) && !!(_q.get('c') || _q.get('s'));
+  document.getElementById("phone-connect").style.display = _shareEntry ? "none" : "flex";
   document.getElementById("phone-upload").style.display  = "none";
 
   // Wordmark → start screen, and the back link out of it
@@ -5531,7 +5570,10 @@ function initPhone() {
     try {
       const result = decodeCompactPaper(compactParam);
       receiveSharedPaper(result, codeParam);
-    } catch(e) { console.warn('[BV] compact import error', e); }
+    } catch(e) {
+      console.warn('[BV] compact import error', e);
+      showConnectScreen();
+    }
     history.replaceState(null, '', location.pathname);
   } else if (shareKeyParam) {
     // ?s=<key>: the payload lives in Firebase — fetch it, then import through
@@ -5541,14 +5583,20 @@ function initPhone() {
     history.replaceState(null, '', location.pathname);
     db.ref(SHARE_DB_PATH + key).once('value').then(snap => {
       const data = snap.val();
-      if (!data || !data.p) { toast('Delingslenken finnes ikke lenger', 'err', 4500); return; }
+      if (!data || !data.p) {
+        toast('Delingslenken finnes ikke lenger', 'err', 4500);
+        showConnectScreen();
+        return;
+      }
       let result = null;
       try { result = decodeCompactPaper(data.p); }
       catch(e) { console.warn('[BV] share decode error', e); }
       if (result) receiveSharedPaper(result, codeParam || data.c);
+      else showConnectScreen();
     }).catch(e => {
       console.warn('[BV] share fetch error', e);
       toast('Kunne ikke hente delt ark', 'err', 4500);
+      showConnectScreen();
     });
   } else if (importParam) {
     try {
