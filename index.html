@@ -1295,6 +1295,9 @@ body.fx-settling #phone-code-display {
    chrome above pushed it down — and comes to rest. */
 body.fx-settling #paper-ring-wrap {
   animation: fxSheetSettle 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+  /* ~160 bordered cells being translated. Same reasoning as the flights:
+     without a layer of its own the whole sheet repaints every frame. */
+  will-change: transform;
 }
 @keyframes fxChromeIn {
   from { opacity: 0; transform: translateY(-10px); }
@@ -3906,9 +3909,19 @@ function fxArrivalTour(blockIdx) {
     // this is a delivery, not a win, and the sheet coming to rest in front of
     // you is the whole reward.
     setTimeout(() => {
+      // Leave paper 1 in the tray and drop the other three. It is already the
+      // real sheet for the game being landed on, so renderActiveGame finds the
+      // tray correct and skips its swap branch outright.
+      //
+      // That branch was the lag. Handing it a tray whose first child was paper
+      // 4 made it deep-clone a ~160-cell sheet for a flip ghost and then run
+      // the strip-by-strip flip — a clone, a full layout and an animation
+      // nobody asked for, in the same frame the chrome comes back.
+      const keep = gs[first] && gs[first].paperEl;
       staged.forEach(el => {
         el.getAnimations().forEach(a => a.cancel());
         STAGE_PROPS.forEach(p => el.style.removeProperty(p));
+        if (el !== keep) el.remove();
       });
       land();
       audioUnlock().then(sfxShareArrive);
