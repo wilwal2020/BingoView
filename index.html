@@ -3617,8 +3617,7 @@ function fxQueueArrival(blockIdx) {
 function fxFillPaperArea() {
   const tray     = document.getElementById('digital-paper');
   const scroller = document.getElementById('paper-canvas-wrap');
-  const ringWrap = document.getElementById('paper-ring-wrap');
-  if (!tray || !scroller || !ringWrap) return;
+  if (!tray || !scroller) return;
 
   // The FULL visible height, not the part below the toolbar: the scroll below
   // pushes the toolbar off, so the block ends up owning all of it. Sizing to
@@ -3630,8 +3629,36 @@ function fxFillPaperArea() {
 
   // Sized first, then scrolled — the scroll needs the extra height to exist
   // before there is anywhere to scroll to.
-  const delta = ringWrap.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-  if (delta > 1) scroller.scrollTop += delta;
+  fxPinPaperArea();
+  fxWatchPaperArea();
+}
+
+// Straight to the bottom rather than to a measured offset. With the block
+// sized to fill, the only thing above it is the toolbar and the stats row, so
+// the bottom of the scroll IS the block sitting at the top — same result, but
+// it can't be computed wrong and it doesn't care what those rows measure.
+function fxPinPaperArea() {
+  const scroller = document.getElementById('paper-canvas-wrap');
+  if (scroller) scroller.scrollTop = scroller.scrollHeight;
+}
+
+// …and the rows above the block DO change height, a second or so in. The
+// "Manuell trykking" and "Markér nye" buttons are hidden until the connection
+// settles, and .paper-toolbar collapses to nothing while both are — so the
+// moment they appear the block gets pushed down and the whole thing looks
+// like it scrolled on its own. Re-pin whenever that happens.
+let _fxPaperAreaObs = null;
+function fxWatchPaperArea() {
+  if (typeof ResizeObserver !== 'function') return;
+  fxUnwatchPaperArea();
+  const targets = [document.querySelector('.paper-toolbar'),
+                   document.getElementById('paper-header')].filter(Boolean);
+  if (!targets.length) return;
+  _fxPaperAreaObs = new ResizeObserver(() => fxPinPaperArea());
+  targets.forEach(t => _fxPaperAreaObs.observe(t));
+}
+function fxUnwatchPaperArea() {
+  if (_fxPaperAreaObs) { _fxPaperAreaObs.disconnect(); _fxPaperAreaObs = null; }
 }
 
 // Called from renderActiveGame once a sheet is actually in the DOM. The
@@ -3685,10 +3712,21 @@ function fxArrivalTour(blockIdx) {
   // Every exit goes through here: drop the staging, put the real paper up.
   const land = () => {
     _fxArrivalTouring = false;
+    fxUnwatchPaperArea();
     tray.classList.remove('fx-awaiting');
     tray.style.removeProperty('min-height');
     if (scroller) scroller.classList.remove('fx-arriving');
     if (first) selectActiveGame(first);
+    // The placeholder height is gone, so the sheet is back to its own size.
+    // Keep the block at the top of the view rather than wherever dropping
+    // that height left the scroll — but only as far as the content allows,
+    // which the browser clamps for us.
+    const ringWrap = document.getElementById('paper-ring-wrap');
+    if (scroller && ringWrap) {
+      const delta = ringWrap.getBoundingClientRect().top
+                  - scroller.getBoundingClientRect().top;
+      if (delta > 1) scroller.scrollTop += delta;
+    }
   };
   if (!first) { land(); return; }
   if (!fxEnabled()) { land(); return; }
