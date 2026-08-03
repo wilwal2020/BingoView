@@ -1207,6 +1207,38 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
   100% { transform: translateY(0); }
 }
 
+/* ── 10c ── Arrival. Someone shared a block with you and it just landed.
+   The strips deal themselves in on their own timeline (fxDealIn, which runs
+   on .strip), so this is free to take the sheet as a whole: it settles up
+   out of a slight shrink, overshoots once, and holds.
+
+   Split across two elements for the same reason the tension ring is: an
+   element gets one `animation`, and #digital-paper's slot is spoken for by
+   every impact in the game. The paper takes the movement; the wrapper, which
+   is the same size and shape, takes the glow — so neither has to wait for
+   the other and an arriving sheet can still react to a call landing on it.
+
+   Rides --fx-sheet-amp rather than the dial, like the punch and the shake:
+   this moves the whole sheet, and at Maks a bigger version of it reads as
+   the paper lurching rather than arriving. */
+body.fx-on #digital-paper.fx-arrive {
+  animation: fxArrive 0.85s cubic-bezier(0.22, 1, 0.3, 1);
+}
+@keyframes fxArrive {
+  0%   { transform: scale(calc(1 - 0.06  * var(--fx-sheet-amp))); }
+  55%  { transform: scale(calc(1 + 0.015 * var(--fx-sheet-amp))); }
+  100% { transform: scale(1); }
+}
+body.fx-on #paper-ring-wrap.fx-arrive-glow {
+  animation: fxArriveGlow 0.85s ease-out;
+  border-radius: 6px;
+}
+@keyframes fxArriveGlow {
+  0%   { box-shadow: 0 0 0 0 rgba(232,178,74,0); }
+  30%  { box-shadow: 0 0 calc(38px * var(--fx-glow)) calc(6px * var(--fx-glow)) rgba(232,178,74,0.72); }
+  100% { box-shadow: 0 0 0 0 rgba(232,178,74,0); }
+}
+
 /* ── 11 ── Tension. A row one number away already pulses; this puts a
    beacon on the specific squares you still need, so "you are close" and
    "these are the numbers" are two different signals rather than one.
@@ -2903,6 +2935,20 @@ function sfxWin() {
     sfxNoise(ctx, { dur: 0.5, gain: 0.06, freq: 5200, at: 0.44 });
   } catch (e) {}
 }
+// A block someone shared with you, landing. Deliberately NOT a fanfare: this
+// is something arriving, not something achieved, so it's a soft swell with
+// four notes walking up out of it and a tone left ringing on top. Four notes
+// where the win has six, and no noise shimmer to close — a gift showing up
+// must never sound bigger than a bingo.
+function sfxShareArrive() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    sfxNoise(ctx, { dur: 0.3, gain: 0.05, freq: 800 });
+    [0, 2, 4, 5].forEach((step, i) =>
+      sfxTone(ctx, { freq: sfxStep(step), type: 'triangle', dur: 0.3, gain: 0.13, at: i * 0.075 }));
+    sfxTone(ctx, { freq: 1046.50, type: 'sine', dur: 0.9, gain: 0.09, at: 0.33 });
+  } catch (e) {}
+}
 
 // Firefox removed the Vibration API entirely (bug 1900037, ~FF129) — desktop
 // and Android both. navigator.vibrate is undefined there, so every call was
@@ -3519,6 +3565,46 @@ function fxConfetti(count) {
     anim.onfinish = done;
     anim.oncancel = done;
   }
+}
+
+// ── A shared block arriving ────────────────────────────────────
+// Opening someone's link is the one moment this app RECEIVES something
+// rather than reporting something, and it used to go by with a toast.
+//
+// The strips already deal themselves in — renderActiveGame does that for any
+// sheet appearing — so this doesn't re-stage the arrival, it puts an event
+// around it: the sheet settles, the edge blooms brass, and the confetti
+// lands as the last strip does.
+//
+// Deliberately smaller than a win. The reference point is the row-complete
+// cascade, not the bingo: receiving a block is a good moment, but the game
+// hasn't been won and the flourish must not claim it has.
+function fxSharedArrival(blockCount) {
+  // Both self-guard on the user's settings — sfxReady wants sound AND the FX
+  // layer, fxHaptic wants vibration AND the FX layer — so neither needs the
+  // check repeated here. The unlock is worth attempting even though this
+  // usually runs on a cold page load with no gesture behind it: browsers that
+  // allow it get the sound, the rest silently skip it and the visual carries.
+  audioUnlock().then(sfxShareArrive);
+  fxHaptic([26, 70, 26, 60, 40]);
+  if (!fxEnabled()) return;
+
+  const paper = document.getElementById('digital-paper');
+  const wrap  = document.getElementById('paper-ring-wrap');
+  if (paper) fxOneShot(paper, 'fx-arrive', 900);
+  if (wrap)  fxOneShot(wrap, 'fx-arrive-glow', 900);
+
+  // Held back until the sheet has finished assembling itself. Strips deal in
+  // over 0.42s at a 55ms stagger, so a six-strip block is still landing at
+  // ~0.7s; confetti thrown over that reads as two things happening at once
+  // rather than one thing arriving. More of it for a multi-block link, since
+  // that genuinely is a bigger delivery.
+  const amp = fxAmp();
+  setTimeout(() => {
+    fxConfetti(Math.round((blockCount > 1 ? 70 : 45) * amp));
+    const r = paper && fxRectOf(paper);
+    if (r) fxShockwave(r, { color: 'rgba(232,178,74,0.9)', spread: 1.5, dur: 620, width: 2 });
+  }, 480);
 }
 
 // Sheet-level win reaction. Kept separate from the per-strip banner slam so
@@ -4820,6 +4906,10 @@ function receiveSharedPaper(result, codeParam) {
   let totalArk = 0;
   let importedBlocks = 0;
   let skippedDupes = 0;
+  // Who sent it. The share payload has carried the owner's name all along —
+  // it just never made it in front of the person receiving the block, and
+  // "3 ark fra Kari" is a different experience from "3 ark".
+  let senderName = '';
   result.blocks.forEach((entry) => {
     const games = entry.games || {};
     const gameCount = Object.keys(games).length;
@@ -4862,6 +4952,7 @@ function receiveSharedPaper(result, codeParam) {
       if (blocks[activeBlockIdx]) {
         blocks[activeBlockIdx].userName = trimmed;
       }
+      if (!senderName) senderName = trimmed;
     }
   });
   // Update name input to show the active block's name
@@ -4872,15 +4963,19 @@ function receiveSharedPaper(result, codeParam) {
   refreshBlockTabs();
   renderActiveGame();
   if (importedBlocks === 0) {
+    // Nothing actually arrived, so nothing to celebrate — a flourish over a
+    // duplicate link would be celebrating a no-op.
     toast(
       skippedDupes ? "Blokken finnes allerede" : "Ingen ark å importere",
       'ok', 3500);
   } else {
+    const from = senderName ? ` fra ${senderName}` : '';
     toast(
       importedBlocks > 1
-        ? `${importedBlocks} blokker (${totalArk} ark) importert!`
-        : `${totalArk} ark importert!`,
+        ? `${importedBlocks} blokker (${totalArk} ark)${from} importert!`
+        : `${totalArk} ark${from} importert!`,
       'ok', 4000);
+    fxSharedArrival(importedBlocks);
   }
   // Auto-connect if session code provided
   const code = (result.code || codeParam || '').trim().toUpperCase();
