@@ -3789,6 +3789,9 @@ function fxArrivalTour(blockIdx) {
 
   const scroller = document.getElementById('paper-canvas-wrap');
 
+  // Set once the real render has been done early — see the prep timer below.
+  let prepped = false;
+
   // Every exit goes through here: drop the staging, put the toolbar and stats
   // row back, and hand over to a normal render.
   const land = () => {
@@ -3804,7 +3807,9 @@ function fxArrivalTour(blockIdx) {
       scroller.classList.remove('fx-arriving');
       scroller.scrollTop = 0;
     }
-    if (first) selectActiveGame(first);
+    // Normally already done by the prep timer, so this frame is class changes
+    // and nothing else. Still here for the exits that skip the tour entirely.
+    if (!prepped && first) selectActiveGame(first);
 
     tray.style.removeProperty('min-height');
     if (!heldHeight || !fxEnabled()) return;
@@ -3905,9 +3910,25 @@ function fxArrivalTour(blockIdx) {
       }, FX_ARRIVE_LEAD + i * step + FX_ARRIVE_FLIGHT * 0.72);
     });
 
-    // Tear the staging down and hand over to a single real render. No confetti:
-    // this is a delivery, not a win, and the sheet coming to rest in front of
-    // you is the whole reward.
+    // The expensive half of the hand-back, done EARLY — while the last paper
+    // is still in the air. renderCells walks every square, both tab rows are
+    // torn down and rebuilt, and the stats and countdown ring are recomputed;
+    // running all of that in the frame the settle begins is what was left of
+    // the chop. Here it costs nothing visible: the flights are transform and
+    // opacity on promoted layers, so they are running on the compositor and
+    // main-thread work cannot touch them.
+    //
+    // Safe to switch the game now because _fxArrivalTouring is still true, so
+    // renderActiveGame leaves the staged stack alone. By the time land() runs,
+    // the sheet is painted, the tabs are built, and all that is left is
+    // removing a few classes.
+    setTimeout(() => {
+      prepped = true;
+      if (first) selectActiveGame(first);
+    }, FX_ARRIVE_LEAD + (order.length - 1) * step + 120);
+
+    // Tear the staging down and hand over. No confetti: this is a delivery,
+    // not a win, and the sheet coming to rest in front of you is the reward.
     setTimeout(() => {
       // Leave paper 1 in the tray and drop the other three. It is already the
       // real sheet for the game being landed on, so renderActiveGame finds the
