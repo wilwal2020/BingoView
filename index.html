@@ -2126,7 +2126,7 @@ body.start-parked #admin-caller { display: none !important; }
 .admin-bar {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
   padding: 5px;
   border-radius: 12px;
   background: rgba(10,16,32,0.86);
@@ -2135,22 +2135,31 @@ body.start-parked #admin-caller { display: none !important; }
   -webkit-backdrop-filter: blur(8px);
   backdrop-filter: blur(8px);
 }
-.admin-bar-head {
+/* Readout of the half-typed number, and the way back out of it. Always in the
+   layout, empty or not — a bar that grew a row on the first press would move
+   every key out from under the finger that just pressed one. */
+.admin-head {
+  width: 40px;
+  border: none;
+  background: transparent;
   text-align: center;
-  font-size: 0.66rem;
-  letter-spacing: 0.1em;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
   color: var(--gold);
   padding: 1px 0 4px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
   margin-bottom: 2px;
+  cursor: pointer;
 }
+.admin-head:disabled { color: var(--dim); opacity: 0.5; cursor: default; }
 .admin-key {
   position: relative;
   overflow: hidden;
   width: 40px;
-  /* Ten keys have to fit the shortest phone in the hall, so the height is a
-     share of the viewport with a floor and a ceiling, not a constant. */
-  height: clamp(26px, 7.2vh, 36px);
+  /* Eleven keys and a readout have to fit the shortest phone in the hall, so
+     the height is a share of the viewport with a floor and a ceiling. */
+  height: clamp(22px, 6.2vh, 34px);
   border: 1px solid rgba(255,255,255,0.10);
   border-radius: 8px;
   background: var(--nav-panel);
@@ -2670,33 +2679,24 @@ header { padding: 7px 13px; gap: 5px 7px; }
     </div>
   </div>
 
-  <!-- Administrator number caller. Tens first, then ones — or a tens digit
-       left alone, which after the set wait goes out as a one-digit number. -->
+  <!-- Administrator number caller. One bar: press once for the first digit,
+       again for the second — or leave it alone and it goes out on its own.
+       A zero at each end so there is always one near the thumb. -->
   <div id="admin-caller" style="display:none">
     <div id="admin-bars">
-      <div class="admin-bar" id="admin-bar-ones" style="display:none" role="group" aria-label="Siste siffer">
-        <div class="admin-bar-head" id="admin-ones-head">–</div>
-        <button type="button" class="admin-key" data-ones="0">0</button>
-        <button type="button" class="admin-key" data-ones="1">1</button>
-        <button type="button" class="admin-key" data-ones="2">2</button>
-        <button type="button" class="admin-key" data-ones="3">3</button>
-        <button type="button" class="admin-key" data-ones="4">4</button>
-        <button type="button" class="admin-key" data-ones="5">5</button>
-        <button type="button" class="admin-key" data-ones="6">6</button>
-        <button type="button" class="admin-key" data-ones="7">7</button>
-        <button type="button" class="admin-key" data-ones="8">8</button>
-        <button type="button" class="admin-key" data-ones="9">9</button>
-      </div>
-      <div class="admin-bar" id="admin-bar-tens" role="group" aria-label="Første siffer">
-        <button type="button" class="admin-key" data-tens="1">1</button>
-        <button type="button" class="admin-key" data-tens="2">2</button>
-        <button type="button" class="admin-key" data-tens="3">3</button>
-        <button type="button" class="admin-key" data-tens="4">4</button>
-        <button type="button" class="admin-key" data-tens="5">5</button>
-        <button type="button" class="admin-key" data-tens="6">6</button>
-        <button type="button" class="admin-key" data-tens="7">7</button>
-        <button type="button" class="admin-key" data-tens="8">8</button>
-        <button type="button" class="admin-key" data-tens="9">9</button>
+      <div class="admin-bar" role="group" aria-label="Kall et tall">
+        <button type="button" class="admin-head" id="admin-head" title="Avbryt tallet" disabled>–</button>
+        <button type="button" class="admin-key" data-key="0">0</button>
+        <button type="button" class="admin-key" data-key="1">1</button>
+        <button type="button" class="admin-key" data-key="2">2</button>
+        <button type="button" class="admin-key" data-key="3">3</button>
+        <button type="button" class="admin-key" data-key="4">4</button>
+        <button type="button" class="admin-key" data-key="5">5</button>
+        <button type="button" class="admin-key" data-key="6">6</button>
+        <button type="button" class="admin-key" data-key="7">7</button>
+        <button type="button" class="admin-key" data-key="8">8</button>
+        <button type="button" class="admin-key" data-key="9">9</button>
+        <button type="button" class="admin-key" data-key="0">0</button>
       </div>
     </div>
     <button type="button" class="admin-handle" id="admin-handle"
@@ -6401,15 +6401,13 @@ function initPhone() {
   setAdminHoldMs(adminHoldMs);            // paint the saved choice
   setAdminMode(adminMode);                // …and the saved mode, row + sidebar
 
-  // The caller's own keys. Delegated per bar so the markup stays flat.
-  document.getElementById("admin-bar-tens").addEventListener("click", e => {
+  // The caller's own keys, delegated so the markup stays flat.
+  document.getElementById("admin-caller").addEventListener("click", e => {
     const key = e.target.closest(".admin-key");
-    if (key) adminPressTens(Number(key.dataset.tens));
+    if (key && !key.disabled) adminPressKey(Number(key.dataset.key));
   });
-  document.getElementById("admin-bar-ones").addEventListener("click", e => {
-    const key = e.target.closest(".admin-key");
-    if (key && !key.disabled) adminPressOnes(Number(key.dataset.ones));
-  });
+  // The readout doubles as the way out of a half-typed number.
+  document.getElementById("admin-head").addEventListener("click", adminClearPick);
   document.getElementById("admin-handle").addEventListener("click", () => {
     setAdminCollapsed(!adminCollapsed);
   });
@@ -7526,20 +7524,23 @@ function setAdminCollapsed(on) {
   syncAdminCaller();
 }
 
-// Forget the half-typed number: no armed digit, no timer, no ones bar.
+// Forget the half-typed number: no armed digit, no timer, nothing waiting.
 function adminClearPick() {
   if (_adminTimer) { clearTimeout(_adminTimer); _adminTimer = null; }
   _adminTens = null;
-  paintAdminBars();
+  paintAdminCaller();
 }
 
-function paintAdminBars() {
-  const onesBar = document.getElementById('admin-bar-ones');
-  const tensBar = document.getElementById('admin-bar-tens');
-  if (!tensBar || !onesBar) return;
+function paintAdminCaller() {
+  const bar = document.getElementById('admin-caller');
+  if (!bar) return;
+  const armedDigit = _adminTens;
 
-  tensBar.querySelectorAll('.admin-key').forEach(b => {
-    const armed = Number(b.dataset.tens) === _adminTens;
+  bar.querySelectorAll('.admin-key').forEach(b => {
+    const d = Number(b.dataset.key);
+    // Matched on the digit, not the element, so the two zeros always agree —
+    // they are one digit in two places a thumb can reach, not two keys.
+    const armed = (armedDigit != null && d === armedDigit);
     // Re-adding the class alone would not restart the drain — the animation is
     // already running on that element — so take it off and force a reflow.
     if (armed && !b.classList.contains('armed')) {
@@ -7547,43 +7548,41 @@ function paintAdminBars() {
       void b.offsetWidth;
     }
     b.classList.toggle('armed', armed);
+    // What this key would do next. Nothing armed: a zero can't start a number.
+    // After a 9: 91–99 don't exist on a 90-ball board, so only the zero is live.
+    b.disabled = (armedDigit == null)
+      ? (d === 0)
+      : (armedDigit * 10 + d > ADMIN_MAX_NUMBER);
   });
 
+  const head = document.getElementById('admin-head');
+  if (head) {
+    head.textContent = (armedDigit == null) ? '–' : (armedDigit + ' ✕');
+    head.disabled = (armedDigit == null);
+  }
+}
+
+// One bar, pressed once or twice. The first press arms a digit; a second one
+// lands beside it as the ones. Nothing following the first press means it was
+// a number in its own right — that is what the wait is for.
+function adminPressKey(d) {
   if (_adminTens == null) {
-    onesBar.style.display = 'none';
+    if (d === 0) return;              // no number on the board starts with a zero
+    vibrateShort();
+    if (_adminTimer) clearTimeout(_adminTimer);
+    _adminTens = d;
+    paintAdminCaller();
+    _adminTimer = setTimeout(() => {
+      _adminTimer = null;
+      const n = _adminTens;
+      adminClearPick();
+      if (n != null) adminCall(n);
+    }, adminHoldMs);
     return;
   }
-  onesBar.style.display = 'flex';
-  const head = document.getElementById('admin-ones-head');
-  if (head) head.textContent = _adminTens + '_';
-  // 91–99 don't exist on a 90-ball board, so after a 9 only the 0 is live.
-  onesBar.querySelectorAll('.admin-key').forEach(b => {
-    const n = _adminTens * 10 + Number(b.dataset.ones);
-    b.disabled = (n > ADMIN_MAX_NUMBER);
-  });
-}
-
-function adminPressTens(d) {
-  vibrateShort();
-  // Pressing the armed digit again takes it back — a way out of a mistyped
-  // first digit that doesn't need anything else on screen to aim at.
-  if (_adminTens === d) { adminClearPick(); return; }
-  if (_adminTimer) clearTimeout(_adminTimer);
-  _adminTens = d;
-  paintAdminBars();
-  _adminTimer = setTimeout(() => {
-    // Nothing followed it, so it was the whole number.
-    _adminTimer = null;
-    const n = _adminTens;
-    adminClearPick();
-    if (n != null) adminCall(n);
-  }, adminHoldMs);
-}
-
-function adminPressOnes(d) {
-  if (_adminTens == null) return;
-  vibrateShort();
   const n = _adminTens * 10 + d;
+  if (n > ADMIN_MAX_NUMBER) return;   // guarded in paint too; belt and braces
+  vibrateShort();
   adminClearPick();
   adminCall(n);
 }
