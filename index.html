@@ -2101,6 +2101,132 @@ body.fx-on .manual-switch .manual-switch-thumb {
 }
 .bv-overlay-btn:hover { border-color: var(--gold); color: var(--gold); }
 
+/* ── Administrator: the number caller ──────────────
+   Hovers over the sheet instead of sitting in the layout. Whoever is calling
+   is still reading their own paper, and a bar that pushed the page around
+   every time a digit was pressed would move the very thing they're reading.
+   Right edge, vertically centred — thumb country on a held phone. */
+#admin-caller {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 900;                 /* under the settings (1000) and share (2000) overlays */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+}
+/* Parked on the code screen there is no sheet — and nothing to call into. */
+body.start-parked #admin-caller { display: none !important; }
+#admin-caller.collapsed #admin-bars { display: none; }
+
+#admin-bars { display: flex; align-items: center; gap: 6px; }
+
+.admin-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px;
+  border-radius: 12px;
+  background: rgba(10,16,32,0.86);
+  border: 1px solid var(--nav-line-2);
+  box-shadow: 0 6px 22px rgba(0,0,0,0.45);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.admin-bar-head {
+  text-align: center;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  padding: 1px 0 4px;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  margin-bottom: 2px;
+}
+.admin-key {
+  position: relative;
+  overflow: hidden;
+  width: 40px;
+  /* Ten keys have to fit the shortest phone in the hall, so the height is a
+     share of the viewport with a floor and a ceiling, not a constant. */
+  height: clamp(26px, 7.2vh, 36px);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 8px;
+  background: var(--nav-panel);
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.admin-key:active { background: var(--nav-panel-2); }
+.admin-key:disabled { opacity: 0.22; cursor: default; }
+/* The armed tens digit. The draining bar IS the wait made visible: it runs for
+   exactly as long as the digit has left to be sent as a number on its own. */
+.admin-key.armed {
+  color: var(--gold);
+  border-color: var(--gold);
+  background: rgba(227,165,58,0.14);
+}
+.admin-key.armed::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 3px;
+  background: var(--gold);
+  transform-origin: left center;
+  animation: admin-drain var(--admin-hold, 1.5s) linear forwards;
+}
+@keyframes admin-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+
+.admin-handle {
+  width: 22px;
+  height: 78px;
+  flex-shrink: 0;
+  border: 1px solid var(--nav-line-2);
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  background: rgba(10,16,32,0.86);
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 1rem;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+/* Password gate — above the settings overlay it is opened from. */
+#bv-admin-pass-overlay { z-index: 2100; align-items: center; }
+.admin-pass-note {
+  font-size: 0.75rem;
+  color: var(--dim);
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+.admin-pass-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #333;
+  background: #0e0e0e;
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  letter-spacing: 0.3em;
+  text-align: center;
+}
+.admin-pass-input:focus { outline: none; border-color: var(--gold); }
+.admin-pass-err {
+  min-height: 1.1em;
+  margin-top: 8px;
+  font-size: 0.72rem;
+  color: #ff8a80;
+  text-align: center;
+}
+
 /* ── Share Modal ──────────────────────── */
 .share-overlay {
   position: fixed; inset: 0;
@@ -2501,10 +2627,80 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <button type="button" data-sec="10">10s</button>
         </div>
       </div>
+      <div class="bv-row" id="bv-row-admin">
+        <div class="bv-row-label">
+          <span>Administrator</span>
+          <span class="bv-row-desc">Kall tallene selv fra denne telefonen — krever passord</span>
+        </div>
+        <label class="bv-toggle">
+          <input type="checkbox" id="bv-admin-on">
+          <span class="bv-toggle-track"></span>
+        </label>
+      </div>
+      <div class="bv-row" id="bv-row-admin-hold" style="display:none">
+        <div class="bv-row-label">
+          <span>Ensifret tall etter</span>
+          <span class="bv-row-desc">Trykk 1–9 og vent så lenge uten å trykke mer, så sendes tallet alene</span>
+        </div>
+        <div class="manual-level-seg" id="bv-admin-hold-seg" role="group" aria-label="Ventetid før et ensifret tall sendes">
+          <button type="button" data-ms="1000">1s</button>
+          <button type="button" data-ms="1500">1,5s</button>
+          <button type="button" data-ms="2000">2s</button>
+          <button type="button" data-ms="3000">3s</button>
+        </div>
+      </div>
       <div class="bv-overlay-actions">
         <button id="bv-settings-close" class="bv-overlay-btn">Lukk</button>
       </div>
     </div>
+  </div>
+
+  <!-- Password gate for administrator mode -->
+  <div id="bv-admin-pass-overlay" class="bv-overlay" style="display:none">
+    <div class="bv-overlay-card">
+      <div class="bv-overlay-title">Administrator</div>
+      <p class="admin-pass-note">Skriv inn passordet for å slå på administratormodus.</p>
+      <input id="bv-admin-pass-input" class="admin-pass-input" type="password"
+             inputmode="numeric" autocomplete="off" placeholder="••••" aria-label="Passord">
+      <div class="admin-pass-err" id="bv-admin-pass-err" role="alert"></div>
+      <div class="bv-overlay-actions">
+        <button id="bv-admin-pass-cancel" class="bv-overlay-btn">Avbryt</button>
+        <button id="bv-admin-pass-ok" class="bv-overlay-btn">Lås opp</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Administrator number caller. Tens first, then ones — or a tens digit
+       left alone, which after the set wait goes out as a one-digit number. -->
+  <div id="admin-caller" style="display:none">
+    <div id="admin-bars">
+      <div class="admin-bar" id="admin-bar-ones" style="display:none" role="group" aria-label="Siste siffer">
+        <div class="admin-bar-head" id="admin-ones-head">–</div>
+        <button type="button" class="admin-key" data-ones="0">0</button>
+        <button type="button" class="admin-key" data-ones="1">1</button>
+        <button type="button" class="admin-key" data-ones="2">2</button>
+        <button type="button" class="admin-key" data-ones="3">3</button>
+        <button type="button" class="admin-key" data-ones="4">4</button>
+        <button type="button" class="admin-key" data-ones="5">5</button>
+        <button type="button" class="admin-key" data-ones="6">6</button>
+        <button type="button" class="admin-key" data-ones="7">7</button>
+        <button type="button" class="admin-key" data-ones="8">8</button>
+        <button type="button" class="admin-key" data-ones="9">9</button>
+      </div>
+      <div class="admin-bar" id="admin-bar-tens" role="group" aria-label="Første siffer">
+        <button type="button" class="admin-key" data-tens="1">1</button>
+        <button type="button" class="admin-key" data-tens="2">2</button>
+        <button type="button" class="admin-key" data-tens="3">3</button>
+        <button type="button" class="admin-key" data-tens="4">4</button>
+        <button type="button" class="admin-key" data-tens="5">5</button>
+        <button type="button" class="admin-key" data-tens="6">6</button>
+        <button type="button" class="admin-key" data-tens="7">7</button>
+        <button type="button" class="admin-key" data-tens="8">8</button>
+        <button type="button" class="admin-key" data-tens="9">9</button>
+      </div>
+    </div>
+    <button type="button" class="admin-handle" id="admin-handle"
+            aria-expanded="true" aria-controls="admin-bars" title="Skjul tallvelgeren">›</button>
   </div>
 
   <!-- Share modal — QR code + compact URL + block selector -->
@@ -4401,6 +4597,28 @@ let jackpotNum = null;            // jackpot number (game 4 / grey), broadcast b
 let sessionCode = null;           // code used to connect — key for localStorage
 let phoneId = null;               // assigned in connectPhone — used when publishing papers
 
+// ── Administrator mode ────────────────────────────────────────
+// Lets this phone call numbers into the session it is connected to, instead of
+// only receiving them. The password is a guard against a curious player poking
+// at Innstillinger, not a security boundary — it sits in this file in plain
+// sight, and anyone who can read the source can read it. Treat it as a lid.
+const ADMIN_PASSWORD = '1234';
+const ADMIN_MAX_NUMBER = 90;      // Norwegian 90-ball bingo
+const ADMIN_HOLD_CHOICES = [1000, 1500, 2000, 3000];
+// Persisted: the caller is on their own phone, and re-typing the password
+// after every reload — mid-game, with a hall waiting — is the worse trade.
+let adminMode = false;
+try { adminMode = localStorage.getItem('bv_admin') === '1'; } catch (e) {}
+let adminHoldMs = 1500;
+try {
+  const _ah = parseInt(localStorage.getItem('bv_admin_hold'), 10);
+  if (ADMIN_HOLD_CHOICES.includes(_ah)) adminHoldMs = _ah;
+} catch (e) {}
+let adminCollapsed = false;
+try { adminCollapsed = localStorage.getItem('bv_admin_collapsed') === '1'; } catch (e) {}
+let _adminTens  = null;           // first digit pressed, waiting on a second
+let _adminTimer = null;           // fires when nothing followed it
+
 // ── Block switching ───────────────────────────────────────────
 function switchBlock(idx) {
   if (idx < 0 || idx >= blocks.length) return;
@@ -6135,6 +6353,67 @@ function initPhone() {
     setManualPlayLevel(manualPlayLevel);   // paint the saved choice
   }
 
+  // ── Administrator mode ──────────────────────────────────────
+  // Switching it ON goes through the password; switching it OFF is just a tap,
+  // because a lock you have to unlock in order to close is only in the way.
+  const adminBox      = document.getElementById("bv-admin-on");
+  const passOverlay   = document.getElementById("bv-admin-pass-overlay");
+  const passInput     = document.getElementById("bv-admin-pass-input");
+  const passErr       = document.getElementById("bv-admin-pass-err");
+  const closePassGate = () => {
+    passOverlay.style.display = "none";
+    passInput.value = "";
+    passErr.textContent = "";
+  };
+  const submitPassGate = () => {
+    if (passInput.value.trim() !== ADMIN_PASSWORD) {
+      passErr.textContent = "Feil passord";
+      passInput.value = "";
+      passInput.focus();
+      return;
+    }
+    closePassGate();
+    setAdminMode(true);
+    toast("Administratormodus på", "ok", 2200);
+  };
+  adminBox.addEventListener("change", () => {
+    if (!adminBox.checked) { setAdminMode(false); return; }
+    // Don't let the switch show "on" until the password has actually landed.
+    adminBox.checked = false;
+    passErr.textContent = "";
+    passInput.value = "";
+    passOverlay.style.display = "flex";
+    // iOS only raises the keyboard from inside the gesture, so focus now.
+    passInput.focus();
+  });
+  passInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") { e.preventDefault(); submitPassGate(); }
+  });
+  document.getElementById("bv-admin-pass-ok").addEventListener("click", submitPassGate);
+  document.getElementById("bv-admin-pass-cancel").addEventListener("click", closePassGate);
+  passOverlay.addEventListener("click", e => { if (e.target === passOverlay) closePassGate(); });
+
+  const holdSeg = document.getElementById("bv-admin-hold-seg");
+  if (holdSeg) {
+    holdSeg.querySelectorAll("button").forEach(b =>
+      b.addEventListener("click", () => setAdminHoldMs(Number(b.dataset.ms))));
+  }
+  setAdminHoldMs(adminHoldMs);            // paint the saved choice
+  setAdminMode(adminMode);                // …and the saved mode, row + sidebar
+
+  // The caller's own keys. Delegated per bar so the markup stays flat.
+  document.getElementById("admin-bar-tens").addEventListener("click", e => {
+    const key = e.target.closest(".admin-key");
+    if (key) adminPressTens(Number(key.dataset.tens));
+  });
+  document.getElementById("admin-bar-ones").addEventListener("click", e => {
+    const key = e.target.closest(".admin-key");
+    if (key && !key.disabled) adminPressOnes(Number(key.dataset.ones));
+  });
+  document.getElementById("admin-handle").addEventListener("click", () => {
+    setAdminCollapsed(!adminCollapsed);
+  });
+
   // Restore saved API key and last session code
   const savedKey = localStorage.getItem("bv_apikey");
   if (savedKey) document.getElementById("apikey-input").value = savedKey;
@@ -6296,6 +6575,8 @@ async function connectPhone(code, opts = {}) {
   const _nameRow = document.getElementById("user-name-row");
   if (_nameRow) _nameRow.style.display = "flex";
   _offlinePrepMode = false;
+  // There is a channel to call into now, so the caller can come out.
+  syncAdminCaller();
 
   // If memory holds blocks (the offline-prep flow), persist them under the
   // session-coded key FIRST so they win over any stale data for this code.
@@ -7190,6 +7471,149 @@ function setManualRevealSec(sec) {
     cancelRevealTimer();
     getGameIds().forEach(g => renderCells(g));
   }
+}
+
+// ════════════════════════════════════
+// ADMINISTRATOR — calling numbers from the phone
+// ════════════════════════════════════
+
+// The caller only appears once there is somewhere to call: a live channel and
+// a session code. (The code screen is handled in CSS, off body.start-parked.)
+function syncAdminCaller() {
+  const el = document.getElementById('admin-caller');
+  if (!el) return;
+  const show = adminMode && !!channelRef && !!sessionCode;
+  el.style.display = show ? 'flex' : 'none';
+  el.classList.toggle('collapsed', adminCollapsed);
+  const handle = document.getElementById('admin-handle');
+  if (handle) {
+    handle.textContent = adminCollapsed ? '‹' : '›';
+    handle.setAttribute('aria-expanded', adminCollapsed ? 'false' : 'true');
+    handle.title = adminCollapsed ? 'Vis tallvelgeren' : 'Skjul tallvelgeren';
+  }
+  if (!show) adminClearPick();
+}
+
+function setAdminMode(on) {
+  adminMode = !!on;
+  try { localStorage.setItem('bv_admin', adminMode ? '1' : '0'); } catch (e) {}
+  const box = document.getElementById('bv-admin-on');
+  if (box) box.checked = adminMode;
+  const holdRow = document.getElementById('bv-row-admin-hold');
+  if (holdRow) holdRow.style.display = adminMode ? '' : 'none';
+  adminClearPick();
+  syncAdminCaller();
+}
+
+function setAdminHoldMs(ms) {
+  const next = ADMIN_HOLD_CHOICES.includes(ms) ? ms : 1500;
+  adminHoldMs = next;
+  try { localStorage.setItem('bv_admin_hold', String(next)); } catch (e) {}
+  const seg = document.getElementById('bv-admin-hold-seg');
+  if (seg) {
+    seg.querySelectorAll('button').forEach(b =>
+      b.classList.toggle('on', Number(b.dataset.ms) === next));
+  }
+  // A digit already waiting keeps the length it was armed with — re-arming it
+  // under a new one would silently give it more (or less) time than the bar
+  // on screen is showing.
+}
+
+function setAdminCollapsed(on) {
+  adminCollapsed = !!on;
+  try { localStorage.setItem('bv_admin_collapsed', adminCollapsed ? '1' : '0'); } catch (e) {}
+  if (adminCollapsed) adminClearPick();
+  syncAdminCaller();
+}
+
+// Forget the half-typed number: no armed digit, no timer, no ones bar.
+function adminClearPick() {
+  if (_adminTimer) { clearTimeout(_adminTimer); _adminTimer = null; }
+  _adminTens = null;
+  paintAdminBars();
+}
+
+function paintAdminBars() {
+  const onesBar = document.getElementById('admin-bar-ones');
+  const tensBar = document.getElementById('admin-bar-tens');
+  if (!tensBar || !onesBar) return;
+
+  tensBar.querySelectorAll('.admin-key').forEach(b => {
+    const armed = Number(b.dataset.tens) === _adminTens;
+    // Re-adding the class alone would not restart the drain — the animation is
+    // already running on that element — so take it off and force a reflow.
+    if (armed && !b.classList.contains('armed')) {
+      b.style.setProperty('--admin-hold', adminHoldMs + 'ms');
+      void b.offsetWidth;
+    }
+    b.classList.toggle('armed', armed);
+  });
+
+  if (_adminTens == null) {
+    onesBar.style.display = 'none';
+    return;
+  }
+  onesBar.style.display = 'flex';
+  const head = document.getElementById('admin-ones-head');
+  if (head) head.textContent = _adminTens + '_';
+  // 91–99 don't exist on a 90-ball board, so after a 9 only the 0 is live.
+  onesBar.querySelectorAll('.admin-key').forEach(b => {
+    const n = _adminTens * 10 + Number(b.dataset.ones);
+    b.disabled = (n > ADMIN_MAX_NUMBER);
+  });
+}
+
+function adminPressTens(d) {
+  vibrateShort();
+  // Pressing the armed digit again takes it back — a way out of a mistyped
+  // first digit that doesn't need anything else on screen to aim at.
+  if (_adminTens === d) { adminClearPick(); return; }
+  if (_adminTimer) clearTimeout(_adminTimer);
+  _adminTens = d;
+  paintAdminBars();
+  _adminTimer = setTimeout(() => {
+    // Nothing followed it, so it was the whole number.
+    _adminTimer = null;
+    const n = _adminTens;
+    adminClearPick();
+    if (n != null) adminCall(n);
+  }, adminHoldMs);
+}
+
+function adminPressOnes(d) {
+  if (_adminTens == null) return;
+  vibrateShort();
+  const n = _adminTens * 10 + d;
+  adminClearPick();
+  adminCall(n);
+}
+
+// Hand the number to the host. It comes back the ordinary way — through
+// callState — so nothing is marked here; the sheet lights up when the host
+// has actually called it, which is the only version of events that counts.
+function adminCall(n) {
+  const num = Number(n);
+  if (!(num >= 1 && num <= ADMIN_MAX_NUMBER)) return;
+  if (!channelRef || !sessionCode) {
+    toast('Ikke tilkoblet en sesjon', 'err', 2600);
+    return;
+  }
+  // Calling a number twice is nearly always a slip, and the host ignores the
+  // repeat anyway — so say so here rather than letting it vanish silently.
+  const g  = currentGame || activeGame;
+  const gs = gameState && gameState[g];
+  const already = gs && Array.isArray(gs.hostCalled) && gs.hostCalled.includes(num);
+  if (already) {
+    toast(num + ' er allerede kalt', 'warn', 2200);
+    return;
+  }
+  channelRef.child('remoteCalls').push({
+    number: String(num),
+    game:   g,
+    from:   phoneId || '',
+    ts:     firebase.database.ServerValue.TIMESTAMP
+  }).catch(() => toast('Fikk ikke sendt ' + num, 'err', 3000));
+  toast('Kalte ' + num, 'ok', 1500);
 }
 
 function setAwayMode(on) {
