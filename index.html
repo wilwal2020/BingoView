@@ -4225,9 +4225,12 @@ function updatePaperStats() {
   // Count what the HOST has called. In manual-play mode gs.called is only the
   // numbers the user has confirmed, so hostCalled is the honest total there;
   // in normal mode the two are the same list.
-  const called = (gs.hostCalled && gs.hostCalled.length)
-    ? gs.hostCalled.length
-    : ((gs.called && gs.called.length) || 0);
+  // Counted as a set: a number is called once, so what's on screen should be
+  // how many DIFFERENT numbers have gone — never a list length that a stray
+  // duplicate (including one restored from a session saved by an older build)
+  // could push past the real figure.
+  const source = (gs.hostCalled && gs.hostCalled.length) ? gs.hostCalled : (gs.called || []);
+  const called = new Set(source.map(Number)).size;
 
   const rekke = gs.rekke || 'Rekke1';
   const avg = rekkeAverages ? rekkeAverages[rekke] : null;
@@ -5189,21 +5192,55 @@ function makeShareKey() {
   return k;
 }
 
-// Remembered so the next share can delete its predecessor, keeping a single
-// user from piling up abandoned share nodes in the database over time.
-function readLastShareKey() { try { return localStorage.getItem('bv_lastShareKey') || ''; } catch (e) { return ''; } }
-function writeLastShareKey(k) { try { localStorage.setItem('bv_lastShareKey', k); } catch (e) {} }
+// The last share this device published: { key, p, c, sent }. Remembered so
+// that re-opening the share sheet hands out the SAME link instead of minting
+// a new one, and so the next genuinely-different share can clean up after a
+// link nobody ever received. `sent` flips once the link leaves the user's
+// hands (see markShareSent) — after that the node is never deleted, because
+// somebody out there is holding that URL.
+function readLastShare() {
+  try {
+    const raw = localStorage.getItem('bv_lastShare');
+    if (raw) { const o = JSON.parse(raw); if (o && o.key) return o; }
+    // Older builds stored the bare key. Treat it as already-sent: we can't
+    // know whether it was, and wrongly keeping a node beats killing a live link.
+    const legacy = localStorage.getItem('bv_lastShareKey');
+    if (legacy) return { key: legacy, p: '', c: '', sent: true };
+  } catch (e) {}
+  return null;
+}
+function writeLastShare(rec) {
+  try {
+    localStorage.setItem('bv_lastShare', JSON.stringify(rec));
+    localStorage.removeItem('bv_lastShareKey');
+  } catch (e) {}
+}
+// The link has been copied — from here on it belongs to whoever got it.
+function markShareSent() {
+  const rec = readLastShare();
+  if (rec && !rec.sent) writeLastShare({ ...rec, sent: true });
+}
 
-// Write the payload under a fresh key and resolve with the short URL. Rejects
-// if the database can't be reached, so the caller can fall back to ?p=.
+// Resolve with the short URL for this payload. Republishes the SAME key when
+// the payload hasn't changed, so a link already sent to someone keeps working
+// no matter how often the share sheet is re-opened. Rejects if the database
+// can't be reached, so the caller can fall back to ?p=.
 function publishShareLink(encoded, code) {
-  const key = makeShareKey();
+  const prev = readLastShare();
+  const same = prev && prev.p === encoded && (prev.c || '') === (code || '');
+  // Same payload → reuse the key. Still writes: the node may have been pruned,
+  // and re-setting identical data is harmless and keeps the URL alive.
+  const key = same ? prev.key : makeShareKey();
   const payload = { p: encoded, ts: firebase.database.ServerValue.TIMESTAMP };
   if (code) payload.c = code;
   return db.ref(SHARE_DB_PATH + key).set(payload).then(() => {
-    const prev = readLastShareKey();
-    if (prev && prev !== key) db.ref(SHARE_DB_PATH + prev).remove().catch(() => {});
-    writeLastShareKey(key);
+    if (!same) {
+      // Only ever prune a link that was never handed out.
+      if (prev && prev.key !== key && !prev.sent) {
+        db.ref(SHARE_DB_PATH + prev.key).remove().catch(() => {});
+      }
+      writeLastShare({ key, p: encoded, c: code || '', sent: false });
+    }
     return location.origin + location.pathname + '?s=' + key;
   });
 }
@@ -5655,6 +5692,9 @@ function initPhone() {
   // Called when the user really shares (copies the link). Only now do the
   // selected blocks count as "given away", handing the name to the receiver.
   function commitShareOwnership() {
+    // The URL is out in the world now — it must never be pruned from under
+    // the person who receives it, however late they open it.
+    markShareSent();
     _shareSelected.forEach(idx => {
       if (blocks[idx]) blocks[idx].sharedAway = true;
     });
@@ -6300,6 +6340,17 @@ async function connectPhone(code, opts = {}) {
   // attaches, so hold celebrations across that whole opening burst.
   fxBeginCatchUp();
 
+  // Games we have seen an authoritative callState broadcast for. The legacy
+  // callLog below must never touch these. callLog is append-only — the host
+  // only ever clears it on a reset, so an undone number stays in it forever —
+  // and child_added replays the whole history the moment it attaches. Running
+  // both at once added that replay on top of the list callState had already
+  // given us: the "kalt" figure came out too high (how much depended on where
+  // in the replay the callState snapshot landed), and worse, undone numbers
+  // and the rekke attached to a long-past call were re-applied, which could
+  // paint a row as complete on a sheet that had not won.
+  const csActive = {};
+
   // Primary real-time sync: full called list per game from main site.
   // Fires immediately on connect (catches up), then on every call/undo.
   getGameIds().forEach(g => {
@@ -6307,6 +6358,7 @@ async function connectPhone(code, opts = {}) {
     const csHandler = (snap) => {
       if (gen !== _connGeneration) return;
       const data = snap.val();
+      if (data) csActive[g] = true;
       if (!data || !data.ts) return;
       if (data.ts <= resetTs) return;
       const nums = Array.isArray(data.numbers) ? data.numbers : [];
@@ -6326,26 +6378,38 @@ async function connectPhone(code, opts = {}) {
   });
 
   // Legacy callLog — kept so older main-site versions still work.
-  // Skipped if callState is already providing data for that game.
+  // Genuinely skipped when callState is in play: a modern host writes a
+  // callState node per game, so its mere existence is the signal that the
+  // log is redundant. The check has to be an explicit probe rather than
+  // "have we received a callState snapshot yet", because the log's replay
+  // races the first callState snapshot and can win.
   channelRef.child('resetTs').once('value', (snap) => {
     if (gen !== _connGeneration) return;  // reconnected while waiting
     resetTs = snap.val() || 0;
-    const clRef = channelRef.child('callLog');
-    const clHandler = (snap2) => {
+    channelRef.child('callState').once('value', (csSnap) => {
       if (gen !== _connGeneration) return;
-      const data = snap2.val();
-      if (!data || !data.number || !data.ts) return;
-      if (data.ts <= resetTs) return;
-      // Only use callLog if callState isn't being used (older main-site build)
-      if (!data.undo) handleCalledNumber(data.number, data.game, data.rekke);
-    };
-    // child_added fires once for every entry that ALREADY exists, so
-    // attaching here replays the entire call history as if it were live.
-    // Restart the catch-up window right at the attach, because resetTs
-    // resolving is async and may land well after connect.
-    fxBeginCatchUp();
-    clRef.on('child_added', clHandler);
-    _channelDetachFns.push(() => clRef.off('child_added', clHandler));
+      if (csSnap.exists()) return;        // modern host — callState is authoritative
+      const clRef = channelRef.child('callLog');
+      const clHandler = (snap2) => {
+        if (gen !== _connGeneration) return;
+        const data = snap2.val();
+        if (!data || !data.number || !data.ts) return;
+        if (data.ts <= resetTs) return;
+        // A host that starts writing callState mid-session (it had no node
+        // yet because nothing had been called) takes over from here.
+        const g = (data.game && getGameIds().includes(data.game))
+          ? data.game : (currentGame || activeGame);
+        if (csActive[g]) return;
+        if (!data.undo) handleCalledNumber(data.number, data.game, data.rekke);
+      };
+      // child_added fires once for every entry that ALREADY exists, so
+      // attaching here replays the entire call history as if it were live.
+      // Restart the catch-up window right at the attach, because the probes
+      // above are async and may land well after connect.
+      fxBeginCatchUp();
+      clRef.on('child_added', clHandler);
+      _channelDetachFns.push(() => clRef.off('child_added', clHandler));
+    });
   });
 
   // Game/rekke state from main site
@@ -7557,7 +7621,11 @@ function handleCalledNumber(number, game, rekke) {
     }
 
     if (!Array.isArray(gs.hostCalled)) gs.hostCalled = [];
-    if (gs.hostCalled[gs.hostCalled.length - 1] !== num) gs.hostCalled.push(num);
+    // Dedupe against the WHOLE list, not just the last entry. A number can
+    // only be called once per game, so a repeat is always an echo (a replayed
+    // log entry, a re-fired listener) — and the last-entry-only check let
+    // those through, inflating the called count.
+    if (!gs.hostCalled.includes(num)) gs.hostCalled.push(num);
 
     if (Array.isArray(gs.wrong)) {
       const w = gs.wrong.indexOf(num);
@@ -7565,7 +7633,7 @@ function handleCalledNumber(number, game, rekke) {
     }
 
     if (!manualPlayMode) {
-      if (gs.called[gs.called.length - 1] !== num) gs.called.push(num);
+      if (!gs.called.includes(num)) gs.called.push(num);
     } else {
       // Everything but this brand-new number gets marked for the user
       autoConfirmManualPlay(gs);
