@@ -2121,7 +2121,7 @@ body.fx-on .manual-switch .manual-switch-thumb {
 body.start-parked #admin-caller { display: none !important; }
 /* Collapsed down to a puck: the grip and the fold button survive, so it can
    still be moved out of the way without being unfolded first. */
-#admin-caller.collapsed .admin-head,
+#admin-caller.collapsed .admin-undo,
 #admin-caller.collapsed .admin-keys { display: none; }
 
 .admin-bar {
@@ -2162,24 +2162,25 @@ body.start-parked #admin-caller { display: none !important; }
 .admin-grip.dragging::before,
 .admin-grip.dragging::after { background: var(--gold); }
 
-/* Readout of the half-typed number, and the way back out of it. Always in the
-   layout, empty or not — a bar that grew a row on the first press would move
-   every key out from under the finger that just pressed one. */
-.admin-head {
+/* Undo, which doubles as the readout: it names the number it would take back,
+   so what the tap does is never a guess. Always in the layout, labelled or
+   not — a bar that grew a row on the first press would move every key out
+   from under the finger that just pressed one. */
+.admin-undo {
   width: 40px;
   border: none;
   background: transparent;
   text-align: center;
   font-family: var(--mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
+  font-size: 0.66rem;
   color: var(--gold);
   padding: 1px 0 4px;
   border-bottom: 1px solid rgba(255,255,255,0.08);
   margin-bottom: 2px;
   cursor: pointer;
+  white-space: nowrap;
 }
-.admin-head:disabled { color: var(--dim); opacity: 0.5; cursor: default; }
+.admin-undo:disabled { color: var(--dim); opacity: 0.45; cursor: default; }
 .admin-key {
   position: relative;
   overflow: hidden;
@@ -2724,7 +2725,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
   <div id="admin-caller" style="display:none">
     <div class="admin-bar" role="group" aria-label="Kall et tall">
       <div class="admin-grip" id="admin-grip" title="Dra for å flytte" aria-label="Flytt tallvelgeren"></div>
-      <button type="button" class="admin-head" id="admin-head" title="Avbryt tallet" disabled>–</button>
+      <button type="button" class="admin-undo" id="admin-undo" title="Ingenting å angre" disabled>↶</button>
       <div class="admin-keys" id="admin-keys">
         <button type="button" class="admin-key" data-key="0">0</button>
         <button type="button" class="admin-key" data-key="1">1</button>
@@ -6453,8 +6454,7 @@ function initPhone() {
     const key = e.target.closest(".admin-key");
     if (key && !key.disabled) adminPressKey(Number(key.dataset.key));
   });
-  // The readout doubles as the way out of a half-typed number.
-  document.getElementById("admin-head").addEventListener("click", adminClearPick);
+  document.getElementById("admin-undo").addEventListener("click", adminUndo);
   document.getElementById("admin-fold").addEventListener("click", () => {
     setAdminCollapsed(!adminCollapsed);
   });
@@ -7685,11 +7685,51 @@ function paintAdminCaller() {
       : (armedDigit * 10 + d > ADMIN_MAX_NUMBER);
   });
 
-  const head = document.getElementById('admin-head');
-  if (head) {
-    head.textContent = (armedDigit == null) ? '–' : (armedDigit + ' ✕');
-    head.disabled = (armedDigit == null);
+  // Undo always names its target, so the tap is never a guess: the digit
+  // sitting half-typed if there is one, otherwise the last number on the
+  // board. Nothing to take back leaves the arrow there but dead, which reads
+  // as "not now" where a blank row would just look broken.
+  const undo = document.getElementById('admin-undo');
+  if (undo) {
+    const target = (armedDigit != null) ? armedDigit : adminUndoTarget();
+    undo.textContent = (target == null) ? '↶' : ('↶' + target);
+    undo.disabled = (target == null);
+    undo.title = (target == null) ? 'Ingenting å angre'
+               : (armedDigit != null) ? ('Angre sifferet ' + target)
+               : ('Angre ' + target + ' — tar det av tavla');
   }
+}
+
+// The number an undo would take back: the most recent call in the game the
+// host is on, whoever made it. Read off the board rather than remembered from
+// our own sends, so the label can't name a number that has since been buried
+// under later calls — undoing that would punch a hole in the middle.
+function adminUndoTarget() {
+  const gs = gameState && gameState[currentGame || activeGame];
+  const list = (gs && Array.isArray(gs.hostCalled)) ? gs.hostCalled : [];
+  return list.length ? list[list.length - 1] : null;
+}
+
+// Undo the most recent thing: a half-typed digit if one is waiting, otherwise
+// the last number called. Like a call, the un-call is the host's to perform —
+// we ask, and the board comes back changed through callState.
+function adminUndo() {
+  if (_adminTens != null) { vibrateShort(); adminClearPick(); return; }
+  const n = adminUndoTarget();
+  if (n == null) return;
+  if (!channelRef || !sessionCode) {
+    toast('Ikke tilkoblet en sesjon', 'err', 2600);
+    return;
+  }
+  vibrateShort();
+  channelRef.child('remoteCalls').push({
+    action: 'uncall',
+    number: String(n),
+    game:   currentGame || activeGame,
+    from:   phoneId || '',
+    ts:     firebase.database.ServerValue.TIMESTAMP
+  }).catch(() => toast('Fikk ikke angret ' + n, 'err', 3000));
+  toast('Angret ' + n, 'ok', 1500);
 }
 
 // One bar, pressed once or twice. The first press arms a digit; a second one
@@ -8213,6 +8253,7 @@ function handleCalledNumber(number, game, rekke) {
   checkProximityTransition(target);
   refreshBlockTabs();
   saveSession();
+  paintAdminCaller();   // the newest call is what an undo would take back
 }
 
 // Full reconciliation from the authoritative callState broadcast.
@@ -8347,6 +8388,8 @@ function reconcileGameState(gameKey, numbers, rekke) {
   // Refresh block badges (non-active blocks may have changed proximity)
   refreshBlockTabs();
   saveSession();
+  // The board moved, so the number an undo would take back moved with it.
+  paintAdminCaller();
   // Restored last: everything above can trigger FX, and this function has no
   // early returns, so this is the single exit point.
   _fxCatchUp = prevCatchUp;
@@ -8385,6 +8428,8 @@ function applyRemoteState(game, rekke) {
   if (changed && !pendingVisible) renderActiveGame();
   else { refreshGameTabs(); updateRekkeLabel(); updateProximityHighlights(activeGame); }
   refreshBlockTabs();
+  // A different game means a different last call to take back.
+  paintAdminCaller();
 }
 
 function handleRemoteReset(scope, game) {
