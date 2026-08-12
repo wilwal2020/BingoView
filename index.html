@@ -2119,9 +2119,10 @@ body.fx-on .manual-switch .manual-switch-thumb {
 }
 /* Parked on the code screen there is no sheet — and nothing to call into. */
 body.start-parked #admin-caller { display: none !important; }
-#admin-caller.collapsed #admin-bars { display: none; }
-
-#admin-bars { display: flex; align-items: center; gap: 6px; }
+/* Collapsed down to a puck: the grip and the fold button survive, so it can
+   still be moved out of the way without being unfolded first. */
+#admin-caller.collapsed .admin-head,
+#admin-caller.collapsed .admin-keys { display: none; }
 
 .admin-bar {
   display: flex;
@@ -2217,20 +2218,32 @@ body.start-parked #admin-caller { display: none !important; }
 }
 @keyframes admin-drain { from { transform: scaleX(1); } to { transform: scaleX(0); } }
 
-.admin-handle {
-  width: 22px;
-  height: 78px;
-  flex-shrink: 0;
-  border: 1px solid var(--nav-line-2);
-  border-right: none;
-  border-radius: 10px 0 0 10px;
-  background: rgba(10,16,32,0.86);
-  color: var(--gold);
+.admin-keys { display: flex; flex-direction: column; gap: 3px; }
+
+/* Fold control, at the foot of the column and shaped like the readout at its
+   head — the two ends of the bar are the chrome, everything between them is
+   the number. It was a tab clipped to the right edge before, which only ever
+   made sense while the bar was pinned to that edge. */
+.admin-fold {
+  width: 40px;
+  height: 22px;
+  margin-top: 3px;
+  padding-top: 4px;
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  background: transparent;
+  color: var(--dim);
   font-family: var(--mono);
-  font-size: 1rem;
+  font-size: 0.85rem;
+  line-height: 1;
   cursor: pointer;
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+}
+.admin-fold:hover { color: var(--gold); }
+/* Nothing above it to be divided from once the keys are gone. */
+#admin-caller.collapsed .admin-fold {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 0;
 }
 
 /* Password gate — above the settings overlay it is opened from. */
@@ -2709,10 +2722,10 @@ header { padding: 7px 13px; gap: 5px 7px; }
        again for the second — or leave it alone and it goes out on its own.
        A zero at each end so there is always one near the thumb. -->
   <div id="admin-caller" style="display:none">
-    <div id="admin-bars">
-      <div class="admin-bar" role="group" aria-label="Kall et tall">
-        <div class="admin-grip" id="admin-grip" title="Dra for å flytte" aria-label="Flytt tallvelgeren"></div>
-        <button type="button" class="admin-head" id="admin-head" title="Avbryt tallet" disabled>–</button>
+    <div class="admin-bar" role="group" aria-label="Kall et tall">
+      <div class="admin-grip" id="admin-grip" title="Dra for å flytte" aria-label="Flytt tallvelgeren"></div>
+      <button type="button" class="admin-head" id="admin-head" title="Avbryt tallet" disabled>–</button>
+      <div class="admin-keys" id="admin-keys">
         <button type="button" class="admin-key" data-key="0">0</button>
         <button type="button" class="admin-key" data-key="1">1</button>
         <button type="button" class="admin-key" data-key="2">2</button>
@@ -2725,9 +2738,9 @@ header { padding: 7px 13px; gap: 5px 7px; }
         <button type="button" class="admin-key" data-key="9">9</button>
         <button type="button" class="admin-key" data-key="0">0</button>
       </div>
+      <button type="button" class="admin-fold" id="admin-fold"
+              aria-expanded="true" aria-controls="admin-keys" title="Skjul tallene">⌃</button>
     </div>
-    <button type="button" class="admin-handle" id="admin-handle"
-            aria-expanded="true" aria-controls="admin-bars" title="Skjul tallvelgeren">›</button>
   </div>
 
   <!-- Share modal — QR code + compact URL + block selector -->
@@ -6442,7 +6455,7 @@ function initPhone() {
   });
   // The readout doubles as the way out of a half-typed number.
   document.getElementById("admin-head").addEventListener("click", adminClearPick);
-  document.getElementById("admin-handle").addEventListener("click", () => {
+  document.getElementById("admin-fold").addEventListener("click", () => {
     setAdminCollapsed(!adminCollapsed);
   });
   initAdminDrag();
@@ -7518,11 +7531,14 @@ function syncAdminCaller() {
   const show = adminMode && !!channelRef && !!sessionCode;
   el.style.display = show ? 'flex' : 'none';
   el.classList.toggle('collapsed', adminCollapsed);
-  const handle = document.getElementById('admin-handle');
-  if (handle) {
-    handle.textContent = adminCollapsed ? '‹' : '›';
-    handle.setAttribute('aria-expanded', adminCollapsed ? 'false' : 'true');
-    handle.title = adminCollapsed ? 'Vis tallvelgeren' : 'Skjul tallvelgeren';
+  const fold = document.getElementById('admin-fold');
+  if (fold) {
+    // The chevron points the way the button itself is about to travel: the bar
+    // hangs off an anchored top edge, so folding walks this control up the
+    // screen and unfolding pushes it back down.
+    fold.textContent = adminCollapsed ? '⌄' : '⌃';
+    fold.setAttribute('aria-expanded', adminCollapsed ? 'false' : 'true');
+    fold.title = adminCollapsed ? 'Vis tallene' : 'Skjul tallene';
   }
   if (show) applyAdminPos();
   if (!show) adminClearPick();
