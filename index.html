@@ -347,6 +347,72 @@ body.start-parked #rekke-buttons { display: none !important; }
 }
 .cam-side-slot { width: 44px; }
 
+/* White shutter flash on capture */
+#cam-flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+.cam-flash-anim { animation: camFlash 260ms ease-out; }
+@keyframes camFlash {
+  0%   { opacity: 0; }
+  12%  { opacity: 0.9; }
+  100% { opacity: 0; }
+}
+
+/* Big centred "saved — next game" confirmation card */
+#cam-confirm {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 36px;
+  background: rgba(0,0,0,0.72);
+  border: 2px solid var(--gold);
+  border-radius: 20px;
+  box-shadow: 0 10px 44px rgba(0,0,0,0.55);
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;   /* never blocks the next shot */
+}
+.cam-confirm-anim { animation: camConfirm 1250ms ease-out; }
+@keyframes camConfirm {
+  0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.6); }
+  14%  { opacity: 1; transform: translate(-50%,-50%) scale(1.08); }
+  26%  { transform: translate(-50%,-50%) scale(1); }
+  72%  { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%,-50%) scale(1); }
+}
+.cam-confirm-check {
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  font-size: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cam-confirm-saved {
+  font-family: var(--display);
+  font-size: 1.7rem;
+  letter-spacing: 0.05em;
+  color: var(--gold);
+}
+.cam-confirm-next {
+  font-family: var(--mono);
+  font-size: 1rem;
+  color: #fff;
+}
+.cam-confirm-next b { color: var(--gold); }
+
 .apikey-row {
   width: 100%;
   display: flex;
@@ -2924,6 +2990,9 @@ header { padding: 7px 13px; gap: 5px 7px; }
     <!-- In-page camera viewfinder — take the photo without leaving the site -->
     <div id="camera-overlay">
       <video id="camera-video" playsinline autoplay muted></video>
+      <!-- Shutter flash + big "saved, next game" confirmation card -->
+      <div id="cam-flash"></div>
+      <div id="cam-confirm"></div>
       <div class="cam-bar cam-bar-top">
         <button type="button" id="cam-close" class="cam-btn" aria-label="Lukk kamera">✕</button>
         <span class="cam-hint" id="cam-hint">Fyll rammen med bingoarket</span>
@@ -8295,6 +8364,29 @@ function updateCamHint() {
   hint.textContent = `Ta bilde av ${getGameName(activeGame)}`;
 }
 
+// White shutter flash + a short haptic buzz — the unmistakable "photo taken".
+function flashCamera() {
+  if (navigator.vibrate) { try { navigator.vibrate(35); } catch (e) {} }
+  const flash = document.getElementById("cam-flash");
+  flash.classList.remove("cam-flash-anim");
+  void flash.offsetWidth;             // reflow so the animation restarts
+  flash.classList.add("cam-flash-anim");
+}
+
+// Big centred card confirming the game just saved and, if any, the next one up.
+function showCamConfirm(savedName, nextName) {
+  const el = document.getElementById("cam-confirm");
+  el.innerHTML =
+    `<div class="cam-confirm-check">✓</div>` +
+    `<div class="cam-confirm-saved">${savedName} lagret</div>` +
+    (nextName
+      ? `<div class="cam-confirm-next">Neste: <b>${nextName}</b></div>`
+      : `<div class="cam-confirm-next">Alle spill fotografert 🎉</div>`);
+  el.classList.remove("cam-confirm-anim");
+  void el.offsetWidth;
+  el.classList.add("cam-confirm-anim");
+}
+
 function captureCamera() {
   const video = document.getElementById("camera-video");
   const w = video.videoWidth, h = video.videoHeight;
@@ -8308,7 +8400,9 @@ function captureCamera() {
   canvas.toBlob((blob) => {
     if (!blob) { shutter.disabled = false; return; }
     const file = new File([blob], `scan-${Date.now()}.jpg`, { type: "image/jpeg" });
+    const savedName = getGameName(activeGame);
     pendingPhotos[activeGame] = file;
+    flashCamera();
 
     // Auto-advance: if another game on this block still needs a photo, switch
     // to it and stay in the camera so the whole block is captured in one run,
@@ -8319,12 +8413,13 @@ function captureCamera() {
       refreshGameTabs();
       updateUploadTitle();
       updateCamHint();
-      toast(`Bilde lagret — neste: ${getGameName(nextEmpty)}`, "ok", 1600);
+      showCamConfirm(savedName, getGameName(nextEmpty));
       shutter.disabled = false;   // ready for the next shot
     } else {
-      // Every game has a photo queued — leave the camera and review the queue.
-      closeCamera();
-      showPendingScreen();
+      // Every game has a photo queued — show the confirmation, then leave the
+      // camera and review the queue.
+      showCamConfirm(savedName, null);
+      setTimeout(() => { closeCamera(); showPendingScreen(); }, 1050);
     }
   }, "image/jpeg", 0.95);
 }
