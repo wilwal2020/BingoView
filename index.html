@@ -2926,7 +2926,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
       <video id="camera-video" playsinline autoplay muted></video>
       <div class="cam-bar cam-bar-top">
         <button type="button" id="cam-close" class="cam-btn" aria-label="Lukk kamera">✕</button>
-        <span class="cam-hint">Fyll rammen med bingoarket</span>
+        <span class="cam-hint" id="cam-hint">Fyll rammen med bingoarket</span>
         <button type="button" id="cam-flip" class="cam-btn" aria-label="Bytt kamera">🔄</button>
       </div>
       <div class="cam-bar cam-bar-bottom">
@@ -6025,7 +6025,12 @@ function initPhone() {
   });
 
   // Camera controls
-  document.getElementById("cam-close").addEventListener("click", closeCamera);
+  document.getElementById("cam-close").addEventListener("click", () => {
+    closeCamera();
+    // If they've already captured some games this run, surface the queue so
+    // those photos aren't stranded behind the upload screen.
+    if (Object.keys(pendingPhotos).length > 0) showPendingScreen();
+  });
   document.getElementById("cam-flip").addEventListener("click", flipCamera);
   document.getElementById("cam-shutter").addEventListener("click", captureCamera);
 
@@ -8245,6 +8250,7 @@ async function openCamera() {
   const overlay = document.getElementById("camera-overlay");
   overlay.style.display = "flex";
   document.getElementById("cam-shutter").disabled = false;
+  updateCamHint();
   try {
     await startCamStream();
   } catch (err) {
@@ -8281,6 +8287,14 @@ async function flipCamera() {
   }
 }
 
+// Show which game the shutter will capture next, so a multi-game run in the
+// live camera is never ambiguous.
+function updateCamHint() {
+  const hint = document.getElementById("cam-hint");
+  if (!hint) return;
+  hint.textContent = `Ta bilde av ${getGameName(activeGame)}`;
+}
+
 function captureCamera() {
   const video = document.getElementById("camera-video");
   const w = video.videoWidth, h = video.videoHeight;
@@ -8294,8 +8308,24 @@ function captureCamera() {
   canvas.toBlob((blob) => {
     if (!blob) { shutter.disabled = false; return; }
     const file = new File([blob], `scan-${Date.now()}.jpg`, { type: "image/jpeg" });
-    closeCamera();
-    queuePhoto(file);
+    pendingPhotos[activeGame] = file;
+
+    // Auto-advance: if another game on this block still needs a photo, switch
+    // to it and stay in the camera so the whole block is captured in one run,
+    // no trip back to the pending screen between shots.
+    const nextEmpty = getGameIds().find(g => !gameState[g].strips && !pendingPhotos[g]);
+    if (nextEmpty) {
+      activeGame = nextEmpty;
+      refreshGameTabs();
+      updateUploadTitle();
+      updateCamHint();
+      toast(`Bilde lagret — neste: ${getGameName(nextEmpty)}`, "ok", 1600);
+      shutter.disabled = false;   // ready for the next shot
+    } else {
+      // Every game has a photo queued — leave the camera and review the queue.
+      closeCamera();
+      showPendingScreen();
+    }
   }, "image/jpeg", 0.95);
 }
 
