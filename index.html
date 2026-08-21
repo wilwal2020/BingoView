@@ -244,7 +244,6 @@ body.start-parked #rekke-buttons { display: none !important; }
 }
 
 .upload-zone:active { border-color: var(--gold); }
-.upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .upload-zone .up-icon { font-size: 3rem; margin-bottom: 12px; }
 .upload-zone h3 { font-family: var(--display); font-size: 1.6rem; color: var(--gold); letter-spacing: 0.06em; }
 .upload-zone p { font-size: 0.72rem; color: var(--dim); margin-top: 6px; }
@@ -255,6 +254,98 @@ body.start-parked #rekke-buttons { display: none !important; }
   text-transform: uppercase;
   letter-spacing: 0.12em;
 }
+
+/* Small secondary "pick from gallery" link under the scan zone */
+.upload-gallery {
+  background: none;
+  border: none;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 4px;
+}
+.upload-gallery:active { color: var(--gold); }
+
+/* ── In-page camera (live viewfinder, no native camera app) ── */
+#camera-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  background: #000;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+#camera-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.cam-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 24px;
+}
+.cam-bar-top {
+  top: 0;
+  height: calc(60px + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+  justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+}
+.cam-bar-bottom {
+  bottom: 0;
+  height: calc(140px + env(safe-area-inset-bottom));
+  padding-bottom: env(safe-area-inset-bottom);
+  background: linear-gradient(to top, rgba(0,0,0,0.55), transparent);
+}
+.cam-hint {
+  color: rgba(255,255,255,0.85);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+}
+.cam-btn {
+  background: rgba(0,0,0,0.35);
+  border: none;
+  color: #fff;
+  font-size: 1.4rem;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.cam-btn:active { background: rgba(255,255,255,0.2); }
+#cam-shutter {
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  border: 4px solid rgba(255,255,255,0.55);
+  background: #fff;
+  cursor: pointer;
+  padding: 0;
+}
+#cam-shutter:active { transform: scale(0.92); }
+#cam-shutter:disabled { opacity: 0.4; }
+.cam-bottom-inner {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.cam-side-slot { width: 44px; }
 
 .apikey-row {
   width: 100%;
@@ -2809,12 +2900,15 @@ header { padding: 7px 13px; gap: 5px 7px; }
               style="display:none;width:100%;margin-bottom:12px;background:var(--gold);color:#000;border:none;border-radius:8px;padding:11px;font-size:0.95rem;font-weight:700;cursor:pointer;">
         ✓ Ferdig — vis arkene mine
       </button>
-      <div class="upload-zone">
-        <input type="file" id="file-input" accept="image/*" capture="environment">
-        <div class="up-icon">📄</div>
+      <div class="upload-zone" id="upload-zone">
+        <div class="up-icon">📷</div>
         <h3 id="upload-title">Skann ark</h3>
         <p id="upload-sub">Trykk for å ta bilde av bingoarket for det aktive spillet</p>
       </div>
+      <!-- Hidden picker — used as the "gallery" fallback and when the live
+           camera isn't available (no getUserMedia / permission denied). -->
+      <input type="file" id="file-input" accept="image/*" style="display:none">
+      <button type="button" id="btn-pick-gallery" class="upload-gallery">📁 Velg fra galleri</button>
       <div class="upload-or">eller</div>
       <button id="btn-generate-paper" class="pending-btn pending-btn-secondary" style="width:100%;font-size:0.95rem;">
         🎲 Generer tilfeldig ark
@@ -2824,6 +2918,23 @@ header { padding: 7px 13px; gap: 5px 7px; }
         <input type="password" id="apikey-input" class="apikey-input"
                placeholder="sk-ant-..." autocomplete="off" spellcheck="false">
         <p class="apikey-hint">Lagres kun lokalt på telefonen og sendes bare til Anthropic</p>
+      </div>
+    </div>
+
+    <!-- In-page camera viewfinder — take the photo without leaving the site -->
+    <div id="camera-overlay">
+      <video id="camera-video" playsinline autoplay muted></video>
+      <div class="cam-bar cam-bar-top">
+        <button type="button" id="cam-close" class="cam-btn" aria-label="Lukk kamera">✕</button>
+        <span class="cam-hint">Fyll rammen med bingoarket</span>
+        <button type="button" id="cam-flip" class="cam-btn" aria-label="Bytt kamera">🔄</button>
+      </div>
+      <div class="cam-bar cam-bar-bottom">
+        <div class="cam-bottom-inner">
+          <div class="cam-side-slot"></div>
+          <button type="button" id="cam-shutter" aria-label="Ta bilde"></button>
+          <div class="cam-side-slot"></div>
+        </div>
       </div>
     </div>
 
@@ -5884,12 +5995,22 @@ function initPhone() {
     }
   });
   document.getElementById("btn-finish-scanning").addEventListener("click", finishScanning);
+
   document.getElementById("file-input").addEventListener("change", (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-    pendingPhotos[activeGame] = file;
     e.target.value = "";
-    showPendingScreen();
+    queuePhoto(file);
+  });
+
+  // Tapping the scan zone opens the in-page camera (see openCamera below).
+  document.getElementById("upload-zone").addEventListener("click", openCamera);
+
+  // "Velg fra galleri" — open the OS picker without capture so it offers the
+  // photo library rather than jumping to the camera.
+  document.getElementById("btn-pick-gallery").addEventListener("click", () => {
+    const inp = document.getElementById("file-input");
+    inp.removeAttribute("capture");
+    inp.click();
   });
 
   document.getElementById("btn-take-next").addEventListener("click", () => {
@@ -5898,14 +6019,15 @@ function initPhone() {
     activeGame = nextEmpty;
     refreshGameTabs();
     updateUploadTitle();
-    // Open the camera straight from the pending screen. Previously we swapped
-    // to the "Skann ark" upload screen first (plus a 120ms delay), which
-    // flashed on-screen and made it look like the flow had reset before the
-    // camera appeared. The file-input .click() is still fired inside this
-    // gesture handler, and the change handler returns to the pending screen
-    // once a photo is taken.
-    document.getElementById("file-input").click();
+    // Open the live camera straight from the pending screen so scanning the
+    // next game is one tap, no app switch.
+    openCamera();
   });
+
+  // Camera controls
+  document.getElementById("cam-close").addEventListener("click", closeCamera);
+  document.getElementById("cam-flip").addEventListener("click", flipCamera);
+  document.getElementById("cam-shutter").addEventListener("click", captureCamera);
 
   document.getElementById("btn-process-now").addEventListener("click", async () => {
     await processAllPending();
@@ -8071,6 +8193,110 @@ function finishScanning() {
     switchBlock(targetBlock);
     document.getElementById("phone-upload").style.display = "none";
   }
+}
+
+// ── In-page camera ───────────────────────────────────────────
+// A live viewfinder inside the site so scanning a sheet never leaves the
+// page for the native camera app. Falls back to the OS file picker (with
+// capture) when getUserMedia is unavailable or the user blocks the camera.
+let _camStream = null;
+let _camFacing = "environment";   // back camera by default
+
+// Queue a captured/picked photo for the active game and show the pending
+// screen. Shared by the live camera and the gallery/native-picker fallback.
+function queuePhoto(file) {
+  if (!file) return;
+  pendingPhotos[activeGame] = file;
+  showPendingScreen();
+}
+
+function nativeCameraFallback() {
+  const inp = document.getElementById("file-input");
+  inp.setAttribute("capture", "environment");
+  inp.click();
+}
+
+async function startCamStream() {
+  const video = document.getElementById("camera-video");
+  _camStream = await navigator.mediaDevices.getUserMedia({
+    video: {
+      facingMode: { ideal: _camFacing },
+      width:  { ideal: 2560 },
+      height: { ideal: 1440 }
+    },
+    audio: false
+  });
+  video.srcObject = _camStream;
+  // iOS won't autoplay reliably without an explicit play() in the gesture.
+  try { await video.play(); } catch (e) {}
+}
+
+async function openCamera() {
+  // Same guard as the picker — don't start a second scan mid-OCR.
+  if (_activeScanCount > 0) {
+    toast("Vent til den pågående skanningen er ferdig", "warn", 3000);
+    return;
+  }
+  // No live-camera support (old browser, insecure context) → native picker.
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    nativeCameraFallback();
+    return;
+  }
+  const overlay = document.getElementById("camera-overlay");
+  overlay.style.display = "flex";
+  document.getElementById("cam-shutter").disabled = false;
+  try {
+    await startCamStream();
+  } catch (err) {
+    // Permission denied, no camera, or in-use elsewhere → fall back.
+    closeCamera();
+    toast("Kunne ikke åpne kameraet – bruker telefonens kamera", "warn", 3500);
+    nativeCameraFallback();
+  }
+}
+
+function stopCamStream() {
+  if (_camStream) {
+    _camStream.getTracks().forEach(t => t.stop());
+    _camStream = null;
+  }
+  const video = document.getElementById("camera-video");
+  if (video) video.srcObject = null;
+}
+
+function closeCamera() {
+  stopCamStream();
+  document.getElementById("camera-overlay").style.display = "none";
+}
+
+async function flipCamera() {
+  _camFacing = (_camFacing === "environment") ? "user" : "environment";
+  stopCamStream();
+  try {
+    await startCamStream();
+  } catch (err) {
+    // Requested camera missing (e.g. no front cam) → revert.
+    _camFacing = (_camFacing === "environment") ? "user" : "environment";
+    try { await startCamStream(); } catch (e) { closeCamera(); }
+  }
+}
+
+function captureCamera() {
+  const video = document.getElementById("camera-video");
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) return;   // stream not ready yet
+  const shutter = document.getElementById("cam-shutter");
+  shutter.disabled = true;   // block double-taps while encoding
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  canvas.getContext("2d").drawImage(video, 0, 0, w, h);
+  canvas.toBlob((blob) => {
+    if (!blob) { shutter.disabled = false; return; }
+    const file = new File([blob], `scan-${Date.now()}.jpg`, { type: "image/jpeg" });
+    closeCamera();
+    queuePhoto(file);
+  }, "image/jpeg", 0.95);
 }
 
 function showPendingScreen() {
