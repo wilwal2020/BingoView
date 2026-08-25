@@ -368,16 +368,23 @@ body.start-parked #rekke-buttons { display: none !important; }
 .cam-process-btn:active { transform: scale(0.95); }
 .cam-process-btn:disabled { opacity: 0.32; cursor: default; }
 
-/* Row of per-game thumbnails above the shutter bar. */
+/* Per-game thumbnails, stacked vertically down the RIGHT edge. The bingo
+   paper being photographed sits in the middle of the frame, so a bottom row
+   of thumbnails covered exactly what you were aiming at — pinning them to the
+   right (empty) side keeps the block clear while framing. Vertically centred
+   between the top and bottom camera bars. */
 .cam-thumbs {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(150px + env(safe-area-inset-bottom));
+  right: calc(8px + env(safe-area-inset-right));
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
+  flex-direction: column;
   gap: 8px;
+  align-items: flex-end;
   justify-content: center;
-  padding: 0 16px;
+  /* Keep a tall 4-game stack from sliding under the top/bottom bars. */
+  max-height: calc(100% - 240px);
   z-index: 2;
   pointer-events: none;   /* only the buttons themselves are tappable */
 }
@@ -6056,6 +6063,17 @@ function showShareModal(url) {
   urlBox.textContent = url;
   urlBox.dataset.url = url;
 
+  // A short ?s= link is now on screen as a scannable QR code. Someone can scan
+  // it straight off the phone WITHOUT the sharer ever pressing "Kopier lenke",
+  // so from this moment the link has effectively been handed out and must never
+  // be pruned from Firebase — otherwise the next reshare (a different block
+  // selection mints a new key) would delete this node, and the person who
+  // scanned the QR later gets "Delingslenken finnes ikke lenger" and falls
+  // back to whatever old session they had cached. Marking it sent here closes
+  // that gap. (The inline ?p= fallback carries its whole payload in the URL, so
+  // it has no Firebase node to protect.)
+  if (typeof url === 'string' && url.indexOf('?s=') !== -1) markShareSent();
+
   // Generate QR code
   try {
     const qr = qrcode(0, 'L'); // auto type, low error correction
@@ -7366,12 +7384,61 @@ Example:
     // straight to the captured gs so block-switches don't corrupt anything.
     const resolvedGame = targetGame || activeGame;
     const gs = targetGs || gameState[resolvedGame];
+
+    // Snapshot whatever was in this slot so a rejected (incomplete) read can be
+    // rolled back instead of clobbering a paper that was already good.
+    const prevStrips = gs.strips;
     gs.strips = parsed;
     buildPaperForGame(resolvedGame, isBackground ? targetBlockIdx : null);
     const count = Object.keys(gs.cellMap).length;
 
-    // For background scans, only touch live UI if the user is currently
-    // viewing the same block + game; otherwise just publish + save.
+    // Identifying label for toasts when multiple blocks are being scanned
+    const lbl = isBackground && blocks.length > 1
+      ? ` (Blokk ${targetBlockIdx + 1} · ${getGameName(resolvedGame)})`
+      : '';
+
+    // A valid Norwegian 90-ball block ALWAYS has exactly 90 numbers (6 strips ×
+    // 15). Every cell holds a distinct value in 1..90, so 90 numbers means the
+    // complete set 1..90 — nothing missing, nothing doubled. Anything else is a
+    // misread we must NOT let through: publishing it seats the player on a paper
+    // that can never legitimately win (e.g. number 1 never appears), and the gap
+    // only surfaces mid-game. Reject it here, BEFORE any save or publish, and
+    // send the user back to rescan.
+    if (count !== 90) {
+      const diff = count < 90 ? `mangler ${90 - count}` : `${count - 90} for mange`;
+      // Roll back to the previous good paper (or empty, for a first scan) so
+      // nothing partial is kept, saved, or published to the host.
+      gs.strips = prevStrips || null;
+      if (gs.strips) {
+        buildPaperForGame(resolvedGame, isBackground ? targetBlockIdx : null);
+      } else {
+        gs.paperEl = null;
+        gs.cellMap = {};
+      }
+
+      const wasVisible = !isBackground ||
+        (targetBlockIdx === activeBlockIdx && resolvedGame === activeGame);
+      if (wasVisible) {
+        document.getElementById("phone-processing").style.display = "none";
+        if (gs.strips) {
+          // There was a good paper before this bad rescan — keep showing it.
+          renderCells(resolvedGame);
+          showGameTabs();
+          renderActiveGame();
+        } else {
+          // Nothing valid to show — back to the capture screen to try again.
+          document.getElementById("phone-paper").style.display = "none";
+          document.getElementById("phone-upload").style.display = "flex";
+          updateUploadTitle();
+        }
+      }
+      refreshBlockTabs();
+      toast(`⚠ Fant ${count}/90 numre${lbl} (${diff}) — arket ble ikke godtatt. Skann på nytt.`, "err", 7000);
+      return;
+    }
+
+    // Valid — commit the read. For background scans, only touch live UI if the
+    // user is currently viewing the same block + game; otherwise just publish.
     const isCurrentlyVisible = !isBackground ||
       (targetBlockIdx === activeBlockIdx && resolvedGame === activeGame);
 
@@ -7386,35 +7453,7 @@ Example:
     publishStripsToHost(resolvedGame, isBackground ? targetBlockIdx : null);
     refreshBlockTabs();
 
-    // Identifying label for toasts when multiple blocks are being scanned
-    const lbl = isBackground && blocks.length > 1
-      ? ` (Blokk ${targetBlockIdx + 1} · ${getGameName(resolvedGame)})`
-      : '';
-
-    if (count === 90) {
-      toast(`✓ ${count} numre funnet${lbl}`, "ok", 3000);
-    } else {
-      // A valid bingo block ALWAYS has exactly 90 numbers (6 strips × 15).
-      // For foreground scans we show a confirm so the user can rescan;
-      // for background scans we just toast a strong warning (the user is
-      // busy with another block — can switch back to verify when ready).
-      const diff = count < 90 ? `mangler ${90 - count}` : `${count - 90} for mange`;
-      toast(`⚠ Fant ${count}/90 numre${lbl} (${diff})`, "err", 6000);
-      if (!isBackground) {
-        setTimeout(() => {
-          const msg = 'Advarsel: arket har bare ' + count + ' av 90 numre (' + diff + ').\n\n' +
-                      'Et gyldig bingoark har alltid nøyaktig 90 numre. Vil du skanne på nytt?';
-          if (confirm(msg)) {
-            gs.strips = null;
-            gs.paperEl = null;
-            gs.cellMap = {};
-            document.getElementById("phone-paper").style.display = "none";
-            document.getElementById("phone-upload").style.display = "flex";
-            updateUploadTitle();
-          }
-        }, 250);
-      }
-    }
+    toast(`✓ ${count} numre funnet${lbl}`, "ok", 3000);
 
   } catch(err) {
     console.error(err);
