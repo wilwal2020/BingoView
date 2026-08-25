@@ -345,7 +345,106 @@ body.start-parked #rekke-buttons { display: none !important; }
   align-items: center;
   justify-content: space-between;
 }
-.cam-side-slot { width: 44px; }
+/* Equal-width flanks keep the shutter optically centred no matter how wide
+   the "Prosesser" button on the right grows. */
+.cam-side-slot { flex: 1 1 0; display: flex; align-items: center; min-width: 0; }
+.cam-side-slot-left  { justify-content: flex-start; }
+.cam-side-slot-right { justify-content: flex-end; }
+
+/* "Prosesser" — process the queued shots without leaving the camera. */
+.cam-process-btn {
+  background: var(--gold);
+  color: var(--ink);
+  border: none;
+  border-radius: 22px;
+  font-family: var(--display);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 11px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cam-process-btn:active { transform: scale(0.95); }
+.cam-process-btn:disabled { opacity: 0.32; cursor: default; }
+
+/* Row of per-game thumbnails above the shutter bar. */
+.cam-thumbs {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(150px + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  padding: 0 16px;
+  z-index: 2;
+  pointer-events: none;   /* only the buttons themselves are tappable */
+}
+.cam-thumb {
+  position: relative;
+  pointer-events: auto;
+  width: 58px;
+  height: 58px;
+  border-radius: 11px;
+  border: 2px solid rgba(255,255,255,0.4);
+  background: rgba(20,20,20,0.75);
+  overflow: hidden;
+  padding: 0;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.cam-thumb.active {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px var(--gold), 0 4px 14px rgba(0,0,0,0.5);
+}
+.cam-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.cam-thumb-empty,
+.cam-thumb-scanned {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  color: rgba(255,255,255,0.45);
+}
+.cam-thumb-scanned { color: var(--green); }
+.cam-thumb-check {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--green);
+  color: #fff;
+  font-size: 0.7rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cam-thumb-lbl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  font-family: var(--mono);
+  font-size: 0.52rem;
+  letter-spacing: 0.02em;
+  color: #1a1a1a;
+  padding: 1px 0 2px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* White shutter flash on capture */
 #cam-flash {
@@ -3066,11 +3165,18 @@ header { padding: 7px 13px; gap: 5px 7px; }
         <span class="cam-hint" id="cam-hint">Fyll rammen med bingoarket</span>
         <button type="button" id="cam-flip" class="cam-btn" aria-label="Bytt kamera">🔄</button>
       </div>
+      <!-- Thumbnails of every game's shot. Tap one to jump back and retake it
+           before processing — no more losing a photo by closing the camera. -->
+      <div id="cam-thumbs" class="cam-thumbs"></div>
       <div class="cam-bar cam-bar-bottom">
         <div class="cam-bottom-inner">
-          <div class="cam-side-slot"></div>
+          <div class="cam-side-slot cam-side-slot-left"></div>
           <button type="button" id="cam-shutter" aria-label="Ta bilde"></button>
-          <div class="cam-side-slot"></div>
+          <div class="cam-side-slot cam-side-slot-right">
+            <!-- Kick off OCR straight from the camera once the last shot is
+                 taken, instead of routing through the pending screen. -->
+            <button type="button" id="cam-process" class="cam-process-btn" disabled>Prosesser</button>
+          </div>
         </div>
       </div>
     </div>
@@ -6207,6 +6313,14 @@ function initPhone() {
   document.getElementById("cam-flip").addEventListener("click", flipCamera);
   document.getElementById("cam-shutter").addEventListener("click", captureCamera);
 
+  // "Prosesser" inside the camera — send the queued shots to OCR without a
+  // detour through the pending screen. Pressed after the last photo is taken.
+  document.getElementById("cam-process").addEventListener("click", async () => {
+    if (Object.keys(pendingPhotos).length === 0) return;
+    closeCamera();
+    await processAllPending();
+  });
+
   document.getElementById("btn-process-now").addEventListener("click", async () => {
     await processAllPending();
   });
@@ -8411,12 +8525,26 @@ async function startCamStream() {
   _camStream = await navigator.mediaDevices.getUserMedia({
     video: {
       facingMode: { ideal: _camFacing },
-      width:  { ideal: 2560 },
-      height: { ideal: 1440 }
+      // Ask for a 4:3 frame — the native aspect of most phone sensors. A 16:9
+      // request makes the browser crop the top and bottom of the sensor, which
+      // is what made the in-page view look far more zoomed-in than the phone's
+      // own camera app. 4:3 gives back the full field of view.
+      width:  { ideal: 2048 },
+      height: { ideal: 1536 }
     },
     audio: false
   });
   video.srcObject = _camStream;
+  // Some Android browsers open the back camera at a non-1× zoom, so the sheet
+  // still looks cropped even at 4:3. Pull the zoom back to the sensor minimum
+  // whenever the platform exposes the control.
+  try {
+    const track = _camStream.getVideoTracks()[0];
+    const caps = track && track.getCapabilities ? track.getCapabilities() : null;
+    if (caps && caps.zoom && typeof caps.zoom.min === "number") {
+      await track.applyConstraints({ advanced: [{ zoom: caps.zoom.min }] });
+    }
+  } catch (e) {}
   // iOS won't autoplay reliably without an explicit play() in the gesture.
   try { await video.play(); } catch (e) {}
 }
@@ -8435,7 +8563,13 @@ async function openCamera() {
   const overlay = document.getElementById("camera-overlay");
   overlay.style.display = "flex";
   document.getElementById("cam-shutter").disabled = false;
+  // Wipe any leftover "… lagret" card from the previous run so it doesn't
+  // flash up the moment the camera reopens on a fresh block.
+  const confirm = document.getElementById("cam-confirm");
+  confirm.classList.remove("cam-confirm-anim");
+  confirm.innerHTML = "";
   updateCamHint();
+  renderCamThumbs();
   try {
     await startCamStream();
   } catch (err) {
@@ -8457,7 +8591,73 @@ function stopCamStream() {
 
 function closeCamera() {
   stopCamStream();
+  clearCamThumbUrls();
   document.getElementById("camera-overlay").style.display = "none";
+}
+
+// ── Camera thumbnail strip ───────────────────────────────────
+// One square per game, showing the shot queued for it. Tapping a square jumps
+// back to that game so the next shutter press retakes it — the fix for losing a
+// photo the moment the camera is closed.
+let _camThumbUrls = {};   // gameKey → object URL, revoked on re-render/close
+
+function clearCamThumbUrls() {
+  Object.values(_camThumbUrls).forEach(u => { try { URL.revokeObjectURL(u); } catch (e) {} });
+  _camThumbUrls = {};
+}
+
+// Enable "Prosesser" as soon as there's at least one queued shot, and show the
+// count so a multi-game run reads at a glance.
+function updateCamProcessBtn() {
+  const btn = document.getElementById("cam-process");
+  if (!btn) return;
+  const n = Object.keys(pendingPhotos).length;
+  btn.disabled = n === 0;
+  btn.textContent = n > 1 ? `Prosesser (${n})` : "Prosesser";
+}
+
+function renderCamThumbs() {
+  const wrap = document.getElementById("cam-thumbs");
+  if (!wrap) return;
+  clearCamThumbUrls();
+  wrap.innerHTML = "";
+  getGameIds().forEach(id => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cam-thumb" + (id === activeGame ? " active" : "");
+    btn.dataset.game = id;
+    const gs = gameState[id];
+    const file = pendingPhotos[id];
+    let inner;
+    if (file) {
+      // A shot is queued for this game — show it, ready to retake on tap.
+      const url = URL.createObjectURL(file);
+      _camThumbUrls[id] = url;
+      inner = `<img src="${url}" alt=""><span class="cam-thumb-check">✓</span>`;
+    } else if (gs && gs.strips) {
+      // Already scanned in an earlier batch — tapping still lets you re-shoot.
+      inner = `<span class="cam-thumb-scanned">✓</span>`;
+    } else {
+      inner = `<span class="cam-thumb-empty">＋</span>`;
+    }
+    inner += `<span class="cam-thumb-lbl" style="background:${getGameColor(id)}">${getGameName(id)}</span>`;
+    btn.innerHTML = inner;
+    btn.addEventListener("click", () => selectCamGame(id));
+    wrap.appendChild(btn);
+  });
+  updateCamProcessBtn();
+}
+
+// Point the shutter at a specific game (e.g. to retake it) without leaving the
+// camera.
+function selectCamGame(id) {
+  activeGame = id;
+  refreshGameTabs();
+  updateUploadTitle();
+  updateCamHint();
+  renderCamThumbs();
+  const shutter = document.getElementById("cam-shutter");
+  if (shutter) shutter.disabled = false;
 }
 
 async function flipCamera() {
@@ -8530,13 +8730,14 @@ function captureCamera() {
       updateUploadTitle();
       updateCamHint();
       showCamConfirm(savedName, getGameName(nextEmpty));
-      shutter.disabled = false;   // ready for the next shot
     } else {
-      // Every game has a photo queued — show the confirmation, then leave the
-      // camera and review the queue.
+      // Every game has a photo queued. Stay in the camera so the user can
+      // review the thumbnails, retake anything that came out wrong, and then
+      // press "Prosesser" themselves.
       showCamConfirm(savedName, null);
-      setTimeout(() => { closeCamera(); showPendingScreen(); }, 1050);
     }
+    renderCamThumbs();       // reflect the new shot + advance the active square
+    shutter.disabled = false;   // ready for the next / retake shot
   }, "image/jpeg", 0.95);
 }
 
