@@ -1530,6 +1530,7 @@ body.fx-arrival #block-tabs,
 body.fx-arrival #game-tabs,
 body.fx-arrival #rekke-buttons,
 body.fx-arrival #win-phone-bar,
+body.fx-arrival #radio-bar,
 body.fx-arrival #phone-code-display { display: none !important; }
 
 /* Coming back out of it. `display` can't be transitioned, so every one of
@@ -1553,6 +1554,7 @@ body.fx-settling #paper-header {
   animation: fxChromeIn 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 body.fx-settling #phone-code-display,
+body.fx-settling #radio-bar,
 body.fx-settling #win-phone-bar {
   animation: fxChromeUp 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
 }
@@ -2079,6 +2081,71 @@ body.fx-on .manual-switch .manual-switch-thumb {
   font-size: 1.3rem;
   letter-spacing: 0.05em;
   color: var(--gold);
+}
+
+/* ── Nettradio-modus ───────────────────────────────────────
+   A strip under the block that holds back everything the host sends by a
+   few seconds, so a number lands on the sheet at the moment the listener
+   hears it read out over a buffered net-radio stream. Hidden entirely
+   unless the setting in Innstillinger has switched it on. */
+#radio-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  padding: 9px 14px;
+  background: #0d0d0d;
+  border-top: 1px solid #1a1a1a;
+  flex-shrink: 0;
+}
+/* Same slider as the toolbar pair, in the cool blue that says "stream"
+   rather than gold (a called number) or purple ("Markér nye"). */
+.manual-switch-radio.active {
+  background: #101c26;
+  border-color: #4fb0e0;
+  color: #7fd0f5;
+}
+.manual-switch-radio.active .manual-switch-pill { background: #4fb0e0; }
+.manual-switch-radio.active .manual-switch-thumb { background: #06161f; }
+/* Something is being held back right now. No count: the queue holds host
+   snapshots, not numbers, so any figure here would be a guess. */
+.manual-switch-radio.waiting .manual-switch-pill { animation: radioWait 1.1s ease-in-out infinite; }
+@keyframes radioWait {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(79,176,224,0.55); }
+  50%      { box-shadow: 0 0 0 5px rgba(79,176,224,0); }
+}
+.radio-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #0e0e0e;
+  border: 1px solid #2a2a2a;
+  border-radius: 999px;
+  padding: 3px;
+}
+.radio-step {
+  width: 32px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: var(--paper);
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  line-height: 1;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.radio-step:active { background: #242424; }
+.radio-step:disabled { color: #3a3a3a; cursor: default; }
+.radio-delay {
+  min-width: 46px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #7fd0f5;
+  user-select: none;
 }
 
 
@@ -2744,6 +2811,8 @@ header { background: transparent; border-bottom: none; }
 #phone-code-display { background: transparent; border-top: 1px solid var(--nav-line); padding: 8px 15px 10px; }
 #phone-code-display .conn-label { display: none; }
 #win-phone-bar { background: transparent; border-top: 1px solid var(--nav-line); }
+#radio-bar { background: transparent; border-top: 1px solid var(--nav-line); }
+.radio-steps { background: var(--nav-panel); border-color: var(--nav-line-2); }
 
 /* Header buttons as quiet ghosts on the gradient. The paper-toolbar pair
    (share / reset) is intentionally excluded — they carry their own accent
@@ -2807,6 +2876,7 @@ header { background: transparent; border-bottom: none; }
 .manual-switch .manual-switch-pill { display: none; }
 .manual-switch.active { background: var(--gold); border-color: var(--gold); color: #1a1205; }
 .manual-switch-away.active { background: #9b7aff; border-color: #9b7aff; color: #160c27; }
+.manual-switch-radio.active { background: #4fb0e0; border-color: #4fb0e0; color: #04151f; }
 /* No lingering focus ring after a tap — only show one for keyboard users */
 .manual-switch:focus { outline: none; }
 .manual-switch:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
@@ -2815,6 +2885,7 @@ header { background: transparent; border-bottom: none; }
   .manual-switch:hover { border-color: var(--nav-line-2); }
   .manual-switch.active:hover { border-color: var(--gold); }
   .manual-switch-away.active:hover { border-color: #9b7aff; }
+  .manual-switch-radio.active:hover { border-color: #4fb0e0; }
 }
 
 /* Float the white paper as a soft card inside a navy panel — the mockup's
@@ -3019,6 +3090,16 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <button type="button" data-ms="2000">2s</button>
           <button type="button" data-ms="3000">3s</button>
         </div>
+      </div>
+      <div class="bv-row" id="bv-row-radio">
+        <div class="bv-row-label">
+          <span>Nettradio-modus</span>
+          <span class="bv-row-desc">Viser en knapp under blokka som forsinker tallene, så de lander når du hører dem på nettradioen</span>
+        </div>
+        <label class="bv-toggle">
+          <input type="checkbox" id="bv-radio-enabled">
+          <span class="bv-toggle-track"></span>
+        </label>
       </div>
       <div class="bv-row bv-row-stacked" id="bv-row-winphone">
         <div class="bv-row-label">
@@ -3253,6 +3334,24 @@ header { padding: 7px 13px; gap: 5px 7px; }
           </svg>
         </div>
       </div>
+      <!-- Nettradio-modus. The switch holds every host update back by the
+           chosen number of seconds so the sheet keeps step with a buffered
+           stream. The whole strip only exists if Innstillinger asked for it. -->
+      <div id="radio-bar" style="display:none">
+        <button id="btn-radio-toggle" class="manual-switch manual-switch-radio" type="button"
+                role="switch" aria-checked="false"
+                title="Forsink tallene så de lander samtidig som du hører dem på nettradioen">
+          <span class="manual-switch-label">Nettradio</span>
+          <span class="manual-switch-pill"><span class="manual-switch-thumb"></span></span>
+        </button>
+        <div id="radio-steps" class="radio-steps" style="display:none">
+          <button id="btn-radio-minus" class="radio-step" type="button"
+                  aria-label="Mindre forsinkelse" title="Mindre forsinkelse">&minus;</button>
+          <span class="radio-delay" id="radio-delay-val" role="status" aria-live="polite">5s</span>
+          <button id="btn-radio-plus" class="radio-step" type="button"
+                  aria-label="Mer forsinkelse" title="Mer forsinkelse">+</button>
+        </div>
+      </div>
       <!-- Number to ring when you get bingo. Set in Innstillinger; the whole
            bar is a tel: link so a tap dials it. Hidden until a number is set. -->
       <a id="win-phone-bar" href="#" style="display:none">
@@ -3429,6 +3528,141 @@ function renderWinPhone() {
     bar.style.display = 'none';
   }
 }
+
+// ── Nettradio-modus: run the sheet behind the host, in step with a stream ──
+// A net-radio stream sits several seconds behind the room it comes from. Left
+// alone, the sheet marks a number while the listener is still waiting to hear
+// it read out — which spoils the call and makes the board impossible to follow.
+// So everything the host sends is parked in a queue and applied `sec` seconds
+// after it landed, and the number lights up as the voice says it.
+//
+// Three pieces of state, and they are not interchangeable:
+//   enabled — the switch in Innstillinger: whether the strip exists at all
+//   on      — the strip's own switch: whether a delay is actually running
+//   sec     — how far behind the host to run
+const RADIO_KEY = 'bv_radio';
+const RADIO_MIN_SEC = 1;
+const RADIO_MAX_SEC = 30;
+const RADIO_STEP_SEC = 1;
+const radio = (() => {
+  const defaults = { enabled: false, on: false, sec: 5 };
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(RADIO_KEY) || '{}'); } catch (e) {}
+  const r = { ...defaults, ...saved };
+  r.enabled = !!r.enabled;
+  r.on      = !!r.on;
+  // A junk or out-of-range stored value would otherwise become a delay the
+  // steppers can't walk back out of.
+  const s = Math.round(Number(r.sec));
+  r.sec = (isFinite(s) && s >= RADIO_MIN_SEC && s <= RADIO_MAX_SEC) ? s : defaults.sec;
+  return r;
+})();
+function saveRadio() {
+  try { localStorage.setItem(RADIO_KEY, JSON.stringify(radio)); } catch (e) {}
+}
+// The single place that decides whether a delay is in force. Both flags have
+// to be set: turning the setting off has to stop the delay as well as hide the
+// strip, or numbers would keep lagging with no control left on screen to
+// explain why.
+function radioDelayMs() {
+  return (radio.enabled && radio.on) ? radio.sec * 1000 : 0;
+}
+
+// The queue. Each item remembers when it ARRIVED, never when it falls due, so
+// changing the delay re-times everything already waiting — in both directions
+// — instead of only applying from the next call onwards.
+const _radioQueue = [];
+let _radioTimer = null;
+
+function radioDefer(fn) {
+  if (radioDelayMs() <= 0) { fn(); return; }
+  _radioQueue.push({ at: Date.now(), run: fn });
+  radioReschedule();
+}
+function radioReschedule() {
+  if (_radioTimer) { clearTimeout(_radioTimer); _radioTimer = null; }
+  paintRadioWaiting();
+  if (!_radioQueue.length) return;
+  // Already due (the delay was shortened or switched off under it) clamps to
+  // 0, which drains on the next tick rather than re-entering here.
+  const wait = Math.max(0, (_radioQueue[0].at + radioDelayMs()) - Date.now());
+  _radioTimer = setTimeout(radioDrain, wait);
+}
+function radioDrain() {
+  _radioTimer = null;
+  const ms = radioDelayMs();
+  const now = Date.now();
+  // Strict FIFO: these are successive snapshots of the same board, so running
+  // a later one ahead of an earlier one would roll the sheet backwards.
+  while (_radioQueue.length && (_radioQueue[0].at + ms) <= now) {
+    const item = _radioQueue.shift();
+    try { item.run(); } catch (e) {}
+  }
+  radioReschedule();
+}
+// Throw away what is waiting without running it. Used on a reset (the board
+// those snapshots described is gone) and on a reconnect (the fresh listeners
+// replay the whole history anyway, so running these too would double-apply).
+function radioDiscardQueue() {
+  _radioQueue.length = 0;
+  if (_radioTimer) { clearTimeout(_radioTimer); _radioTimer = null; }
+  paintRadioWaiting();
+}
+
+// Something is being held back right now. Deliberately not a count: the queue
+// holds host snapshots rather than numbers, so any figure here would be a lie.
+function paintRadioWaiting() {
+  const btn = document.getElementById('btn-radio-toggle');
+  if (btn) btn.classList.toggle('waiting', radioDelayMs() > 0 && _radioQueue.length > 0);
+}
+function renderRadioBar() {
+  // Keep the settings checkbox in step. It is normally what drives `enabled`,
+  // but this is the one place that guarantees the two never disagree.
+  const box = document.getElementById('bv-radio-enabled');
+  if (box) box.checked = radio.enabled;
+  const bar = document.getElementById('radio-bar');
+  if (!bar) return;
+  bar.style.display = radio.enabled ? 'flex' : 'none';
+  const btn = document.getElementById('btn-radio-toggle');
+  if (btn) {
+    btn.classList.toggle('active', radio.on);
+    btn.setAttribute('aria-checked', radio.on ? 'true' : 'false');
+  }
+  // The two steppers only mean anything once a delay is running.
+  const steps = document.getElementById('radio-steps');
+  if (steps) steps.style.display = radio.on ? 'inline-flex' : 'none';
+  const val = document.getElementById('radio-delay-val');
+  if (val) val.textContent = radio.sec + 's';
+  const minus = document.getElementById('btn-radio-minus');
+  const plus  = document.getElementById('btn-radio-plus');
+  if (minus) minus.disabled = radio.sec <= RADIO_MIN_SEC;
+  if (plus)  plus.disabled  = radio.sec >= RADIO_MAX_SEC;
+  paintRadioWaiting();
+}
+// Every setter reschedules: shortening the delay, or dropping it altogether,
+// has to release what is already parked. Otherwise the board stays stuck
+// behind the host with nothing left on screen to bring it forward.
+function setRadioOn(on) {
+  radio.on = !!on;
+  saveRadio();
+  renderRadioBar();
+  radioReschedule();
+}
+function setRadioSec(sec) {
+  const s = Math.min(RADIO_MAX_SEC, Math.max(RADIO_MIN_SEC, Math.round(sec)));
+  if (s === radio.sec) return;
+  radio.sec = s;
+  saveRadio();
+  renderRadioBar();
+  radioReschedule();
+}
+function setRadioEnabled(on) {
+  radio.enabled = !!on;
+  saveRadio();
+  renderRadioBar();
+  radioReschedule();
+}
+
 
 let _audioCtx = null;
 function getAudioCtx() {
@@ -6671,6 +6905,16 @@ function initPhone() {
     setAwayMode(!awayMode);
   });
 
+  // Nettradio strip under the block: the switch, then the two steppers that
+  // set how far behind the host to run.
+  const radioToggle = document.getElementById("btn-radio-toggle");
+  if (radioToggle) radioToggle.addEventListener("click", () => setRadioOn(!radio.on));
+  const radioMinus = document.getElementById("btn-radio-minus");
+  if (radioMinus) radioMinus.addEventListener("click", () => setRadioSec(radio.sec - RADIO_STEP_SEC));
+  const radioPlus = document.getElementById("btn-radio-plus");
+  if (radioPlus) radioPlus.addEventListener("click", () => setRadioSec(radio.sec + RADIO_STEP_SEC));
+  renderRadioBar();
+
   // BV settings overlay (sound / vibrate)
   const settingsOverlay = document.getElementById("bv-settings-overlay");
   const vibrateOn       = document.getElementById("bv-vibrate-on");
@@ -6717,6 +6961,14 @@ function initPhone() {
     });
   }
   renderWinPhone();
+
+  // Nettradio-modus — the setting only decides whether the strip under the
+  // block is there at all; the strip's own switch starts and stops the delay.
+  const radioEnabled = document.getElementById("bv-radio-enabled");
+  if (radioEnabled) {
+    radioEnabled.checked = !!radio.enabled;
+    radioEnabled.addEventListener("change", () => setRadioEnabled(radioEnabled.checked));
+  }
 
   settingsOverlay.addEventListener("click", e => {
     if (e.target === settingsOverlay) settingsOverlay.style.display = "none";
@@ -7005,6 +7257,8 @@ async function connectPhone(code, opts = {}) {
   _channelDetachFns.forEach(fn => { try { fn(); } catch(e) {} });
   _channelDetachFns = [];
   const gen = ++_connGeneration;
+  // Anything nettradio was holding describes the connection we just dropped.
+  radioDiscardQueue();
 
   // Switching to a DIFFERENT code: drop our presence on the old channel so
   // the old host doesn't keep showing this phone as online.
@@ -7126,6 +7380,9 @@ async function connectPhone(code, opts = {}) {
   // Fires immediately on connect (catches up), then on every call/undo.
   getGameIds().forEach(g => {
     const csRef = channelRef.child('callState/' + g);
+    // Has this game had a snapshot yet on this connection? See the nettradio
+    // note at the bottom of the handler.
+    let csSeen = false;
     const csHandler = (snap) => {
       if (gen !== _connGeneration) return;
       const data = snap.val();
@@ -7133,16 +7390,27 @@ async function connectPhone(code, opts = {}) {
       if (!data || !data.ts) return;
       if (data.ts <= resetTs) return;
       const nums = Array.isArray(data.numbers) ? data.numbers : [];
-      // Remember when this call landed (server clock where available) and how
-      // many calls deep the game is — together they fix the ring's direction
-      // and how much of the interval is already gone.
-      _lastCall[g] = {
-        at: (data.sts != null ? Number(data.sts) : Number(data.ts)) || 0,
-        n:  nums.length
+      const apply = () => {
+        // Nettradio may have parked this for several seconds; a reconnect in
+        // the meantime has already replayed everything from scratch.
+        if (gen !== _connGeneration) return;
+        // Remember when this call landed (server clock where available) and how
+        // many calls deep the game is — together they fix the ring's direction
+        // and how much of the interval is already gone. Parked with the rest,
+        // so the countdown starts when the number appears, not when it arrived.
+        _lastCall[g] = {
+          at: (data.sts != null ? Number(data.sts) : Number(data.ts)) || 0,
+          n:  nums.length
+        };
+        reconcileGameState(g, data.numbers || [], data.rekke);
+        // After reconcile: it may have auto-switched the active game to this one.
+        if (g === activeGame) refreshCallRing();
       };
-      reconcileGameState(g, data.numbers || [], data.rekke);
-      // After reconcile: it may have auto-switched the active game to this one.
-      if (g === activeGame) refreshCallRing();
+      // Nettradio-modus delays live calls so they land with the stream. The
+      // FIRST snapshot is Firebase replaying the game so far — minutes old
+      // already — so holding it back would only leave the user staring at an
+      // empty sheet on open. Catch-up goes on immediately; live calls wait.
+      if (csSeen) { radioDefer(apply); } else { csSeen = true; apply(); }
     };
     csRef.on('value', csHandler);
     _channelDetachFns.push(() => csRef.off('value', csHandler));
@@ -7161,6 +7429,10 @@ async function connectPhone(code, opts = {}) {
       if (gen !== _connGeneration) return;
       if (csSnap.exists()) return;        // modern host — callState is authoritative
       const clRef = channelRef.child('callLog');
+      // child_added replays the whole log the moment it attaches. Entries
+      // stamped before that attach are history, not live calls, so nettradio
+      // lets them straight through (same reasoning as csSeen above).
+      const clAttachAt = Date.now();
       const clHandler = (snap2) => {
         if (gen !== _connGeneration) return;
         const data = snap2.val();
@@ -7171,7 +7443,13 @@ async function connectPhone(code, opts = {}) {
         const g = (data.game && getGameIds().includes(data.game))
           ? data.game : (currentGame || activeGame);
         if (csActive[g]) return;
-        if (!data.undo) handleCalledNumber(data.number, data.game, data.rekke);
+        if (data.undo) return;
+        const num = data.number, dGame = data.game, dRekke = data.rekke;
+        const apply = () => {
+          if (gen !== _connGeneration) return;
+          handleCalledNumber(num, dGame, dRekke);
+        };
+        if (Number(data.ts) >= clAttachAt) radioDefer(apply); else apply();
       };
       // child_added fires once for every entry that ALREADY exists, so
       // attaching here replays the entire call history as if it were live.
@@ -7185,21 +7463,30 @@ async function connectPhone(code, opts = {}) {
 
   // Game/rekke state from main site
   const stateRef = channelRef.child('state');
+  let stateSeen = false;
   const stateHandler = (snap) => {
     if (gen !== _connGeneration) return;
     const data = snap.val();
     if (!data) return;
-    // Countdown length is the host's call: 0 (or absent, e.g. an older host
-    // build) means no ring at all.
-    const t = Number(data.callTimer);
-    callTimerSec = (isFinite(t) && t > 0) ? t : 0;
-    // Average balls per rekke, straight from the host's game history.
-    if (Array.isArray(data.avgs) && data.avgs.length === 3) {
-      rekkeAverages = { Rekke1: data.avgs[0], Rekke2: data.avgs[1], Rekke3: data.avgs[2] };
-    }
-    applyRemoteState(data.game, data.rekke);
-    refreshCallRing();
-    updatePaperStats();
+    const apply = () => {
+      if (gen !== _connGeneration) return;
+      // Countdown length is the host's call: 0 (or absent, e.g. an older host
+      // build) means no ring at all.
+      const t = Number(data.callTimer);
+      callTimerSec = (isFinite(t) && t > 0) ? t : 0;
+      // Average balls per rekke, straight from the host's game history.
+      if (Array.isArray(data.avgs) && data.avgs.length === 3) {
+        rekkeAverages = { Rekke1: data.avgs[0], Rekke2: data.avgs[1], Rekke3: data.avgs[2] };
+      }
+      applyRemoteState(data.game, data.rekke);
+      refreshCallRing();
+      updatePaperStats();
+    };
+    // Delayed alongside the calls, not ahead of them: the host moves to the
+    // next game or rekke on the very call that ended the last one, so letting
+    // that through early would swap the sheet out from under a number the
+    // listener has not heard yet.
+    if (stateSeen) { radioDefer(apply); } else { stateSeen = true; apply(); }
   };
   stateRef.on('value', stateHandler);
   _channelDetachFns.push(() => stateRef.off('value', stateHandler));
@@ -9141,6 +9428,10 @@ function applyRemoteState(game, rekke) {
 
 function handleRemoteReset(scope, game) {
   resetTs = Date.now();
+  // Nettradio may be holding calls that belong to the game being wiped. They
+  // must be dropped, not merely delayed — applied after the reset they would
+  // repopulate a sheet the host has just cleared.
+  radioDiscardQueue();
   // A reset means no call is outstanding, so no countdown should be running.
   if (scope === 'all') {
     Object.keys(_lastCall).forEach(k => delete _lastCall[k]);
