@@ -1853,6 +1853,27 @@ body.fx-on .manual-switch .manual-switch-thumb {
   border-style: dashed;
   cursor: pointer;
 }
+/* A block just arrived without a name of its own. Pulses a few times to catch
+   the eye, then holds a steady brass ring until the field is touched — a
+   shared block left as "Blokk 2" is exactly what this is here to prevent. */
+.user-name-input.name-nudge {
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  padding-left: 8px;
+  padding-right: 8px;
+  background: rgba(227, 165, 58, 0.08);
+  box-shadow: 0 0 0 1px rgba(227, 165, 58, 0.35);
+  animation: bv-name-nudge 1.15s ease-in-out 3;
+}
+.user-name-input.name-nudge::placeholder { color: var(--gold); opacity: 0.9; }
+.user-name-row.name-nudge .user-name-label { color: var(--gold); }
+@keyframes bv-name-nudge {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(227, 165, 58, 0.35); }
+  50%      { box-shadow: 0 0 0 4px rgba(227, 165, 58, 0.22), 0 0 18px rgba(227, 165, 58, 0.45); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .user-name-input.name-nudge { animation: none; }
+}
 
 /* Game tabs strip — row of 4 selectors */
 /* Block selector row — sits above game tabs */
@@ -4680,7 +4701,11 @@ function fxArrivalTour(blockIdx) {
     if (!prepped && first) selectActiveGame(first);
 
     tray.style.removeProperty('min-height');
-    if (!heldHeight || !fxEnabled()) return;
+    const settles = !!heldHeight && fxEnabled();
+    // Once everything has come to rest — pointing at the field while the
+    // chrome is still sliding back in would be lost in the motion.
+    setTimeout(nudgeNameIfDefault, settles ? FX_SETTLE + 120 : 150);
+    if (!settles) return;
 
     // The layout change itself happens in this one frame and is NOT animated.
     // Easing the block's height down looked right but cost a full re-layout of
@@ -5301,6 +5326,8 @@ let _adminTimer = null;           // fires when nothing followed it
 // ── Block switching ───────────────────────────────────────────
 function switchBlock(idx) {
   if (idx < 0 || idx >= blocks.length) return;
+  // The nudge is about the block that just arrived, not whichever is next.
+  if (idx !== activeBlockIdx) clearNameNudge();
   // Any move off the auto-opened block ends its "just opened for you" status
   if (idx !== _autoOpenedBlockIdx) _autoOpenedBlockIdx = -1;
   const prevGame = activeGame;
@@ -5351,6 +5378,7 @@ function addBlock() {
 function removeBlock(idx) {
   if (blocks.length <= 1) return; // always keep at least 1
   _autoOpenedBlockIdx = -1;       // indices shift — the flag can't survive it
+  clearNameNudge();
   // Clean up Firebase for the removed block's virtual phone
   cleanupBlockPhone(idx);
   // Also clean up the last block's old virtual phone ID (indices shift down)
@@ -5496,6 +5524,27 @@ function blockPhoneId(bIdx) {
   return bIdx === 0 ? phoneId : phoneId + '_b' + bIdx;
 }
 
+// This device's persistent id — the base every block's virtual phone id is
+// built from. Minted on first use rather than on first connect, because a
+// share link made during offline prep has to say who sent it too.
+function devicePhoneId() {
+  let id = null;
+  try { id = localStorage.getItem('bv_phoneId'); } catch (e) {}
+  if (!id) {
+    id = Math.random().toString(36).slice(2, 8).toUpperCase();
+    try { localStorage.setItem('bv_phoneId', id); } catch (e) {}
+  }
+  return id;
+}
+
+// A name the user never actually chose: blank, or the "Blokk N" placeholder
+// label a nameless block goes by. Adopting or keeping one of these is what
+// left shared copies labelled "Blokk 1 (Blokk 4)".
+function isDefaultBlockName(name) {
+  const n = (name || '').trim();
+  return !n || /^Blokk\s*\d+$/i.test(n);
+}
+
 // Register Firebase presence + onDisconnect for virtual block phones.
 // Block 0 is handled by the main presenceRef; blocks 1+ need their own.
 // Called on connect/reconnect and whenever a new block is added.
@@ -5584,8 +5633,13 @@ function updateBlockMeta(bIdx) {
     lastSeen: Date.now(),
     gameKeys: allKeys,
     userName: getBlockLabel(bIdx),
+    // The name alone, without the "(Blokk N)" suffix or a "Blokk N"
+    // placeholder — what another phone holding this block should adopt.
+    baseName: getStoredUserName(bIdx),
     sharedAway: !!blk.sharedAway,
     fp: blockStripFingerprint(blk),
+    receivedFrom: blk.receivedFrom || null,
+    receivedAt: blk.receivedFrom ? (blk.receivedAt || 0) : null,
   });
 }
 
@@ -5631,6 +5685,7 @@ function publishUserName() {
     const pid = blockPhoneId(bIdx);
     const label = getBlockLabel(bIdx);
     channelRef.child('papers_meta/' + pid + '/userName').set(label);
+    channelRef.child('papers_meta/' + pid + '/baseName').set(getStoredUserName(bIdx));
     channelRef.child('papers_meta/' + pid + '/sharedAway').set(!!blk.sharedAway);
     channelRef.child('phones/' + pid + '/userName').set(label);
     channelRef.child('phones/' + pid + '/sharedAway').set(!!blk.sharedAway);
@@ -5664,6 +5719,9 @@ function reclaimSharedBlock() {
   if (!blk || !blk.sharedAway) return;
   if (!confirm("Ta tilbake dette arket? Du kan endre navnet igjen.")) return;
   blk.sharedAway = false;
+  // Receivers that already have it must not hand it straight back over —
+  // only someone who takes the block AFTER this moment does.
+  blk.reclaimedAt = serverNow();
   syncSharedAwayUI();
   publishUserName();
   saveSession();
@@ -5671,6 +5729,28 @@ function reclaimSharedBlock() {
   const nameInput = document.getElementById("user-name-input");
   if (nameInput) nameInput.focus();
   toast("Arket er ditt igjen", "ok", 2500);
+}
+
+// Point at the name field once a shared block has finished arriving — but only
+// when it came without a name. Blocks shared nameless mostly stayed that way:
+// nothing on screen asked for one. A block that already carries a real name
+// is left alone.
+function nudgeNameIfDefault() {
+  const blk   = blocks[activeBlockIdx];
+  const row   = document.getElementById("user-name-row");
+  const input = document.getElementById("user-name-input");
+  if (!blk || !row || !input) return;
+  if (row.style.display === 'none') return;           // never connected — no field to point at
+  if (blk.sharedAway || !isDefaultBlockName(blk.userName)) return;
+  if (document.activeElement === input) return;       // already on it
+  row.classList.add('name-nudge');
+  input.classList.add('name-nudge');
+}
+function clearNameNudge() {
+  const row   = document.getElementById("user-name-row");
+  const input = document.getElementById("user-name-input");
+  if (row)   row.classList.remove('name-nudge');
+  if (input) input.classList.remove('name-nudge');
 }
 
 // Latest papers_meta snapshot for the whole channel (all phones' blocks).
@@ -5684,6 +5764,25 @@ function reconcileSharedNames() {
   if (!channelRef || !phoneId) return;
   const myPids = new Set(blocks.map((_, i) => blockPhoneId(i)));
   let changed = false;
+  const handedOver = [];
+  // A block of ours that another phone received FROM THIS DEVICE has been
+  // shared, however it got there. "Kopier lenke" marks it on the spot, but a
+  // scanned QR code never touches that button — the receiver's copy saying
+  // where it came from is the only sign we get.
+  blocks.forEach((blk, bIdx) => {
+    if (blk.sharedAway) return;
+    const myFp = blockStripFingerprint(blk);
+    if (!myFp) return;
+    const taken = Object.entries(_remoteMeta).some(([pid, meta]) =>
+      !myPids.has(pid) && meta && meta.fp === myFp &&
+      meta.receivedFrom === phoneId &&
+      (Number(meta.receivedAt) || 0) > (blk.reclaimedAt || 0));
+    if (taken) {
+      blk.sharedAway = true;
+      handedOver.push(bIdx);
+      changed = true;
+    }
+  });
   blocks.forEach((blk) => {
     if (!blk.sharedAway) return;
     const myFp = blockStripFingerprint(blk);
@@ -5695,12 +5794,21 @@ function reconcileSharedNames() {
       if (myPids.has(pid) || !meta || meta.sharedAway) return;
       if (meta.fp !== myFp) return;
       const seen = meta.lastSeen || 0;
-      if (seen >= ownerSeen) { ownerSeen = seen; ownerName = (meta.userName || '').toString(); }
+      if (seen >= ownerSeen) {
+        ownerSeen = seen;
+        // baseName is the owner's own name, published as-is. Older builds
+        // only send the display label, so strip its "(Blokk N)" suffix.
+        ownerName = (typeof meta.baseName === 'string')
+          ? meta.baseName
+          : (meta.userName || '').toString().replace(/\s*\(Blokk\s*\d+\)\s*$/i, '');
+      }
     });
     if (ownerName == null) return;
-    // Strip the "(Blokk N)" suffix — we want the owner's chosen base name.
-    const baseName = ownerName.replace(/\s*\(Blokk\s*\d+\)\s*$/i, '').trim();
-    if (baseName && baseName !== (blk.userName || '')) {
+    const baseName = ownerName.trim();
+    // A receiver who hasn't named the block yet goes by "Blokk N" — that is
+    // their placeholder, not a name, and adopting it is what produced labels
+    // like "Blokk 1 (Blokk 4)" on the sharer's side.
+    if (!isDefaultBlockName(baseName) && baseName !== (blk.userName || '')) {
       blk.userName = baseName;
       changed = true;
     }
@@ -5713,6 +5821,13 @@ function reconcileSharedNames() {
     syncSharedAwayUI();
     refreshBlockTabs();
     saveSession();
+  }
+  if (handedOver.length) {
+    // Tell the host (and every other phone) this copy no longer owns the name.
+    publishUserName();
+    toast(handedOver.length > 1
+      ? `${handedOver.length} blokker er delt — mottakerne eier navnene nå`
+      : `Blokk ${handedOver[0] + 1} er delt — mottakeren eier navnet nå`, 'ok', 3500);
   }
 }
 
@@ -5727,6 +5842,8 @@ function saveSession() {
   const data = { version: 2, activeBlockIdx, blocks: [] };
   blocks.forEach(blk => {
     const blkData = { _userName: blk.userName || '', _sharedAway: !!blk.sharedAway };
+    if (blk.receivedFrom) { blkData._receivedFrom = blk.receivedFrom; blkData._receivedAt = blk.receivedAt || 0; }
+    if (blk.reclaimedAt) blkData._reclaimedAt = blk.reclaimedAt;
     getGameIds().forEach(g => {
       blkData[g] = { strips: blk.gameState[g].strips, called: blk.gameState[g].called, rekke: blk.gameState[g].rekke };
     });
@@ -5780,6 +5897,11 @@ function restoreSession(opts = {}) {
     const blk = createEmptyBlock();
     blk.userName = blkData._userName || '';
     blk.sharedAway = !!blkData._sharedAway;
+    if (blkData._receivedFrom) {
+      blk.receivedFrom = String(blkData._receivedFrom);
+      blk.receivedAt = Number(blkData._receivedAt) || 0;
+    }
+    if (blkData._reclaimedAt) blk.reclaimedAt = Number(blkData._reclaimedAt) || 0;
     getGameIds().forEach(g => {
       if (!blkData[g] || !blkData[g].strips) return;
       blk.gameState[g].strips = blkData[g].strips;
@@ -6058,10 +6180,15 @@ function decodeCompactPaper(b64) {
            games: single.games, userName: single.userName };
 }
 
+// `f` is the sharing device's id. The receiver publishes it back on its copy
+// of the block, which is how the sharer learns the block was actually taken —
+// a scanned QR code never goes through "Kopier lenke", so without this the
+// sharer's copy was never handed over.
 function buildCompactShareUrl(blocksData, code) {
   const encoded = encodeCompactPapers(blocksData, code);
   let url = location.origin + location.pathname + '?p=' + encoded;
   if (code) url += '&c=' + encodeURIComponent(code);
+  url += '&f=' + encodeURIComponent(devicePhoneId());
   return url;
 }
 
@@ -6128,7 +6255,7 @@ function publishShareLink(encoded, code) {
   // Same payload → reuse the key. Still writes: the node may have been pruned,
   // and re-setting identical data is harmless and keeps the URL alive.
   const key = same ? prev.key : makeShareKey();
-  const payload = { p: encoded, ts: firebase.database.ServerValue.TIMESTAMP };
+  const payload = { p: encoded, f: devicePhoneId(), ts: firebase.database.ServerValue.TIMESTAMP };
   if (code) payload.c = code;
   return db.ref(SHARE_DB_PATH + key).set(payload).then(() => {
     if (!same) {
@@ -6143,8 +6270,12 @@ function publishShareLink(encoded, code) {
 }
 
 // Shared import path for both ?p= (payload decoded inline) and ?s= (payload
-// fetched from Firebase). `result` is the decoded { code, blocks } object.
-function receiveSharedPaper(result, codeParam) {
+// fetched from Firebase). `result` is the decoded { code, blocks } object;
+// `fromId` is the sharing device's id, when the link carries one.
+function receiveSharedPaper(result, codeParam, fromId) {
+  // Opening your own link is not receiving anything from anyone.
+  const sender = (fromId || '').toString().replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
+  const receivedFrom = (sender && sender !== devicePhoneId()) ? sender : '';
   // If the recipient already has a saved session for the target code, load it
   // FIRST so a shared block is ADDED to their existing blocks instead of
   // replacing everything. Without this, the import populates memory with only
@@ -6235,6 +6366,12 @@ function receiveSharedPaper(result, codeParam) {
       gameState = blocks[activeBlockIdx].gameState;
     }
     if (arrivedBlockIdx < 0) arrivedBlockIdx = activeBlockIdx;
+    // Published on this copy's papers_meta; the sharer's phone sees its own
+    // id there and hands the name over (see reconcileSharedNames).
+    if (receivedFrom) {
+      blocks[activeBlockIdx].receivedFrom = receivedFrom;
+      blocks[activeBlockIdx].receivedAt = serverNow();
+    }
     Object.entries(games).forEach(([g, strips]) => {
       if (gameState[g] && Array.isArray(strips)) {
         gameState[g].strips = strips;
@@ -6790,7 +6927,7 @@ function initPhone() {
     // Self-contained inline link (older shares + offline fallback).
     try {
       const result = decodeCompactPaper(compactParam);
-      receiveSharedPaper(result, codeParam);
+      receiveSharedPaper(result, codeParam, urlParams.get('f'));
     } catch(e) {
       console.warn('[BV] compact import error', e);
       showConnectScreen();
@@ -6812,7 +6949,7 @@ function initPhone() {
       let result = null;
       try { result = decodeCompactPaper(data.p); }
       catch(e) { console.warn('[BV] share decode error', e); }
-      if (result) receiveSharedPaper(result, codeParam || data.c);
+      if (result) receiveSharedPaper(result, codeParam || data.c, data.f);
       else showConnectScreen();
     }).catch(e => {
       console.warn('[BV] share fetch error', e);
@@ -7179,6 +7316,8 @@ function initPhone() {
     nameInput.addEventListener("mousedown", (e) => {
       if (nameInput.readOnly) { e.preventDefault(); reclaimSharedBlock(); }
     });
+    // The nudge has done its job the moment the field is touched.
+    nameInput.addEventListener("focus", clearNameNudge);
     let nameTimer = null;
     nameInput.addEventListener("input", () => {
       const v = nameInput.value.trim().slice(0, 24);
@@ -7199,15 +7338,17 @@ function initPhone() {
     document.getElementById("phone-code-input").value = code;
     history.replaceState(null, '', location.pathname);
     connectPhone(code);
-  } else if (!shareKeyParam && lastCode && lastCode.trim().length >= 4
+  } else if (!shareKeyParam && !compactParam && lastCode && lastCode.trim().length >= 4
              && localStorage.getItem('bv_paper_' + lastCode.trim().toUpperCase())) {
     // Auto-reconnect after a refresh: a last-used code WITH saved paper data
     // means a session was in progress — reconnect so the blocks reappear
     // without any taps. Quiet: if the host is gone (bingo night over), just
     // land on the normal connect screen without error toasts.
-    // Skipped for ?s= links: the async share import owns the connection (via
-    // the shared code), and we don't want a stale last-session connect racing
-    // it or flashing the recipient's own old blocks first.
+    // Skipped for share links (?s= and ?p=): the share import owns the
+    // connection (via the shared code), and we don't want a stale last-session
+    // connect racing it or flashing the recipient's own old blocks first. With
+    // ?p= that race used to save the freshly imported block under the OLD
+    // session's code, and the old session's blocks under the new one.
     connectPhone(lastCode.trim().toUpperCase(), { quiet: true });
   }
 
@@ -7284,13 +7425,7 @@ async function connectPhone(code, opts = {}) {
   // so the host never loses sight of this phone.
   // Persistent phoneId per device so reconnects retain identity (and so
   // host-side persistent papers stay associated with the same phone).
-  let storedPhoneId;
-  try { storedPhoneId = localStorage.getItem('bv_phoneId'); } catch (e) {}
-  if (!storedPhoneId) {
-    storedPhoneId = Math.random().toString(36).slice(2, 8).toUpperCase();
-    try { localStorage.setItem('bv_phoneId', storedPhoneId); } catch (e) {}
-  }
-  phoneId = storedPhoneId;
+  phoneId = devicePhoneId();
   const presenceRef = channelRef.child('phones/' + phoneId);
 
   const infoRef = db.ref('.info/connected');
