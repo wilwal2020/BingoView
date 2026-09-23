@@ -1485,12 +1485,11 @@ body.fx-on[data-fx="maks"] #digital-paper.fx-miss { animation: fxMiss 0.3s ease-
   min-height: 46vh;
 }
 
-/* ── 10c ── Arrival. The papers flying in are driven from JS via the Web
-   Animations API rather than from a class here — see fxArrivalTour. They are
-   staged all at once and their keyframes carry a per-paper entry vector, so
-   there is nothing for a stylesheet rule to hang on: every one of them is
-   coming in from somewhere different, and scheduling them up front with
-   delays is what keeps the main thread out of the sequence. */
+/* ── 10c ── Arrival. The sequences themselves are driven from JS via the Web
+   Animations API — see fxArrivalTour and ARRIVAL_RUNNERS. Every position in
+   them is measured on the phone at run time, so all that lives here is the
+   waiting state the page sits in until the arrival starts, and the look of
+   the pieces on the stage. */
 
 /* The arriving state of the sheet panel.
 
@@ -1533,51 +1532,327 @@ body.fx-arrival #win-phone-bar,
 body.fx-arrival #radio-bar,
 body.fx-arrival #phone-code-display { display: none !important; }
 
-/* Coming back out of it. `display` can't be transitioned, so every one of
-   these reclaims its space in a single frame no matter what — and the block
-   loses its held height in that same frame. That layout change is deliberately
-   NOT animated: easing the block's height down looked right but re-laid out
-   ~650 cells on every frame for the whole 420ms, which is what made the
-   hand-back lag.
+/* The arrival stage: laid over the whole screen while a shared block comes
+   in, above the page and the FX layer but under toasts (1500) and the
+   settings overlays (2000). The page is already laid out underneath it — the
+   backdrop is what keeps that out of sight until the sheet's reveal. */
+#fx-arrival-stage {
+  position: fixed;
+  inset: 0;
+  z-index: 1450;
+  pointer-events: none;
+  overflow: hidden;
+}
+#fx-arrival-stage .arr-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 16, 32, 0.94);
+}
+.arr-actor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  will-change: transform, opacity;
+}
 
-   So the layout lands at once and only transform and opacity move over it.
-   Everything above the sheet drops in from slightly high, the code bar comes
-   up from below, and the sheet itself settles down into the space it just gave
-   up. All compositor work, over a layout that has already finished. */
-body.fx-settling .hdr-row-actions,
-body.fx-settling #user-name-row,
-body.fx-settling #block-tabs,
-body.fx-settling #game-tabs,
-body.fx-settling #rekke-buttons,
-body.fx-settling .paper-toolbar,
-body.fx-settling #paper-header {
-  animation: fxChromeIn 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+/* A stand-in paper: the game's colour and three ruled strips. */
+.arr-paper {
+  display: flex;
+  flex-direction: column;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
 }
-body.fx-settling #phone-code-display,
-body.fx-settling #radio-bar,
-body.fx-settling #win-phone-bar {
-  animation: fxChromeUp 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
+.arr-mini-strip {
+  flex: 1 1 0;
+  min-height: 0;
+  border-radius: 2px;
+  background-color: #fffdf8;
+  background-image:
+    linear-gradient(to right, rgba(11, 18, 34, 0.14) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(11, 18, 34, 0.14) 1px, transparent 1px);
+  background-size: 11.1% 100%, 100% 33.4%;
 }
-/* The sheet's share of it. Starts high — where it was a frame ago, before the
-   chrome above pushed it down — and comes to rest. */
-body.fx-settling #paper-ring-wrap {
-  animation: fxSheetSettle 420ms cubic-bezier(0.4, 0, 0.2, 1) both;
-  /* ~160 bordered cells being translated. Same reasoning as the flights:
-     without a layer of its own the whole sheet repaints every frame. */
-  will-change: transform;
+.arr-paper-label {
+  flex: 0 0 auto;
+  font-family: var(--display);
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: #0b1222;
 }
-@keyframes fxChromeIn {
-  from { opacity: 0; transform: translateY(-10px); }
-  to   { opacity: 1; transform: none; }
+
+/* C · printed tickets carry the real numbers. */
+.arr-ticket {
+  border-radius: 0 0 6px 6px;
+  border-top: 2px dashed rgba(11, 18, 34, 0.3);
 }
-@keyframes fxChromeUp {
-  from { opacity: 0; transform: translateY(10px); }
-  to   { opacity: 1; transform: none; }
+.arr-tk-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.3);
 }
-@keyframes fxSheetSettle {
-  from { transform: translateY(-22px); }
-  to   { transform: none; }
+.arr-tk-id {
+  align-self: flex-start;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 1.3;
+  color: #fff;
 }
+.arr-tk-grid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+}
+.arr-tk-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  background: #fffdf8;
+  font-family: var(--mono);
+  font-weight: 600;
+  color: #1a1f2e;
+}
+.arr-tk-cell.empty { background: rgba(11, 18, 34, 0.07); }
+.arr-slot { background: var(--gold); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45); }
+.arr-slit {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  height: 4px;
+  border-radius: 2px;
+  background: #0b1222;
+}
+
+/* A · the envelope. */
+.arr-env-back {
+  border-radius: 10px;
+  background: #b9802a;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+.arr-env-pocket {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  border-radius: 10px;
+  background: var(--gold);
+  clip-path: polygon(0 0, 50% 55%, 100% 0, 100% 100%, 0 100%);
+}
+.arr-env-title {
+  max-width: 90%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--display);
+  letter-spacing: 0.08em;
+  line-height: 1;
+  color: #1a1204;
+}
+.arr-env-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: #4a3309;
+}
+.arr-env-flap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #cf9535;
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  transform-origin: 50% 0;
+}
+.arr-env-seal {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #0b1222;
+  border: 2px solid #f0c067;
+}
+
+/* B · cards: a BingoView back, the paper on the front. */
+.arr-card { perspective: 800px; }
+.arr-card-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+.arr-card-back,
+.arr-card-front {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.arr-card-back {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1b2640;
+  border: 2px solid var(--gold);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45);
+}
+.arr-card-mono {
+  width: 76%;
+  height: 82%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  border: 1px dashed rgba(227, 165, 58, 0.45);
+  font-family: var(--display);
+  letter-spacing: 0.04em;
+  color: var(--gold);
+}
+.arr-card-front { transform: rotateY(180deg); }
+
+/* D · bingo balls. */
+.arr-ball {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+.arr-ball-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #fffdf8;
+  font-family: var(--display);
+  line-height: 1;
+  color: #0b1222;
+}
+.arr-ball-shadow { border-radius: 50%; background: rgba(0, 0, 0, 0.6); }
+.arr-ring { border-radius: 50%; border: 3px solid var(--gold); }
+
+/* E · the paper plane and its trail. */
+.arr-plane { filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.45)); }
+.arr-plane-inner { width: 100%; height: 100%; }
+.arr-trail { opacity: 0.55; }
+.arr-trail path {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.arr-flash {
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(227, 165, 58, 0.8), rgba(227, 165, 58, 0) 70%);
+}
+
+/* F · the stack and its stamps. */
+.arr-stackpaper { border-radius: 8px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4); overflow: visible; }
+.arr-stack-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.arr-stack-left { display: flex; align-items: baseline; gap: 8px; }
+.arr-stack-name {
+  font-family: var(--display);
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: #0b1222;
+}
+.arr-stack-count { font-family: var(--mono); font-weight: 600; color: rgba(11, 18, 34, 0.7); }
+.arr-stamp-wrap { position: relative; flex-shrink: 0; }
+.arr-stamp {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+.arr-stamp-ring { position: absolute; inset: -4px; border: 2px solid; border-radius: 8px; }
+
+/* G · from the sender into a tray. */
+.arr-who { display: flex; flex-direction: column; align-items: center; }
+.arr-who-disc { position: relative; }
+.arr-who-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--gold);
+}
+.arr-who-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--gold);
+  font-family: var(--display);
+  line-height: 1;
+  color: #1a1204;
+}
+.arr-who-name { font-weight: 700; color: var(--paper); }
+.arr-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); }
+.arr-tray { display: flex; flex-direction: column; align-items: center; }
+.arr-tray-grid { display: grid; }
+.arr-slot-cell {
+  box-sizing: border-box;
+  border-radius: 8px;
+  border: 1.5px dashed #2e3d5c;
+}
+.arr-count { position: relative; }
+.arr-count-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  text-align: center;
+  font-family: var(--mono);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: #c9cfdb;
+}
+.arr-count-line.done { color: #3fbf74; }
+
+/* A paper reaching its tab — drawn over the backdrop at the tab's spot. */
+.arr-tab-glow { border-radius: 8px; }
+
+/* Innstillinger: which arrivals are in the draw. */
+.arr-pick { display: flex; flex-direction: column; gap: 2px; }
+.arr-pick-row { display: flex; align-items: center; gap: 10px; min-height: 40px; }
+.arr-pick-row label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.8rem;
+  color: var(--paper);
+  cursor: pointer;
+}
+.arr-pick-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--gold);
+  flex-shrink: 0;
+}
+.arr-pick-row .bv-overlay-btn { padding: 5px 12px; font-size: 0.72rem; }
+.arr-pick-none { font-size: 0.7rem; color: var(--gold); padding-top: 4px; }
 
 /* ── 11 ── Tension. A row one number away already pulses; this puts a
    beacon on the specific squares you still need, so "you are close" and
@@ -3048,6 +3323,13 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <button type="button" data-fx="maks">Maks</button>
         </div>
       </div>
+      <div class="bv-row bv-row-stacked" id="bv-row-arrivals">
+        <div class="bv-row-label">
+          <span>Når noen deler en blokk med deg</span>
+          <span class="bv-row-desc">En av de valgte spilles, tilfeldig. «Vis» spiller den på blokka du har oppe nå.</span>
+        </div>
+        <div class="arr-pick" id="bv-arrival-list"></div>
+      </div>
       <div class="bv-row" id="bv-row-call-ring">
         <div class="bv-row-label">
           <span>Nedtelling til neste tall</span>
@@ -3484,6 +3766,18 @@ const FEEDBACK_KEY = 'bv_feedback';
 // fx-on class never goes on the body, so not one FX rule in the stylesheet
 // can match and the app behaves exactly as it did before any of this existed.
 const FX_LEVELS = ['av', 'rolig', 'full', 'maks'];
+// The ways a shared block can arrive (see ARRIVAL_RUNNERS). Innstillinger
+// lets the user tick which of them are in the draw.
+const ARRIVAL_STYLES = [
+  { id: 'envelope',     name: 'Konvolutten' },
+  { id: 'cards',        name: 'Kortene snus' },
+  { id: 'printer',      name: 'Billettautomaten' },
+  { id: 'balls',        name: 'Bingoballene' },
+  { id: 'plane',        name: 'Papirflyet' },
+  { id: 'stamp',        name: 'Stempelet' },
+  { id: 'transfer',     name: 'Fra avsenderen til deg' },
+  { id: 'transferAnon', name: 'Overføringen, uten navn' },
+];
 const feedback = (() => {
   // The full experience out of the box. These were all conservative opt-ins
   // while the FX layer was new; it isn't new any more, and a first-time user
@@ -3493,10 +3787,15 @@ const feedback = (() => {
                      animations: true, fxLevel: 'maks',
                      // The host only sets how long the countdown runs; this
                      // decides whether it's drawn on this phone at all.
-                     callRing: true };
+                     callRing: true,
+                     arrivalStyles: ARRIVAL_STYLES.map(s => s.id) };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(FEEDBACK_KEY) || '{}'); } catch (e) {}
   const f = { ...defaults, ...saved };
+  // Only ids that still exist; an empty list is a real choice (no animation).
+  f.arrivalStyles = Array.isArray(saved && saved.arrivalStyles)
+    ? saved.arrivalStyles.filter(id => ARRIVAL_STYLES.some(s => s.id === id))
+    : defaults.arrivalStyles.slice();
   // Migration from the old boolean. Anyone who had animations on gets 'full'
   // rather than 'rolig': they opted into flourishes, and 'full' is the level
   // this was designed around — 'rolig' exists for people who find that much.
@@ -3910,6 +4209,14 @@ function sfxSlotSheet(i) {
   try {
     sfxNoise(ctx, { dur: 0.05, gain: 0.07, freq: 1400 });
     sfxTone(ctx, { freq: sfxStep(i), type: 'triangle', dur: 0.22, gain: 0.12 });
+  } catch (e) {}
+}
+// F · a rubber stamp coming down: a short low thud, felt more than heard.
+function sfxStampThud() {
+  const ctx = sfxReady(); if (!ctx) return;
+  try {
+    sfxNoise(ctx, { dur: 0.07, gain: 0.12, freq: 380 });
+    sfxTone(ctx, { freq: 110, type: 'triangle', dur: 0.14, gain: 0.14 });
   } catch (e) {}
 }
 function sfxShareArrive() {
@@ -4546,10 +4853,9 @@ function fxConfetti(count) {
 // Opening someone's link is the one moment this app RECEIVES something
 // rather than reporting something, and it used to go by with a toast.
 //
-// The strips already deal themselves in — renderActiveGame does that for any
-// sheet appearing — so this doesn't re-stage the arrival, it puts an event
-// around it: the sheet settles, the edge blooms brass, and the confetti
-// lands as the last strip does.
+// It now gets a short sequence of its own — one of several, drawn at random
+// (fxArrivalTour) — that shows the papers coming in one per game and landing
+// in their tabs before the sheet comes up.
 //
 // Deliberately smaller than a win. The reference point is the row-complete
 // cascade, not the bingo: receiving a block is a good moment, but the game
@@ -4562,8 +4868,10 @@ function fxConfetti(count) {
 // Holds the block that arrived, not its papers — the games are read off it at
 // tour time so the tour can't be working from a list that has since changed.
 let _fxPendingArrival = null;
-// True for the length of the tour. renderActiveGame reads it to stand its own
-// sheet-swap animations down while the papers are flying in under their own.
+// Who sent it, when the share said — some arrivals show the name.
+let _fxPendingArrivalFrom = '';
+// Set while arrLandPage puts the landing sheet in the tray by hand.
+// renderActiveGame reads it to keep its own sheet-swap animation out of it.
 let _fxArrivalTouring = false;
 // Set the instant we know this page load came from a share link, which is
 // before the payload has even been decoded. The stripped-back header depends
@@ -4580,9 +4888,10 @@ let _fxShareEntry = false;
 let _fxArrivalReady = false;
 let _fxArrivalReadyTimer = null;
 
-function fxQueueArrival(blockIdx) {
+function fxQueueArrival(blockIdx, sender) {
   if (blockIdx == null || blockIdx < 0) return;
   _fxPendingArrival = blockIdx;
+  _fxPendingArrivalFrom = sender || '';
   _fxArrivalReady = false;
   clearTimeout(_fxArrivalReadyTimer);
   // Safety net. A host that never answers must not strand the user on an
@@ -4641,218 +4950,895 @@ function fxFlushArrival() {
   // Cleared BEFORE the tour runs: the tour switches papers, every switch
   // re-enters renderActiveGame, and a flag still set here would recurse.
   _fxPendingArrival = null;
-  fxArrivalTour(blockIdx);
+  fxArrivalTour(blockIdx, _fxPendingArrivalFrom);
 }
 
-const FX_ARRIVE_FLIGHT = 720;   // one paper's flight
-const FX_ARRIVE_LEAD   = 140;   // breathing room before the first one starts
-const FX_SETTLE        = 420;   // block shrinking back / chrome coming in
+// ── Share arrival ─────────────────────────────────────────────
+// A shared block arrives through one of several short sequences, picked at
+// random from the ones ticked in Innstillinger (ARRIVAL_STYLES). Each plays
+// on a stage laid over the whole screen, and the real page is laid out
+// underneath it from the very first frame — hidden behind the stage's
+// backdrop. That is what lets every paper fly to the REAL game tab and the
+// landing paper settle onto the REAL sheet, measured where they actually are
+// on this phone, instead of aiming at positions guessed from a mockup.
+//
+// Everything moving is transform and opacity through the Web Animations API,
+// scheduled up front where it can be. The stage's papers are lightweight
+// stand-ins (a coloured card with three ruled strips) rather than the real
+// ~160-cell sheets, so nothing heavy is being laid out mid-flight.
 
-// A block arrives as a set of papers — one per game — and this deals them in
-// the way you'd be handed them: paper 4, 3, 2, 1, ending on the one about to
-// be played.
-//
-// Every paper is staged in the tray UP FRONT and the whole sequence is handed
-// to the compositor in one go. The obvious way to write this — switch to each
-// game on a timer and animate whatever sheet lands — is what made it choppy:
-// each beat ran a real game switch, and a real game switch is a DOM swap plus
-// renderCells over every square plus a full rebuild of both tab rows plus the
-// countdown ring's geometry. That is a big chunk of main-thread work landing
-// four times in the middle of an animation, and no amount of deferring it by
-// a frame changes the fact that it is happening at all.
-//
-// None of it is needed to show someone what they were sent. The sheets are
-// already built; stacking them and animating transforms means one layout pass
-// for the lot, then nothing on the main thread until the tour is over and the
-// real game switch happens once.
-function fxArrivalTour(blockIdx) {
-  // The tour is about the papers, but they live in a block, so make sure
+let _arrRun = null;   // the sequence on screen, so a second one can cut it short
+
+function pickArrivalStyle(hasSender) {
+  const known = new Set(ARRIVAL_STYLES.map(s => s.id));
+  let pool = (feedback.arrivalStyles || []).filter(id => known.has(id));
+  // No name to show: the named transfer plays as its anonymous twin.
+  if (!hasSender) pool = pool.map(id => id === 'transfer' ? 'transferAnon' : id);
+  pool = [...new Set(pool)];
+  if (!pool.length) return null;
+  // Random, but never the same one twice running when there is a choice.
+  let last = null;
+  try { last = localStorage.getItem('bv_lastArrival'); } catch (e) {}
+  const choices = pool.length > 1 ? pool.filter(id => id !== last) : pool;
+  const id = choices[Math.floor(Math.random() * choices.length)];
+  try { localStorage.setItem('bv_lastArrival', id); } catch (e) {}
+  return id;
+}
+
+// Hand the page back: the landing sheet goes in the tray while the tour
+// still owns it, so the render below finds the tray already right and skips
+// its own swap animation, then every arrival-only class comes off.
+function arrLandPage(first) {
+  const tray     = document.getElementById('digital-paper');
+  const scroller = document.getElementById('paper-canvas-wrap');
+  const keep = first && gameState[first] && gameState[first].paperEl;
+  _fxArrivalTouring = true;
+  if (keep && tray.firstChild !== keep) { tray.innerHTML = ''; tray.appendChild(keep); }
+  if (first) activeGame = first;
+  _fxArrivalTouring = false;
+  _fxShareEntry = false;
+  tray.classList.remove('fx-awaiting');
+  tray.style.removeProperty('min-height');
+  document.body.classList.remove('fx-arrival');
+  if (scroller) { scroller.classList.remove('fx-arriving'); scroller.scrollTop = 0; }
+  renderActiveGame();
+}
+
+function arrTf(p) {
+  return `translate(${p.x || 0}px, ${p.y || 0}px) rotate(${p.r || 0}deg) scale(${p.s == null ? 1 : p.s})`;
+}
+
+// Offsets for n items spread around 0, at most `max` apart, never wider than fits.
+function arrSpread(n, max, span) {
+  const sp = n > 1 ? Math.min(max, span / (n - 1)) : 0;
+  return Array.from({ length: n }, (_, i) => (i - (n - 1) / 2) * sp);
+}
+
+function arrEl(cls, css) {
+  const el = document.createElement('div');
+  el.className = cls;
+  if (css) Object.assign(el.style, css);
+  return el;
+}
+
+// The stand-in paper: the game's colour, three ruled strips, its name.
+function arrMiniPaper(g, w, h, opts = {}) {
+  const el = arrEl('arr-actor arr-paper', {
+    width: w + 'px', height: h + 'px', background: g.color,
+    padding: Math.round(w * 0.075) + 'px', gap: Math.max(3, Math.round(h * 0.04)) + 'px',
+  });
+  for (let k = 0; k < 3; k++) el.appendChild(arrEl('arr-mini-strip'));
+  if (opts.label !== false) {
+    const l = arrEl('arr-paper-label');
+    l.textContent = g.name;
+    l.style.fontSize = Math.round(h * 0.13) + 'px';
+    el.appendChild(l);
+  }
+  return el;
+}
+
+// A printed ticket: the block's REAL first three strips for that game, so the
+// last one out matches the sheet it turns into.
+function arrTicket(g, w, h, u) {
+  const el = arrEl('arr-actor arr-paper arr-ticket', {
+    width: w + 'px', height: h + 'px', background: g.color,
+    padding: Math.round(8 * u) + 'px', gap: Math.round(6 * u) + 'px',
+  });
+  (g.strips || []).slice(0, 3).forEach(strip => {
+    const s = arrEl('arr-tk-strip', { padding: Math.round(5 * u) + 'px' });
+    const id = arrEl('arr-tk-id', { background: g.idBg, fontSize: Math.round(9 * u) + 'px' });
+    id.textContent = strip.id != null ? String(strip.id) : '';
+    s.appendChild(id);
+    const grid = arrEl('arr-tk-grid', { gap: Math.max(1, Math.round(2 * u)) + 'px' });
+    (strip.rows || []).slice(0, 3).forEach(row => {
+      const slots = Array(9).fill('');
+      (row || []).forEach(n => {
+        n = Number(n);
+        if (!n) return;
+        slots[n >= 90 ? 8 : Math.floor(n / 10)] = String(n);
+      });
+      slots.forEach(v => {
+        const c = arrEl('arr-tk-cell' + (v ? '' : ' empty'), {
+          height: Math.round(19 * u) + 'px', fontSize: Math.round(11 * u) + 'px',
+        });
+        c.textContent = v;
+        grid.appendChild(c);
+      });
+    });
+    s.appendChild(grid);
+    el.appendChild(s);
+  });
+  return el;
+}
+
+// Put an element on the stage centred on (cx, cy). The returned paper record
+// tracks where its transform leaves it, so a later flight can start from
+// exactly that pose.
+function arrPlace(run, el, cx, cy, w, h, z, g) {
+  el.style.left = (cx - w / 2) + 'px';
+  el.style.top  = (cy - h / 2) + 'px';
+  if (z != null) el.style.zIndex = String(z);
+  run.stage.appendChild(el);
+  return { el, g, home: { x: cx, y: cy }, w, h, pose: { x: 0, y: 0, r: 0, s: 1 } };
+}
+
+function arrTabRect(gid) {
+  const tab = document.querySelector('#game-tabs .game-tab[data-game="' + gid + '"]');
+  if (!tab) return null;
+  const r = tab.getBoundingClientRect();
+  return r.width ? r : null;
+}
+
+// A paper reaching its tab: the tab flashes in the game's colour. The same
+// flash is also drawn on the stage, over the backdrop, because in some
+// sequences the papers land before the backdrop has lifted off the tab row.
+function arrCatchTab(run, p) {
+  const r = arrTabRect(p.g.id);
+  const tab = document.querySelector('#game-tabs .game-tab[data-game="' + p.g.id + '"]');
+  if (tab) {
+    tab.animate([
+      { transform: 'scale(1)' },
+      { transform: 'scale(1.1)', backgroundColor: p.g.color, color: '#0B1222',
+        boxShadow: '0 0 0 3px ' + p.g.color + ', 0 0 18px ' + p.g.color, offset: 0.3 },
+      { transform: 'scale(1)' },
+    ], { duration: 700, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+  }
+  if (r) {
+    const glow = arrEl('arr-actor arr-tab-glow', {
+      left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px',
+      background: p.g.color, zIndex: '90', opacity: '0',
+    });
+    run.stage.appendChild(glow);
+    run.anim(glow, [
+      { opacity: 0, transform: 'scale(0.9)' },
+      { opacity: 0.95, transform: 'scale(1.08)', offset: 0.3 },
+      { opacity: 0, transform: 'scale(1)' },
+    ], 650, 0, 'ease-out', 'forwards');
+  }
+  sfxSlotSheet(p.g.i);
+  fxHaptic(14);
+}
+
+// Fly a paper from wherever it is now into its game tab, shrinking to the
+// tab's height. `wiggle` gives it a small tear-off tug first.
+function arrFlyToTab(run, p, opts = {}) {
+  const r = arrTabRect(p.g.id);
+  const tx = r ? r.left + r.width / 2 : run.vw / 2;
+  const ty = r ? r.top + r.height / 2 : 60;
+  const s  = Math.max(0.15, Math.min(0.6, (r ? r.height : 34) / p.h));
+  const end = { x: tx - p.home.x, y: ty - p.home.y, r: 0, s };
+  const dur = opts.dur || 500;
+  const frames = [{ opacity: 1, transform: arrTf(p.pose) }];
+  if (opts.wiggle) {
+    frames.push({ opacity: 1, offset: 0.18,
+      transform: arrTf({ ...p.pose, y: p.pose.y + 10 * run.u, r: (p.pose.r || 0) - 3 }) });
+  }
+  frames.push({ opacity: 0, transform: arrTf(end) });
+  run.anim(p.el, frames, dur, 0, 'cubic-bezier(0.5, 0, 0.3, 1)', 'forwards');
+  p.pose = end;
+  run.at(dur * 0.8, () => arrCatchTab(run, p));
+}
+
+// The landing paper settles onto the real sheet. Scaled uniformly — by width,
+// top edges aligned — so it never stretches, and it holds full strength
+// until more than half way before handing over to the sheet fading in
+// beneath it. `whiten` fades its colour to the sheet's white on the way.
+function arrMorphToSheet(run, p, opts = {}) {
+  const sheet = document.getElementById('digital-paper');
+  const r = sheet.getBoundingClientRect();
+  const s = r.width / p.w;
+  const end = { x: r.left + r.width / 2 - p.home.x, y: r.top + (p.h * s) / 2 - p.home.y, r: 0, s };
+  const dur = opts.dur || 700;
+  const first = { opacity: 1, transform: arrTf(p.pose) };
+  const last  = { opacity: 0, transform: arrTf(end) };
+  if (opts.whiten) { first.backgroundColor = p.g.color; last.backgroundColor = '#ffffff'; }
+  const frames = [first];
+  if (opts.tug) {
+    frames.push({ offset: 0.15, transform: arrTf({ ...p.pose, y: (p.pose.y || 0) + 8 * run.u, r: -2 }) });
+  }
+  frames.push({ opacity: 1, offset: 0.6 }, last);
+  run.anim(p.el, frames, dur, 0, 'cubic-bezier(0.45, 0, 0.2, 1)', 'forwards');
+  p.pose = end;
+  run.at(dur * 0.35, () => arrCatchTab(run, p));
+  return dur;
+}
+
+// The real sheet comes in. After a morph it simply fades up under the paper
+// landing on it; otherwise it rises into place with its strips following.
+function arrRevealSheet(run, afterMorph) {
+  const ring = document.getElementById('paper-ring-wrap');
+  if (!ring) return;
+  ring.style.opacity = '';
+  if (afterMorph) {
+    run.anim(ring, [{ opacity: 0 }, { opacity: 1 }], 420, 0, 'ease-out', 'backwards');
+  } else {
+    run.anim(ring, [
+      { opacity: 0, transform: 'translateY(18px) scale(0.97)' },
+      { opacity: 1, transform: 'none' },
+    ], 500, 0, 'cubic-bezier(0.2, 0.8, 0.2, 1)', 'backwards');
+    document.querySelectorAll('#digital-paper .strip').forEach((st, i) => {
+      if (i > 7) return;   // the rest are below the fold anyway
+      run.anim(st, [
+        { opacity: 0, transform: 'translateY(10px)' },
+        { opacity: 1, transform: 'none' },
+      ], 400, 120 + i * 60, 'cubic-bezier(0.2, 0.8, 0.2, 1)', 'backwards');
+    });
+  }
+  audioUnlock().then(sfxShareArrive);
+  fxHaptic([26, 70, 26, 60, 40]);
+}
+
+// ── The sequences ─────────────────────────────────────────────
+// Each lays out its intro on the stage and returns its plan: which papers go
+// to their tabs and when, which one (if any) settles onto the sheet, and when
+// the backdrop lifts and the sheet comes in. Times are ms from the start.
+const ARRIVAL_RUNNERS = {
+
+  // A · A sealed envelope drops in, opens, and the papers rise out into a fan.
+  envelope(run) {
+    const { vw, vh, u, games } = run;
+    const N = games.length;
+    const ew = 250 * u, eh = 160 * u, ex = vw / 2, ey = vh * 0.62;
+    const pw = 92 * u, ph = 124 * u;
+    const box = (cls, h, z) => {
+      const el = arrEl('arr-actor ' + cls, {
+        left: (ex - ew / 2) + 'px', top: (ey - eh / 2) + 'px',
+        width: ew + 'px', height: h + 'px', zIndex: String(z),
+      });
+      run.stage.appendChild(el);
+      return el;
+    };
+    const back = box('arr-env-back', eh, 2);
+    const pocket = box('arr-env-pocket', eh, 4);
+    const t1 = arrEl('arr-env-title');
+    t1.textContent = run.sender ? 'Fra ' + run.sender : 'Til deg';
+    t1.style.fontSize = Math.round(28 * u) + 'px';
+    const t2 = arrEl('arr-env-sub');
+    t2.textContent = N + (N === 1 ? ' ARK' : ' ARK');
+    pocket.style.paddingBottom = Math.round(20 * u) + 'px';
+    pocket.append(t1, t2);
+    const flapWrap = box('arr-env-flapwrap', eh * 0.625, 6);
+    const flap = arrEl('arr-env-flap');
+    const seal = arrEl('arr-env-seal', {
+      width: 24 * u + 'px', height: 24 * u + 'px',
+      left: (ew / 2 - 12 * u) + 'px', top: (eh * 0.625 * 0.62) + 'px',
+    });
+    flap.appendChild(seal);
+    flapWrap.appendChild(flap);
+
+    const drop = [
+      { transform: `translateY(${-(ey + eh)}px) rotate(-10deg)` },
+      { transform: 'translateY(12px) rotate(1.5deg)', offset: 0.64 },
+      { transform: 'translateY(-5px) rotate(-0.5deg)', offset: 0.82 },
+      { transform: 'translateY(0px) rotate(0deg)' },
+    ];
+    [back, pocket, flapWrap].forEach(el => run.anim(el, drop, 620, 0, 'ease-out'));
+    run.at(470, () => fxHaptic(18));
+    run.anim(flapWrap, [{ zIndex: 6 }, { zIndex: 6, offset: 0.49 }, { zIndex: 1, offset: 0.5 }, { zIndex: 1 }], 360, 700, 'linear');
+    run.anim(flap, [
+      { transform: 'perspective(700px) rotateX(0deg)' },
+      { transform: 'perspective(700px) rotateX(180deg)' },
+    ], 360, 700, 'cubic-bezier(0.4, 0, 0.2, 1)');
+
+    const xs = arrSpread(N, 90 * u, vw - pw - 24);
+    const papers = games.map((g, i) => {
+      const p = arrPlace(run, arrMiniPaper(g, pw, ph), ex, ey, pw, ph, 3, g);
+      const mid = i - (N - 1) / 2;
+      p.pose = { x: xs[i], y: -220 * u + Math.abs(mid) * 8 * u, r: mid * 6, s: 1 };
+      run.anim(p.el, [
+        { opacity: 0, transform: `translate(0px, ${24 * u}px)` },
+        { opacity: 1, offset: 0.01 },
+        { transform: `translate(0px, ${-170 * u}px) rotate(0deg)`, offset: 0.45 },
+        { opacity: 1, transform: arrTf(p.pose) },
+      ], 850, 1000 + i * 180, 'cubic-bezier(0.2, 0.8, 0.2, 1)');
+      return p;
+    });
+    const riseEnd = 1000 + (N - 1) * 180 + 850;
+    const out = [
+      { transform: 'translateY(0px) rotate(0deg)', opacity: 1 },
+      { transform: `translateY(${vh * 0.6}px) rotate(8deg)`, opacity: 0 },
+    ];
+    [back, pocket, flapWrap].forEach(el =>
+      run.anim(el, out, 500, riseEnd - 40, 'cubic-bezier(0.5, 0, 0.8, 0.4)', 'forwards'));
+    return {
+      goes: papers.map((p, i) => ({ p, at: riseEnd + 260 + i * 90 })),
+      backdropAt: riseEnd + 300, revealAt: riseEnd + 560,
+    };
+  },
+
+  // B · Dealt face down into a fan, flipped one by one; the first game's card
+  // opens out into the sheet, the rest tuck into their tabs.
+  cards(run) {
+    const { vw, vh, u, games } = run;
+    const N = games.length;
+    const cw = 100 * u, ch = 136 * u, hx = vw / 2, hy = vh * 0.56;
+    const xs = arrSpread(N, 92 * u, vw - cw - 24);
+    const cards = games.map((g, i) => {
+      const outer = arrEl('arr-actor arr-card', { width: cw + 'px', height: ch + 'px' });
+      const inner = arrEl('arr-card-inner');
+      const backFace = arrEl('arr-card-back');
+      const mono = arrEl('arr-card-mono', { fontSize: Math.round(34 * u) + 'px' });
+      mono.textContent = 'BV';
+      backFace.appendChild(mono);
+      const front = arrMiniPaper(g, cw, ch);
+      front.classList.remove('arr-actor');
+      front.classList.add('arr-card-front');
+      inner.append(backFace, front);
+      outer.appendChild(inner);
+      const p = arrPlace(run, outer, hx, hy, cw, ch, 30 + i, g);
+      const mid = i - (N - 1) / 2;
+      p.pose = { x: xs[i], y: Math.abs(mid) * 14 * u, r: mid * 6, s: 1 };
+      p.inner = inner;
+      run.anim(outer, [
+        { opacity: 0, transform: `translate(0px, ${-(hy + ch)}px) rotate(-200deg) scale(0.9)` },
+        { opacity: 1, offset: 0.12 },
+        { opacity: 1, transform: arrTf(p.pose) },
+      ], 550, 250 + i * 160, 'cubic-bezier(0.2, 0.9, 0.25, 1)');
+      return p;
+    });
+    const dealEnd = 250 + (N - 1) * 160 + 550;
+    cards.forEach((p, i) => {
+      const at = dealEnd + 100 + i * 200;
+      run.anim(p.inner, [
+        { transform: 'rotateY(0deg) scale(1)' },
+        { transform: 'rotateY(90deg) scale(1.1)', offset: 0.5 },
+        { transform: 'rotateY(180deg) scale(1)' },
+      ], 450, at, 'ease-in-out');
+      run.at(at + 225, () => fxHaptic(10));
+    });
+    const flipEnd = dealEnd + 100 + (N - 1) * 200 + 450;
+    const heroAt = flipEnd + 350;
+    return {
+      goes: cards.slice(1).map((p, k) => ({ p, at: flipEnd + 200 + k * 80 })),
+      hero: { p: cards[0], at: heroAt, dur: 650 },
+      backdropAt: flipEnd + 300, revealAt: heroAt + 260,
+    };
+  },
+
+  // C · Printed out of a ticket machine one at a time, last game first. Each
+  // finished ticket tears off to its tab; the first game's prints last and
+  // settles onto the sheet, whitening as it lands.
+  printer(run) {
+    const { vw, vh, u, games } = run;
+    const N = games.length;
+    const sw = 300 * u, sh = 22 * u;
+    const slotTop = Math.max(120, vh * 0.26);
+    const slitY = slotTop + sh / 2;
+    const tw = Math.min(260 * u, vw - 40), th = 300 * u;
+    const slot = arrEl('arr-actor arr-slot', {
+      left: (vw / 2 - sw / 2) + 'px', top: slotTop + 'px', width: sw + 'px', height: sh + 'px',
+      borderRadius: sh / 2 + 'px', zIndex: '45',
+    });
+    slot.appendChild(arrEl('arr-slit', { top: (sh / 2 - 2) + 'px' }));
+    run.stage.appendChild(slot);
+    run.anim(slot, [
+      { opacity: 0, transform: 'translateY(-40px) scaleX(0.6)' },
+      { opacity: 1, transform: 'none' },
+    ], 400, 50, 'cubic-bezier(0.2, 0.8, 0.2, 1)');
+
+    const order = games.slice().reverse();          // last game prints first
+    const tickets = order.map((g, j) => {
+      const p = arrPlace(run, arrTicket(g, tw, th, u), vw / 2, slitY + th / 2, tw, th, 30 + j, g);
+      const at = 450 + j * 620;
+      const step = k => ({ transform: `translateY(${-th * k / 3}px)`, clipPath: `inset(${th * k / 3}px 0px 0px 0px)` });
+      run.anim(p.el, [
+        step(3),
+        { ...step(2), offset: 0.28 }, { ...step(2), offset: 0.36 },
+        { ...step(1), offset: 0.62 }, { ...step(1), offset: 0.70 },
+        step(0),
+      ], 550, at, 'linear');
+      [0.28, 0.62, 1].forEach(f => run.at(at + 550 * f, () => fxHaptic(6)));
+      p.printedAt = at + 550;
+      return p;
+    });
+    const hero = tickets[N - 1];
+    const heroAt = hero.printedAt + 150;
+    run.anim(slot, [
+      { opacity: 1, transform: 'none' },
+      { opacity: 0, transform: 'translateY(-30px) scaleX(0.7)' },
+    ], 350, heroAt, 'ease', 'forwards');
+    return {
+      goes: tickets.slice(0, N - 1).map(p => ({ p, at: p.printedAt + 50, wiggle: true })),
+      hero: { p: hero, at: heroAt, dur: 760, whiten: true, tug: true },
+      backdropAt: heroAt + 60, revealAt: heroAt + 300,
+    };
+  },
+
+  // D · Bingo balls drop and bounce, then burst into their papers.
+  balls(run) {
+    const { vw, vh, u, games } = run;
+    const N = games.length;
+    const floorY = vh * 0.66, bd = 64 * u, pw = 92 * u, ph = 124 * u;
+    const xs = arrSpread(N, 80 * u, vw - pw - 24);
+    const RIMS = { blue: '#6F95CF', yellow: '#D9B53A', pink: '#D77AA2', grey: '#A99AA3' };
+    const dropDur = 950;
+    const papers = games.map((g, i) => {
+      const cx = vw / 2 + xs[i];
+      const at = 100 + i * 180;
+      const shadow = arrEl('arr-actor arr-ball-shadow', {
+        left: (cx - 30 * u) + 'px', top: (floorY + bd / 2 - 4 * u) + 'px',
+        width: 60 * u + 'px', height: 10 * u + 'px', zIndex: '2', opacity: '0',
+      });
+      const ring = arrEl('arr-actor arr-ring', {
+        left: (cx - bd / 2) + 'px', top: (floorY - bd / 2) + 'px',
+        width: bd + 'px', height: bd + 'px', zIndex: '3', opacity: '0',
+      });
+      const ball = arrEl('arr-actor arr-ball', {
+        left: (cx - bd / 2) + 'px', top: (floorY - bd / 2) + 'px',
+        width: bd + 'px', height: bd + 'px', zIndex: '4',
+        background: `radial-gradient(circle at 34% 28%, #ffffff 0, ${g.color} 22%, ${g.color} 62%, ${RIMS[g.id] || g.color} 100%)`,
+      });
+      const num = arrEl('arr-ball-num', {
+        width: 34 * u + 'px', height: 34 * u + 'px', fontSize: Math.round(24 * u) + 'px',
+      });
+      num.textContent = String(i + 1);
+      ball.appendChild(num);
+      run.stage.append(shadow, ring, ball);
+      const R = (a, y, sx, sy) => `translateY(${y}px) rotate(${a}deg) scale(${sx}, ${sy})`;
+      const fall = 'cubic-bezier(0.5, 0, 1, 0.6)', rise = 'cubic-bezier(0, 0.5, 0.5, 1)';
+      run.anim(ball, [
+        { transform: R(-260, -(floorY + 120), 1, 1), easing: fall },
+        { transform: R(0, 0, 1.1, 0.88), offset: 0.44, easing: rise },
+        { transform: R(40, -96 * u, 1, 1), offset: 0.60, easing: fall },
+        { transform: R(70, 0, 1.06, 0.93), offset: 0.73, easing: rise },
+        { transform: R(84, -30 * u, 1, 1), offset: 0.83, easing: fall },
+        { transform: R(92, 0, 1.03, 0.97), offset: 0.91, easing: rise },
+        { transform: R(95, -7 * u, 1, 1), offset: 0.96 },
+        { transform: R(96, 0, 1, 1) },
+      ], dropDur, at, 'linear');
+      run.anim(shadow, [
+        { opacity: 0, transform: 'scale(0.3)' },
+        { opacity: 0.55, transform: 'scale(1)', offset: 0.44 },
+        { opacity: 0.25, transform: 'scale(0.7)', offset: 0.60 },
+        { opacity: 0.5, transform: 'scale(1)', offset: 0.73 },
+        { opacity: 0.5, transform: 'scale(1)' },
+      ], dropDur, at, 'linear');
+      run.at(at + dropDur * 0.44, () => fxHaptic(12));
+      const p = arrPlace(run, arrMiniPaper(g, pw, ph), cx, floorY, pw, ph, 5, g);
+      p.pose = { x: 0, y: -80 * u, r: (i - (N - 1) / 2) * 5, s: 1 };
+      p.ball = ball; p.ring = ring; p.shadow = shadow;
+      return p;
+    });
+    const dropEnd = 100 + (N - 1) * 180 + dropDur;
+    papers.forEach((p, i) => {
+      const pop = dropEnd + 100 + i * 140;
+      run.anim(p.ball, [
+        { opacity: 1, transform: 'rotate(96deg) scale(1)' },
+        { opacity: 1, transform: 'rotate(96deg) scale(1.28)', offset: 0.4 },
+        { opacity: 0, transform: 'rotate(96deg) scale(1.6)' },
+      ], 300, pop, 'ease-out', 'forwards');
+      run.anim(p.shadow, [{ opacity: 0.5 }, { opacity: 0 }], 200, pop, 'ease', 'forwards');
+      run.anim(p.ring, [
+        { opacity: 0.95, transform: 'scale(0.7)' },
+        { opacity: 0, transform: 'scale(2.6)' },
+      ], 450, pop + 80, 'cubic-bezier(0.2, 0.8, 0.2, 1)', 'forwards');
+      run.anim(p.el, [
+        { opacity: 0, transform: 'scale(0.3)' },
+        { opacity: 1, transform: arrTf({ ...p.pose, y: p.pose.y * 0.6, s: 1.1 }), offset: 0.55 },
+        { opacity: 1, transform: arrTf(p.pose) },
+      ], 450, pop + 50, 'cubic-bezier(0.2, 0.9, 0.3, 1.2)');
+      run.at(pop + 60, () => fxHaptic(16));
+    });
+    const popEnd = dropEnd + 100 + (N - 1) * 140 + 500;
+    return {
+      goes: papers.map((p, i) => ({ p, at: popEnd + 150 + i * 90 })),
+      backdropAt: popEnd + 200, revealAt: popEnd + 450,
+    };
+  },
+
+  // E · A paper plane loops in on a traced path, lands level and unfolds into
+  // the papers. The path is sampled here rather than left to CSS motion
+  // paths: the heading is unwrapped so it never spins the long way round,
+  // and the final approach is built to arrive flying straight right — so the
+  // plane is level when it unfolds instead of flipping over at the last
+  // moment.
+  plane(run) {
+    const { vw, vh, u, games } = run;
+    const N = games.length;
+    const L = { x: vw / 2, y: vh * 0.56 };
+    const P = (x, y) => ({ x, y });
+    const P0 = P(-60 * u, vh * 0.86);
+    const s1 = [P0, P(vw * 0.15, vh * 0.66), P(vw * 1.0, vh * 0.80), P(vw * 0.82, vh * 0.50)];
+    // Control points tuned so the heading never turns more than ~8° between
+    // samples on any phone size (the first cut had a 113° kink three quarters
+    // in, which read as a flip) and the loop closes one full turn round, so
+    // the plane arrives dead level.
+    const s2 = [s1[3], P(2 * s1[3].x - s1[2].x, 2 * s1[3].y - s1[2].y), P(0, vh * 0.26), P(vw * 0.10, vh * 0.46)];
+    const s3 = [s2[3], P(2 * s2[3].x - s2[2].x, 2 * s2[3].y - s2[2].y), P(L.x - 100 * u, L.y), L];
+    const segs = [s1, s2, s3];
+    const bez = (s, t) => {
+      const m = 1 - t;
+      return {
+        x: m * m * m * s[0].x + 3 * m * m * t * s[1].x + 3 * m * t * t * s[2].x + t * t * t * s[3].x,
+        y: m * m * m * s[0].y + 3 * m * m * t * s[1].y + 3 * m * t * t * s[2].y + t * t * t * s[3].y,
+      };
+    };
+    const der = (s, t) => {
+      const m = 1 - t;
+      return {
+        x: 3 * m * m * (s[1].x - s[0].x) + 6 * m * t * (s[2].x - s[1].x) + 3 * t * t * (s[3].x - s[2].x),
+        y: 3 * m * m * (s[1].y - s[0].y) + 6 * m * t * (s[2].y - s[1].y) + 3 * t * t * (s[3].y - s[2].y),
+      };
+    };
+    const pts = [];
+    segs.forEach((s, si) => {
+      for (let k = si === 0 ? 0 : 1; k <= 40; k++) {
+        const t = k / 40, pt = bez(s, t), d = der(s, t);
+        pts.push({ x: pt.x, y: pt.y, a: Math.atan2(d.y, d.x) * 180 / Math.PI });
+      }
+    });
+    let len = 0, prevA = pts[0].a;
+    pts.forEach((pt, k) => {
+      if (k) len += Math.hypot(pt.x - pts[k - 1].x, pt.y - pts[k - 1].y);
+      pt.len = len;
+      while (pt.a - prevA > 180) pt.a -= 360;
+      while (pt.a - prevA < -180) pt.a += 360;
+      prevA = pt.a;
+    });
+    const plw = 84 * u, plh = 52 * u;
+    const flyDur = 1450, flyAt = 100, flyEase = 'cubic-bezier(0.45, 0, 0.35, 1)';
+
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'arr-actor arr-trail');
+    svg.setAttribute('width', vw); svg.setAttribute('height', vh);
+    svg.setAttribute('viewBox', `0 0 ${vw} ${vh}`);
+    svg.style.zIndex = '2';
+    const path = document.createElementNS(NS, 'path');
+    const f = n => n.toFixed(1);
+    path.setAttribute('d', `M ${f(P0.x)} ${f(P0.y)} ` + segs.map(s =>
+      `C ${f(s[1].x)} ${f(s[1].y)}, ${f(s[2].x)} ${f(s[2].y)}, ${f(s[3].x)} ${f(s[3].y)}`).join(' '));
+    path.setAttribute('pathLength', '1');
+    path.setAttribute('stroke-dasharray', '1 1');
+    svg.appendChild(path);
+    run.stage.appendChild(svg);
+    run.anim(path, [{ strokeDashoffset: '1px' }, { strokeDashoffset: '0px' }], flyDur, flyAt, flyEase);
+    run.anim(svg, [{ opacity: 0.55 }, { opacity: 0 }], 400, flyAt + flyDur, 'ease', 'forwards');
+
+    const plane = arrEl('arr-actor arr-plane', { width: plw + 'px', height: plh + 'px', zIndex: '6' });
+    const planeInner = arrEl('arr-plane-inner');
+    planeInner.innerHTML =
+      '<svg viewBox="0 0 84 52" width="100%" height="100%" aria-hidden="true">' +
+      // Nose on the +x axis, so "rotate to the heading" really points it
+      // where it is going.
+      '<path d="M2 5 L82 26 L2 47 L20 26 Z" fill="#FFFDF8" stroke="#C8892B" stroke-width="1.5" stroke-linejoin="round"/>' +
+      '<path d="M82 26 L20 26 L12 38 Z" fill="#E6DCC6" stroke="#C8892B" stroke-width="1.5" stroke-linejoin="round"/></svg>';
+    plane.appendChild(planeInner);
+    run.stage.appendChild(plane);
+    run.anim(plane, pts.map(pt => ({
+      offset: pt.len / len,
+      transform: `translate(${pt.x - plw / 2}px, ${pt.y - plh / 2}px) rotate(${pt.a}deg)`,
+    })), flyDur, flyAt, flyEase);
+    const land = flyAt + flyDur;
+    run.anim(planeInner, [
+      { opacity: 1, transform: 'scale(1)' },
+      { opacity: 1, transform: 'scale(1.25, 0.6)', offset: 0.4 },
+      { opacity: 0, transform: 'scale(1.6, 0.1)' },
+    ], 300, land, 'ease-in', 'forwards');
+    const flash = arrEl('arr-actor arr-flash', {
+      left: (L.x - 50 * u) + 'px', top: (L.y - 50 * u) + 'px',
+      width: 100 * u + 'px', height: 100 * u + 'px', zIndex: '4', opacity: '0',
+    });
+    run.stage.appendChild(flash);
+    run.anim(flash, [
+      { opacity: 0, transform: 'scale(0.4)' },
+      { opacity: 0.9, offset: 0.3 },
+      { opacity: 0, transform: 'scale(2.2)' },
+    ], 500, land, 'ease-out', 'forwards');
+    run.at(land, () => fxHaptic(20));
+
+    const pw = 92 * u, ph = 124 * u, gx = 52 * u, gy = 70 * u;
+    const GRID = {
+      1: [[0, 0]],
+      2: [[-gx, 0], [gx, 0]],
+      3: [[-gx, -gy], [gx, -gy], [0, gy]],
+      4: [[-gx, -gy], [gx, -gy], [-gx, gy], [gx, gy]],
+    }[N];
+    const tilts = [-4, 3, 2, -3];
+    const papers = games.map((g, i) => {
+      const p = arrPlace(run, arrMiniPaper(g, pw, ph), L.x, L.y, pw, ph, 5, g);
+      p.pose = { x: GRID[i][0], y: GRID[i][1], r: tilts[i], s: 1 };
+      run.anim(p.el, [
+        { opacity: 0, transform: 'perspective(600px) rotateX(-90deg) scale(0.6)' },
+        { opacity: 1, offset: 0.6,
+          transform: `perspective(600px) translate(${p.pose.x * 1.08}px, ${p.pose.y * 1.08}px) rotateX(10deg) rotate(${p.pose.r}deg) scale(1.02)` },
+        { opacity: 1,
+          transform: `perspective(600px) translate(${p.pose.x}px, ${p.pose.y}px) rotateX(0deg) rotate(${p.pose.r}deg) scale(1)` },
+      ], 500, land + 80 + i * 120, 'cubic-bezier(0.2, 0.8, 0.2, 1)');
+      return p;
+    });
+    const unfoldEnd = land + 80 + (N - 1) * 120 + 500;
+    return {
+      goes: papers.map((p, i) => ({ p, at: unfoldEnd + 200 + i * 90 })),
+      backdropAt: unfoldEnd + 250, revealAt: unfoldEnd + 500,
+    };
+  },
+
+  // F · Papers slide onto a stack and each one takes a MOTTATT stamp.
+  stamp(run) {
+    const { vw, vh, u, games } = run;
+    const N = games.length;
+    const pw = Math.min(260 * u, vw - 40), ph = 156 * u, step = 56 * u;
+    const top0 = vh * 0.30;
+    const INKS = { blue: '#2E3F80', yellow: '#7A5418', pink: '#8E2E52', grey: '#4F4854' };
+    const tilts = [-1.5, 1, -0.5, 1.5];
+    const papers = games.map((g, i) => {
+      const el = arrEl('arr-actor arr-paper arr-stackpaper', {
+        width: pw + 'px', height: ph + 'px', background: g.color,
+        padding: `${10 * u}px ${12 * u}px`, gap: 6 * u + 'px',
+      });
+      const head = arrEl('arr-stack-head', { height: 32 * u + 'px' });
+      const name = arrEl('arr-stack-name', { fontSize: Math.round(24 * u) + 'px' });
+      name.textContent = g.name;
+      const count = arrEl('arr-stack-count', { fontSize: Math.round(11 * u) + 'px' });
+      count.textContent = (g.strips || []).length + ' ark';
+      const left = arrEl('arr-stack-left');
+      left.append(name, count);
+      const ink = INKS[g.id] || '#0B1222';
+      const stampWrap = arrEl('arr-stamp-wrap', { width: 96 * u + 'px', height: 30 * u + 'px' });
+      const ring = arrEl('arr-stamp-ring', { borderColor: ink, opacity: '0' });
+      const stamp = arrEl('arr-stamp', { borderColor: ink, color: ink, fontSize: Math.round(12 * u) + 'px', opacity: '0' });
+      stamp.textContent = 'MOTTATT';
+      stampWrap.append(ring, stamp);
+      head.append(left, stampWrap);
+      el.appendChild(head);
+      for (let k = 0; k < 3; k++) el.appendChild(arrEl('arr-mini-strip'));
+      const p = arrPlace(run, el, vw / 2, top0 + i * step + ph / 2, pw, ph, 10 + i, g);
+      p.pose = { x: 0, y: 0, r: tilts[i] || 0, s: 1 };
+      const land = 350 + i * 420, hit = land + 450;
+      run.anim(el, [
+        { opacity: 0, transform: `translateX(${vw}px) rotate(7deg)` },
+        { opacity: 1, transform: 'translateX(-10px) rotate(-1deg)', offset: 0.7 },
+        { opacity: 1, transform: arrTf(p.pose) },
+      ], 450, land, 'cubic-bezier(0.2, 0.8, 0.2, 1)');
+      run.anim(stamp, [
+        { opacity: 0, transform: 'scale(2.6) rotate(-24deg)' },
+        { opacity: 1, transform: 'scale(0.9) rotate(-9deg)', offset: 0.7 },
+        { opacity: 1, transform: 'scale(1) rotate(-9deg)' },
+      ], 200, hit, 'cubic-bezier(0.6, 0, 1, 0.6)', 'forwards');
+      run.anim(ring, [
+        { opacity: 0.7, transform: 'scale(0.8) rotate(-9deg)' },
+        { opacity: 0, transform: 'scale(1.7) rotate(-9deg)' },
+      ], 350, hit + 140, 'ease-out', 'forwards');
+      run.anim(el, [{ translate: '0 0' }, { translate: '0 4px', offset: 0.35 }, { translate: '0 0' }], 160, hit + 110, 'ease-out');
+      run.at(hit + 130, () => { sfxStampThud(); fxHaptic(18); });
+      return p;
+    });
+    const lastHit = 350 + (N - 1) * 420 + 450 + 200;
+    return {
+      goes: papers.map((p, i) => ({ p, at: lastHit + 250 + i * 90 })),
+      backdropAt: lastHit + 300, revealAt: lastHit + 550,
+    };
+  },
+
+  // G · The papers hop one at a time from the sender into a tray of slots,
+  // with a running count. `anon` swaps the sender's initial and name for a
+  // plain incoming mark.
+  transfer(run, anon) {
+    const { vw, vh, u, games } = run;
+    const N = games.length;
+    const ay = vh * 0.24, ad = 60 * u;
+    const sender = anon ? '' : run.sender;
+    const who = arrEl('arr-actor arr-who', { left: '0px', width: vw + 'px', top: (ay - ad / 2) + 'px', zIndex: '10', gap: 8 * u + 'px' });
+    const disc = arrEl('arr-who-disc', { width: ad + 'px', height: ad + 'px' });
+    const pulses = [0, 1].map(() => {
+      const pr = arrEl('arr-who-pulse', { opacity: '0' });
+      disc.appendChild(pr);
+      return pr;
+    });
+    const face = arrEl('arr-who-face', { fontSize: Math.round(32 * u) + 'px' });
+    if (sender) {
+      face.textContent = sender.trim().charAt(0).toUpperCase();
+    } else {
+      face.innerHTML = '<svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
+    }
+    disc.appendChild(face);
+    who.appendChild(disc);
+    if (sender) {
+      const nm = arrEl('arr-who-name', { fontSize: Math.round(14 * u) + 'px' });
+      nm.textContent = sender;
+      who.appendChild(nm);
+    }
+    run.stage.appendChild(who);
+    run.anim(who, [
+      { opacity: 0, transform: 'scale(0.4)' },
+      { opacity: 1, transform: 'scale(1.08)', offset: 0.7 },
+      { opacity: 1, transform: 'scale(1)' },
+    ], 400, 0, 'cubic-bezier(0.2, 0.9, 0.3, 1.2)');
+    pulses.forEach((pr, k) => {
+      const a = run.anim(pr, [{ opacity: 0.8, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.9)' }],
+        900, 350 + k * 450, 'ease-out', 'forwards');
+      a.effect.updateTiming({ iterations: 2 });
+    });
+
+    const cellW = 58.5 * u, cellH = 82 * u, gap = 10 * u;
+    const gridW = N * cellW + (N - 1) * gap;
+    const trayTop = vh * 0.65;
+    const lineTop = ay + ad / 2 + 6 * u, lineLen = trayTop - lineTop - 10 * u;
+    for (let k = 0; k < 5; k++) {
+      const dot = arrEl('arr-actor arr-dot', {
+        left: (vw / 2 - 3) + 'px', top: lineTop + 'px', zIndex: '2', opacity: '0',
+      });
+      run.stage.appendChild(dot);
+      const a = run.anim(dot, [
+        { opacity: 0, transform: 'translateY(0px)' },
+        { opacity: 1, offset: 0.15 },
+        { opacity: 1, offset: 0.85 },
+        { opacity: 0, transform: `translateY(${lineLen}px)` },
+      ], 900, 450 + k * 180, 'linear', 'forwards');
+      a.effect.updateTiming({ iterations: 2 });
+    }
+    const tray = arrEl('arr-actor arr-tray', { left: '0px', width: vw + 'px', top: trayTop + 'px', zIndex: '5', gap: 14 * u + 'px' });
+    const grid = arrEl('arr-tray-grid', {
+      width: gridW + 'px', gap: gap + 'px', gridTemplateColumns: `repeat(${N}, minmax(0, 1fr))`,
+    });
+    const slots = games.map(() => {
+      const s = arrEl('arr-slot-cell', { height: cellH + 'px' });
+      grid.appendChild(s);
+      return s;
+    });
+    const countBox = arrEl('arr-count', { width: gridW + 'px', height: 20 * u + 'px' });
+    const counts = games.map((_, k) => {
+      const c = arrEl('arr-count-line' + (k === N - 1 ? ' done' : ''), { fontSize: Math.round(12 * u) + 'px', opacity: '0' });
+      c.textContent = k === N - 1 ? `${N} AV ${N} — FERDIG` : `${k + 1} AV ${N} ARK`;
+      countBox.appendChild(c);
+      return c;
+    });
+    tray.append(grid, countBox);
+    run.stage.appendChild(tray);
+    run.anim(tray, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 350, 250, 'ease');
+
+    const pw = 56 * u, ph = 74 * u;
+    const slotCy = trayTop + cellH / 2;
+    const sides = [-1, 1, -1, 1];
+    const lands = [];
+    const papers = games.map((g, i) => {
+      const p = arrPlace(run, arrMiniPaper(g, pw, ph, { label: false }), vw / 2, ay, pw, ph, 20 + i, g);
+      const sx = (vw / 2 - gridW / 2 + cellW / 2 + i * (cellW + gap)) - vw / 2;
+      const sy = slotCy - ay;
+      const side = sides[i];
+      p.pose = { x: sx, y: sy, r: 0, s: 1 };
+      const at = 600 + i * 300;
+      run.anim(p.el, [
+        { opacity: 0, transform: 'translate(0px, 0px) scale(0.2)' },
+        { opacity: 1, transform: `translate(0px, ${10 * u}px) scale(0.8)`, offset: 0.12 },
+        { opacity: 1, transform: `translate(${sx * 0.4 + side * 70 * u}px, ${sy * 0.45}px) rotate(${side * 14}deg) scale(1.15)`, offset: 0.5 },
+        { transform: `translate(${sx}px, ${sy + 6 * u}px) scale(0.97)`, offset: 0.85 },
+        { opacity: 1, transform: arrTf(p.pose) },
+      ], 700, at, 'cubic-bezier(0.35, 0, 0.25, 1)');
+      lands.push(at + 700);
+      return p;
+    });
+    lands.forEach((t, k) => {
+      run.anim(slots[k], [
+        { backgroundColor: 'rgba(227,165,58,0)', borderColor: '#2E3D5C' },
+        { backgroundColor: 'rgba(227,165,58,0.12)', borderColor: '#E3A53A' },
+      ], 250, t - 50, 'ease', 'forwards');
+      run.at(t - 40, () => fxHaptic(12));
+      const last = k === N - 1;
+      run.anim(counts[k], last
+        ? [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }]
+        : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none', offset: 0.12 },
+           { opacity: 1, transform: 'none', offset: 0.88 }, { opacity: 0, transform: 'translateY(-6px)' }],
+        last ? 250 : lands[k + 1] - t, t, last ? 'ease' : 'linear', 'forwards');
+    });
+    const lastLand = lands[N - 1];
+    [who, tray].forEach(el => run.anim(el, [{ opacity: 1 }, { opacity: 0 }], 300, lastLand + 200, 'ease', 'forwards'));
+    return {
+      goes: papers.map((p, i) => ({ p, at: lastLand + 400 + i * 90 })),
+      backdropAt: lastLand + 450, revealAt: lastLand + 700,
+    };
+  },
+
+  transferAnon(run) { return ARRIVAL_RUNNERS.transfer(run, true); },
+};
+
+// Play a shared block's arrival. `sender` is the name the share carried, if
+// any; `forceStyle` is the Innstillinger preview asking for one in particular.
+function fxArrivalTour(blockIdx, sender, forceStyle) {
+  if (_arrRun) _arrRun.finish();
+  // The arrival is about the papers, but they live in a block, so make sure
   // we're standing on the right one before reading them off it.
   if (blockIdx >= 0 && blockIdx < blocks.length && blockIdx !== activeBlockIdx) {
     switchBlock(blockIdx);
   }
   const gs = gameState;
-  const games = getGameIds().filter(g => gs[g] && gs[g].strips && gs[g].paperEl);
-  const first = games[0];
-  const tray  = document.getElementById('digital-paper');
+  const ids = getGameIds().filter(g => gs[g] && gs[g].strips && gs[g].paperEl);
+  const first = ids[0];
+  const style = (first && fxEnabled())
+    ? (forceStyle || pickArrivalStyle(!!(sender && sender.trim())))
+    : null;
+  const runner = style && ARRIVAL_RUNNERS[style];
+  if (!runner) {
+    arrLandPage(first);
+    setTimeout(nudgeNameIfDefault, 150);
+    return;
+  }
 
-  const scroller = document.getElementById('paper-canvas-wrap');
+  const vw = document.documentElement.clientWidth || window.innerWidth;
+  const vh = window.innerHeight;
+  const stage = arrEl('', null);
+  stage.id = 'fx-arrival-stage';
+  const backdrop = arrEl('arr-backdrop');
+  stage.appendChild(backdrop);
+  document.body.appendChild(stage);
 
-  // Set once the real render has been done early — see the prep timer below.
-  let prepped = false;
-
-  // Every exit goes through here: drop the staging, put the toolbar and stats
-  // row back, and hand over to a normal render.
-  const land = () => {
-    // The height the block has been holding. Kept so it can be eased down
-    // rather than dropped, which is what made the hand-back feel abrupt.
-    const heldHeight = tray.style.minHeight;
-
-    _fxArrivalTouring = false;
-    _fxShareEntry = false;
-    tray.classList.remove('fx-awaiting');
-    document.body.classList.remove('fx-arrival');
-    if (scroller) {
-      scroller.classList.remove('fx-arriving');
-      scroller.scrollTop = 0;
-    }
-    // Normally already done by the prep timer, so this frame is class changes
-    // and nothing else. Still here for the exits that skip the tour entirely.
-    if (!prepped && first) selectActiveGame(first);
-
-    tray.style.removeProperty('min-height');
-    const settles = !!heldHeight && fxEnabled();
-    // Once everything has come to rest — pointing at the field while the
-    // chrome is still sliding back in would be lost in the motion.
-    setTimeout(nudgeNameIfDefault, settles ? FX_SETTLE + 120 : 150);
-    if (!settles) return;
-
-    // The layout change itself happens in this one frame and is NOT animated.
-    // Easing the block's height down looked right but cost a full re-layout of
-    // ~650 cells on every frame for the whole 420ms, which is what made the
-    // hand-back lag. The smoothing is transform and opacity only — the chrome
-    // slides in, the sheet settles down into the space it just lost — so the
-    // compositor carries it and the layout is already finished underneath.
-    document.body.classList.add('fx-settling');
-    setTimeout(() => document.body.classList.remove('fx-settling'), FX_SETTLE + 60);
+  const run = {
+    stage, vw, vh,
+    u: Math.max(0.8, Math.min(1.25, vw / 390)),
+    sender: (sender || '').trim().slice(0, 24),
+    // Four at most: that is every game a share can carry.
+    games: ids.slice(0, 4).map((id, i) => {
+      const def = getGame(id) || {};
+      return { id, i, name: def.name || '', color: def.color || '#d6cad1',
+               idBg: def.stripIdBg || '#4c569e', strips: gs[id].strips };
+    }),
+    timers: [], anims: [], done: false,
+    at(ms, fn) {
+      this.timers.push(setTimeout(() => {
+        if (this.done) return;
+        try { fn(); } catch (e) { console.warn('[BV] arrival', e); this.finish(); }
+      }, ms));
+    },
+    anim(el, frames, dur, delay = 0, easing = 'linear', fill = 'both') {
+      const a = el.animate(frames, { duration: dur, delay, easing, fill });
+      this.anims.push(a);
+      return a;
+    },
+    finish() {
+      if (this.done) return;
+      this.done = true;
+      this.timers.forEach(clearTimeout);
+      this.anims.forEach(a => { try { a.cancel(); } catch (e) {} });
+      stage.remove();
+      const ring = document.getElementById('paper-ring-wrap');
+      if (ring) ring.style.opacity = '';
+      if (_arrRun === this) _arrRun = null;
+    },
   };
-  if (!first) { land(); return; }
-  if (!fxEnabled()) { land(); return; }
+  _arrRun = run;
 
-  // Counted DOWN — paper 4, 3, 2, 1 — so the last to land is the one the game
-  // starts on, rather than finishing on an arbitrary paper and jumping back.
-  const order = games.slice().reverse();
-  const step  = order.length > 4 ? 520 : 780;
+  // Lay the real page out behind the backdrop, in this same task, so the
+  // backdrop and the finished layout reach the screen in one paint. The sheet
+  // itself waits hidden until its reveal.
+  arrLandPage(first);
+  const ring = document.getElementById('paper-ring-wrap');
+  if (ring) ring.style.opacity = '0';
 
-  _fxArrivalTouring = true;
-  tray.classList.add('fx-awaiting');   // holds the block open under the stack
-  // Before anything moves: takes the toolbar and stats row out of the flow and
-  // clips the panel, so the measurement below gets the whole area and nothing
-  // above the block can resize under it mid-flight.
-  if (scroller) scroller.classList.add('fx-arriving');
-  document.body.classList.add('fx-arrival');
-  fxFillPaperArea();
+  let plan;
+  try { plan = runner(run); }
+  catch (e) { console.warn('[BV] arrival', e); run.finish(); setTimeout(nudgeNameIfDefault, 150); return; }
 
-  // Stage the stack. Absolutely positioned so they overlap in place and the
-  // tray keeps the height fx-awaiting gives it; z-index ascending so each
-  // lands on top of the one before, leaving paper 1 face up at the end.
-  tray.innerHTML = '';
-  const STAGE_PROPS = ['position', 'left', 'right', 'top', 'opacity', 'will-change',
-                       'z-index', '--strip-id-bg', '--strip-id-fg'];
-  const staged = order.map((g, i) => {
-    const el = gs[g].paperEl;
-    // Set property by property rather than through cssText: these are the
-    // real sheet elements the game goes on using, and cssText would wipe
-    // anything already inline on them.
-    el.style.position = 'absolute';
-    el.style.left = '0';
-    el.style.right = '0';
-    el.style.top = '0';
-    el.style.opacity = '0';
-    el.style.willChange = 'transform, opacity';
-    el.style.zIndex = String(i + 1);
-    // Each paper wears its OWN game's colours. renderActiveGame sets these on
-    // #digital-paper, which every sheet inherits from — fine when only one is
-    // ever in there, but the whole stack is now, so all four came out in the
-    // active game's palette. Set on the sheet, each overrides for its own
-    // subtree.
-    const def = getGame(g) || {};
-    el.style.setProperty('--strip-id-bg', def.stripIdBg || '#f0ede4');
-    el.style.setProperty('--strip-id-fg', def.stripIdFg || '#333');
-    tray.appendChild(el);
-    return el;
-  });
-  // One forced layout for the whole stack, paid here instead of once per beat.
-  void tray.offsetWidth;
-
-  const launch = () => {
-    // Each paper's entry vector is its own, so a run reads as papers being
-    // tossed onto a table rather than one animation repeated. Distances are
-    // absolute rather than dial-scaled, like every other whole-sheet movement.
-    staged.forEach((el, i) => {
-      const side = Math.random() < 0.5 ? -1 : 1;
-      const x = Math.round(side * (155 + Math.random() * 110));
-      const y = Math.round((Math.random() - 0.45) * 210);
-      const r = side * (11 + Math.random() * 17);
-      el.animate([
-        { opacity: 0, transform: `translate(${x}px, ${y}px) rotate(${r.toFixed(1)}deg) scale(0.7)` },
-        { opacity: 1, offset: 0.18 },
-        // Still loose: a third of the way home and still turning. Without this
-        // beat the paper travels a straight line and reads as a slide.
-        { transform: `translate(${(x * 0.36).toFixed(0)}px, ${(y * 0.36).toFixed(0)}px) ` +
-                     `rotate(${(r * 0.45).toFixed(1)}deg) scale(0.88)`, offset: 0.46 },
-        // Through the mark and a shade past square, so it lands rather than stops.
-        { transform: `translate(${(-x * 0.045).toFixed(0)}px, ${(-y * 0.045).toFixed(0)}px) ` +
-                     `rotate(${(-r * 0.07).toFixed(1)}deg) scale(1.025)`, offset: 0.8 },
-        { opacity: 1, transform: 'none' },
-      ], {
-        duration: FX_ARRIVE_FLIGHT,
-        delay: FX_ARRIVE_LEAD + i * step,
-        easing: 'cubic-bezier(0.18, 0.86, 0.24, 1)',
-        fill: 'both',
-      });
-    });
-
-    // Sound and haptics still need timers, but a few oscillators cost nothing
-    // next to a game switch — and crucially the flights are already scheduled,
-    // so a late timer can't stall one.
-    order.forEach((g, i) => {
-      setTimeout(() => {
-        sfxSlotSheet(i);
-        fxHaptic(14);
-      }, FX_ARRIVE_LEAD + i * step + FX_ARRIVE_FLIGHT * 0.72);
-    });
-
-    // The expensive half of the hand-back, done EARLY — while the last paper
-    // is still in the air. renderCells walks every square, both tab rows are
-    // torn down and rebuilt, and the stats and countdown ring are recomputed;
-    // running all of that in the frame the settle begins is what was left of
-    // the chop. Here it costs nothing visible: the flights are transform and
-    // opacity on promoted layers, so they are running on the compositor and
-    // main-thread work cannot touch them.
-    //
-    // Safe to switch the game now because _fxArrivalTouring is still true, so
-    // renderActiveGame leaves the staged stack alone. By the time land() runs,
-    // the sheet is painted, the tabs are built, and all that is left is
-    // removing a few classes.
-    setTimeout(() => {
-      prepped = true;
-      if (first) selectActiveGame(first);
-    }, FX_ARRIVE_LEAD + (order.length - 1) * step + 120);
-
-    // Tear the staging down and hand over. No confetti: this is a delivery,
-    // not a win, and the sheet coming to rest in front of you is the reward.
-    setTimeout(() => {
-      // Leave paper 1 in the tray and drop the other three. It is already the
-      // real sheet for the game being landed on, so renderActiveGame finds the
-      // tray correct and skips its swap branch outright.
-      //
-      // That branch was the lag. Handing it a tray whose first child was paper
-      // 4 made it deep-clone a ~160-cell sheet for a flip ghost and then run
-      // the strip-by-strip flip — a clone, a full layout and an animation
-      // nobody asked for, in the same frame the chrome comes back.
-      const keep = gs[first] && gs[first].paperEl;
-      staged.forEach(el => {
-        el.getAnimations().forEach(a => a.cancel());
-        STAGE_PROPS.forEach(p => el.style.removeProperty(p));
-        if (el !== keep) el.remove();
-      });
-      land();
-      audioUnlock().then(sfxShareArrive);
-      fxHaptic([26, 70, 26, 60, 40]);
-      const sheet = tray.firstElementChild;
-      const rect  = sheet && fxRectOf(sheet);
-      if (rect) fxShockwave(rect, { color: 'rgba(232,178,74,0.9)', spread: 1.4, dur: 620, width: 2 });
-    }, FX_ARRIVE_LEAD + (order.length - 1) * step + FX_ARRIVE_FLIGHT + 40);
-  };
-
-  // Held two frames. Staging four sheets puts ~650 cells into the document at
-  // once, and laying them out is only half the cost — the browser still has to
-  // RASTER them, which on a phone is the slowest thing in this sequence.
-  // Launching in the same frame meant the first flight was racing that raster,
-  // which is the chop right as the link opens. Two frames guarantees the stack
-  // has been through a full layout-and-paint before anything starts moving.
-  requestAnimationFrame(() => requestAnimationFrame(launch));
+  (plan.goes || []).forEach(gx => run.at(gx.at, () => arrFlyToTab(run, gx.p, { wiggle: gx.wiggle })));
+  if (plan.hero) {
+    const h = plan.hero;
+    run.at(h.at, () => arrMorphToSheet(run, h.p, h));
+  }
+  run.at(plan.backdropAt, () =>
+    run.anim(backdrop, [{ opacity: 1 }, { opacity: 0 }], 450, 0, 'ease', 'forwards'));
+  run.at(plan.revealAt, () => arrRevealSheet(run, !!plan.hero));
+  run.at(plan.revealAt + 650, nudgeNameIfDefault);
+  run.at(plan.revealAt + 900, () => run.finish());
 }
 
 // Sheet-level win reaction. Kept separate from the per-strip banner slam so
@@ -6393,7 +7379,7 @@ function receiveSharedPaper(result, codeParam, fromId) {
   // Queued BEFORE the first render, so that render leaves the sheet out and
   // shows the empty block instead. Queue it afterwards and the user gets a
   // full look at paper 1 before the tour starts counting down to it.
-  if (importedBlocks > 0) fxQueueArrival(arrivedBlockIdx);
+  if (importedBlocks > 0) fxQueueArrival(arrivedBlockIdx, senderName);
   showGameTabs();
   refreshBlockTabs();
   renderActiveGame();
@@ -7179,6 +8165,50 @@ function initPhone() {
   animSeg.querySelectorAll("button").forEach(b =>
     b.addEventListener("click", () => setFxLevel(b.dataset.fx)));
   paintFxSeg();
+
+  // Which arrivals are in the draw — a tick per sequence, plus a "Vis" that
+  // plays that one on the block on screen, so choosing isn't guesswork.
+  const arrivalList = document.getElementById("bv-arrival-list");
+  if (arrivalList) {
+    const none = document.createElement("div");
+    none.className = "arr-pick-none";
+    none.textContent = "Ingen valgt — delte blokker vises uten animasjon.";
+    const paintNone = () => { none.style.display = feedback.arrivalStyles.length ? "none" : "block"; };
+    ARRIVAL_STYLES.forEach(s => {
+      const row = document.createElement("div");
+      row.className = "arr-pick-row";
+      const label = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = feedback.arrivalStyles.includes(s.id);
+      box.addEventListener("change", () => {
+        const on = new Set(feedback.arrivalStyles);
+        if (box.checked) on.add(s.id); else on.delete(s.id);
+        // Kept in the list's own order so the saved record stays tidy.
+        feedback.arrivalStyles = ARRIVAL_STYLES.map(x => x.id).filter(id => on.has(id));
+        saveFeedback();
+        paintNone();
+      });
+      label.append(box, document.createTextNode(s.name));
+      const show = document.createElement("button");
+      show.type = "button";
+      show.className = "bv-overlay-btn";
+      show.textContent = "Vis";
+      show.addEventListener("click", () => {
+        const blk = blocks[activeBlockIdx];
+        const hasPaper = blk && getGameIds().some(g => blk.gameState[g] && blk.gameState[g].strips);
+        if (!hasPaper) { toast("Skann eller åpne en blokk først, så har animasjonen noe å vise", "warn", 3500); return; }
+        if (!fxEnabled()) { toast("Animasjoner er slått av", "warn", 3000); return; }
+        settingsOverlay.style.display = "none";
+        const who = ((blk.userName || '').trim()) || 'Kari';
+        fxArrivalTour(activeBlockIdx, who, s.id);
+      });
+      row.append(label, show);
+      arrivalList.appendChild(row);
+    });
+    arrivalList.appendChild(none);
+    paintNone();
+  }
 
   // Manual play entry
   document.getElementById("btn-manual-play").addEventListener("click", enterManualMode);
