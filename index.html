@@ -1548,6 +1548,43 @@ body.fx-arrival #phone-code-display { display: none !important; }
   inset: 0;
   background: rgba(10, 16, 32, 0.94);
 }
+
+/* The wait before it. A share link spends a few seconds connecting before the
+   arrival can start, and for all of that the page underneath is an empty
+   white block — which read as something broken rather than something on its
+   way. The same backdrop the stage opens on goes up from the first paint
+   instead, so when the arrival starts it is already standing on it and the
+   stage simply takes over. Same z-index as the stage, and the stage is
+   appended later, so it lands on top. */
+#fx-arrival-wait {
+  position: fixed;
+  inset: 0;
+  z-index: 1450;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 16, 32, 0.94);
+  transition: opacity 0.25s ease;
+}
+#fx-arrival-wait.out { opacity: 0; }
+.arr-wait-dots { display: flex; gap: 10px; }
+.arr-wait-dots span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.75);
+  animation: arrWaitDot 1.1s ease-in-out infinite;
+}
+.arr-wait-dots span:nth-child(2) { animation-delay: 0.15s; }
+.arr-wait-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes arrWaitDot {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+  40%           { opacity: 1;    transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arr-wait-dots span { animation: none; opacity: 0.6; }
+}
 .arr-actor {
   position: absolute;
   left: 0;
@@ -4899,6 +4936,28 @@ function fxQueueArrival(blockIdx, sender) {
   _fxArrivalReadyTimer = setTimeout(fxArrivalSettled, 7000);
 }
 
+// The dark screen a share link waits behind (see #fx-arrival-wait). Hidden
+// instantly when the stage is taking over from it — fading one 0.94 backdrop
+// out from under another would visibly darken the screen for a moment — and
+// faded otherwise, when it is the page itself being uncovered.
+function fxShowArrivalWait() {
+  if (document.getElementById('fx-arrival-wait')) return;
+  const el = arrEl('');
+  el.id = 'fx-arrival-wait';
+  const dots = arrEl('arr-wait-dots');
+  for (let i = 0; i < 3; i++) dots.appendChild(document.createElement('span'));
+  el.appendChild(dots);
+  document.body.appendChild(el);
+}
+function fxHideArrivalWait(instant) {
+  const el = document.getElementById('fx-arrival-wait');
+  if (!el) return;
+  el.removeAttribute('id');
+  if (instant || !fxEnabled() || document.hidden) { el.remove(); return; }
+  el.classList.add('out');
+  setTimeout(() => el.remove(), 300);
+}
+
 // Called once the connection has resolved, either way. The short delay is for
 // the first Firebase snapshot that follows it, which is what fills in the
 // rekke banner and the stats row.
@@ -5782,6 +5841,7 @@ function fxArrivalTour(blockIdx, sender, forceStyle) {
   const backdrop = arrEl('arr-backdrop');
   stage.appendChild(backdrop);
   document.body.appendChild(stage);
+  fxHideArrivalWait(true);
 
   const run = {
     stage, vw, vh,
@@ -7276,7 +7336,12 @@ function receiveSharedPaper(result, codeParam, fromId) {
       }
     } catch (e) {}
   }
-  if (!(result && Array.isArray(result.blocks) && result.blocks.length)) return;
+  // Nothing in it to receive: give up on the link like every other dead end,
+  // rather than leave the user on the wait screen.
+  if (!(result && Array.isArray(result.blocks) && result.blocks.length)) {
+    showConnectScreen();
+    return;
+  }
 
   // The share format always exposes a `blocks` array (single-block v3/v4 are
   // normalised to a one-entry array). Iterate it and import each as its own
@@ -7380,6 +7445,9 @@ function receiveSharedPaper(result, codeParam, fromId) {
   // shows the empty block instead. Queue it afterwards and the user gets a
   // full look at paper 1 before the tour starts counting down to it.
   if (importedBlocks > 0) fxQueueArrival(arrivedBlockIdx, senderName);
+  // A link to a block we already have: no arrival is coming, so hand the app
+  // back now. Left set, the header stayed stripped for the whole session.
+  else _fxShareEntry = false;
   showGameTabs();
   refreshBlockTabs();
   renderActiveGame();
@@ -7574,6 +7642,7 @@ function showConnectScreen() {
   // Giving up on the share link also means giving the app its header back.
   _fxShareEntry = false;
   document.body.classList.remove('fx-arrival');
+  fxHideArrivalWait(true);
   document.getElementById("phone-connect").style.display = "flex";
 }
 
@@ -7596,7 +7665,7 @@ function initPhone() {
   // decoded (or fetched, for a ?s= link), and everything that happens in
   // between was showing through.
   _fxShareEntry = _shareEntry;
-  if (_shareEntry) document.body.classList.add('fx-arrival');
+  if (_shareEntry) { document.body.classList.add('fx-arrival'); fxShowArrivalWait(); }
   document.getElementById("phone-upload").style.display  = "none";
 
   // Wordmark → start screen, and the back link out of it
@@ -9054,6 +9123,8 @@ function renderActiveGame() {
   // arrival being queued — a render landing in that window would otherwise
   // hand the header back for a moment.
   document.body.classList.toggle('fx-arrival', awaiting || _fxShareEntry);
+  // Nothing arriving any more, however that came about — the wait screen goes.
+  if (!awaiting && !_fxShareEntry) fxHideArrivalWait();
 
   // Mid-tour the tray holds every paper at once, staged and animating. A swap
   // here would tear that stack out from under the flights — and this function
