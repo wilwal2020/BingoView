@@ -1822,54 +1822,34 @@ body.fx-arrival #phone-code-display { display: none !important; }
 }
 .arr-stamp-ring { position: absolute; inset: -4px; border: 2px solid; border-radius: 8px; }
 
-/* G · from the sender into a tray. */
-.arr-who { display: flex; flex-direction: column; align-items: center; }
-.arr-who-disc { position: relative; }
-.arr-who-pulse {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid var(--gold);
-}
-.arr-who-face {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--gold);
-  font-family: var(--display);
-  line-height: 1;
-  color: #1a1204;
-}
-.arr-who-name { font-weight: 700; color: var(--paper); }
-.arr-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); }
-.arr-tray { display: flex; flex-direction: column; align-items: center; }
-.arr-tray-grid { display: grid; }
-.arr-slot-cell {
-  box-sizing: border-box;
-  border-radius: 8px;
-  border: 1.5px dashed #2e3d5c;
-}
-.arr-count { position: relative; }
-.arr-count-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  text-align: center;
-  font-family: var(--mono);
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  color: #c9cfdb;
-}
-.arr-count-line.done { color: #3fbf74; }
-
 /* A paper reaching its tab — drawn over the backdrop at the tab's spot. */
 .arr-tab-glow { border-radius: 8px; }
 
-/* Innstillinger: which arrivals are in the draw. */
+/* Innstillinger: which arrivals are in the draw. Folded away by default —
+   a row per sequence was most of the settings panel, for something set once. */
+/* Block, not the row's flex: flex on <details> is too new to lean on. */
+.arr-details { display: block; }
+.arr-details[open] > summary { margin-bottom: 8px; }
+.arr-details > .bv-row-desc { display: block; margin-bottom: 6px; }
+.arr-details > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.arr-details > summary::-webkit-details-marker { display: none; }
+.arr-details-chev {
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-right: 2px solid var(--dim);
+  border-bottom: 2px solid var(--dim);
+  transform: rotate(45deg);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.arr-details[open] .arr-details-chev { transform: rotate(-135deg); }
 .arr-pick { display: flex; flex-direction: column; gap: 2px; }
 .arr-pick-row { display: flex; align-items: center; gap: 10px; min-height: 40px; }
 .arr-pick-row label {
@@ -3360,13 +3340,17 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <button type="button" data-fx="maks">Maks</button>
         </div>
       </div>
-      <div class="bv-row bv-row-stacked" id="bv-row-arrivals">
-        <div class="bv-row-label">
-          <span>Når noen deler en blokk med deg</span>
-          <span class="bv-row-desc">En av de valgte spilles, tilfeldig. «Vis» spiller den på blokka du har oppe nå.</span>
-        </div>
+      <details class="bv-row bv-row-stacked arr-details" id="bv-row-arrivals">
+        <summary>
+          <div class="bv-row-label">
+            <span>Når noen deler en blokk med deg</span>
+            <span class="bv-row-desc" id="bv-arrival-count"></span>
+          </div>
+          <span class="arr-details-chev" aria-hidden="true"></span>
+        </summary>
+        <span class="bv-row-desc">En av de valgte spilles, tilfeldig. «Vis» spiller den på blokka du har oppe nå.</span>
         <div class="arr-pick" id="bv-arrival-list"></div>
-      </div>
+      </details>
       <div class="bv-row" id="bv-row-call-ring">
         <div class="bv-row-label">
           <span>Nedtelling til neste tall</span>
@@ -3812,8 +3796,6 @@ const ARRIVAL_STYLES = [
   { id: 'balls',        name: 'Bingoballene' },
   { id: 'plane',        name: 'Papirflyet' },
   { id: 'stamp',        name: 'Stempelet' },
-  { id: 'transfer',     name: 'Fra avsenderen til deg' },
-  { id: 'transferAnon', name: 'Overføringen, uten navn' },
 ];
 const feedback = (() => {
   // The full experience out of the box. These were all conservative opt-ins
@@ -5028,12 +5010,9 @@ function fxFlushArrival() {
 
 let _arrRun = null;   // the sequence on screen, so a second one can cut it short
 
-function pickArrivalStyle(hasSender) {
+function pickArrivalStyle() {
   const known = new Set(ARRIVAL_STYLES.map(s => s.id));
-  let pool = (feedback.arrivalStyles || []).filter(id => known.has(id));
-  // No name to show: the named transfer plays as its anonymous twin.
-  if (!hasSender) pool = pool.map(id => id === 'transfer' ? 'transferAnon' : id);
-  pool = [...new Set(pool)];
+  const pool = (feedback.arrivalStyles || []).filter(id => known.has(id));
   if (!pool.length) return null;
   // Random, but never the same one twice running when there is a choice.
   let last = null;
@@ -5381,9 +5360,17 @@ const ARRIVAL_RUNNERS = {
     const { vw, vh, u, games } = run;
     const N = games.length;
     const sw = 300 * u, sh = 22 * u;
-    const slotTop = Math.max(120, vh * 0.26);
-    const slitY = slotTop + sh / 2;
     const tw = Math.min(260 * u, vw - 40), th = 300 * u;
+    // Clear of the tab row. At a fixed height the machine sat right on top
+    // of the tabs, so each ticket's flash at its tab was drawn over the
+    // machine still printing the next one. Below the tabs by a margin, but
+    // never so low that a full ticket runs off the bottom of the screen.
+    const tabBottom = games.reduce((m, g) => {
+      const r = arrTabRect(g.id);
+      return r ? Math.max(m, r.bottom) : m;
+    }, 0);
+    const slotTop = Math.min(Math.max(120, vh * 0.26, tabBottom + 48 * u), vh - th - sh - 16);
+    const slitY = slotTop + sh / 2;
     const slot = arrEl('arr-actor arr-slot', {
       left: (vw / 2 - sw / 2) + 'px', top: slotTop + 'px', width: sw + 'px', height: sh + 'px',
       borderRadius: sh / 2 + 'px', zIndex: '45',
@@ -5689,127 +5676,6 @@ const ARRIVAL_RUNNERS = {
       backdropAt: lastHit + 300, revealAt: lastHit + 550,
     };
   },
-
-  // G · The papers hop one at a time from the sender into a tray of slots,
-  // with a running count. `anon` swaps the sender's initial and name for a
-  // plain incoming mark.
-  transfer(run, anon) {
-    const { vw, vh, u, games } = run;
-    const N = games.length;
-    const ay = vh * 0.24, ad = 60 * u;
-    const sender = anon ? '' : run.sender;
-    const who = arrEl('arr-actor arr-who', { left: '0px', width: vw + 'px', top: (ay - ad / 2) + 'px', zIndex: '10', gap: 8 * u + 'px' });
-    const disc = arrEl('arr-who-disc', { width: ad + 'px', height: ad + 'px' });
-    const pulses = [0, 1].map(() => {
-      const pr = arrEl('arr-who-pulse', { opacity: '0' });
-      disc.appendChild(pr);
-      return pr;
-    });
-    const face = arrEl('arr-who-face', { fontSize: Math.round(32 * u) + 'px' });
-    if (sender) {
-      face.textContent = sender.trim().charAt(0).toUpperCase();
-    } else {
-      face.innerHTML = '<svg viewBox="0 0 24 24" width="46%" height="46%" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
-    }
-    disc.appendChild(face);
-    who.appendChild(disc);
-    if (sender) {
-      const nm = arrEl('arr-who-name', { fontSize: Math.round(14 * u) + 'px' });
-      nm.textContent = sender;
-      who.appendChild(nm);
-    }
-    run.stage.appendChild(who);
-    run.anim(who, [
-      { opacity: 0, transform: 'scale(0.4)' },
-      { opacity: 1, transform: 'scale(1.08)', offset: 0.7 },
-      { opacity: 1, transform: 'scale(1)' },
-    ], 400, 0, 'cubic-bezier(0.2, 0.9, 0.3, 1.2)');
-    pulses.forEach((pr, k) => {
-      const a = run.anim(pr, [{ opacity: 0.8, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(1.9)' }],
-        900, 350 + k * 450, 'ease-out', 'forwards');
-      a.effect.updateTiming({ iterations: 2 });
-    });
-
-    const cellW = 58.5 * u, cellH = 82 * u, gap = 10 * u;
-    const gridW = N * cellW + (N - 1) * gap;
-    const trayTop = vh * 0.65;
-    const lineTop = ay + ad / 2 + 6 * u, lineLen = trayTop - lineTop - 10 * u;
-    for (let k = 0; k < 5; k++) {
-      const dot = arrEl('arr-actor arr-dot', {
-        left: (vw / 2 - 3) + 'px', top: lineTop + 'px', zIndex: '2', opacity: '0',
-      });
-      run.stage.appendChild(dot);
-      const a = run.anim(dot, [
-        { opacity: 0, transform: 'translateY(0px)' },
-        { opacity: 1, offset: 0.15 },
-        { opacity: 1, offset: 0.85 },
-        { opacity: 0, transform: `translateY(${lineLen}px)` },
-      ], 900, 450 + k * 180, 'linear', 'forwards');
-      a.effect.updateTiming({ iterations: 2 });
-    }
-    const tray = arrEl('arr-actor arr-tray', { left: '0px', width: vw + 'px', top: trayTop + 'px', zIndex: '5', gap: 14 * u + 'px' });
-    const grid = arrEl('arr-tray-grid', {
-      width: gridW + 'px', gap: gap + 'px', gridTemplateColumns: `repeat(${N}, minmax(0, 1fr))`,
-    });
-    const slots = games.map(() => {
-      const s = arrEl('arr-slot-cell', { height: cellH + 'px' });
-      grid.appendChild(s);
-      return s;
-    });
-    const countBox = arrEl('arr-count', { width: gridW + 'px', height: 20 * u + 'px' });
-    const counts = games.map((_, k) => {
-      const c = arrEl('arr-count-line' + (k === N - 1 ? ' done' : ''), { fontSize: Math.round(12 * u) + 'px', opacity: '0' });
-      c.textContent = k === N - 1 ? `${N} AV ${N} — FERDIG` : `${k + 1} AV ${N} ARK`;
-      countBox.appendChild(c);
-      return c;
-    });
-    tray.append(grid, countBox);
-    run.stage.appendChild(tray);
-    run.anim(tray, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 350, 250, 'ease');
-
-    const pw = 56 * u, ph = 74 * u;
-    const slotCy = trayTop + cellH / 2;
-    const sides = [-1, 1, -1, 1];
-    const lands = [];
-    const papers = games.map((g, i) => {
-      const p = arrPlace(run, arrMiniPaper(g, pw, ph, { label: false }), vw / 2, ay, pw, ph, 20 + i, g);
-      const sx = (vw / 2 - gridW / 2 + cellW / 2 + i * (cellW + gap)) - vw / 2;
-      const sy = slotCy - ay;
-      const side = sides[i];
-      p.pose = { x: sx, y: sy, r: 0, s: 1 };
-      const at = 600 + i * 300;
-      run.anim(p.el, [
-        { opacity: 0, transform: 'translate(0px, 0px) scale(0.2)' },
-        { opacity: 1, transform: `translate(0px, ${10 * u}px) scale(0.8)`, offset: 0.12 },
-        { opacity: 1, transform: `translate(${sx * 0.4 + side * 70 * u}px, ${sy * 0.45}px) rotate(${side * 14}deg) scale(1.15)`, offset: 0.5 },
-        { transform: `translate(${sx}px, ${sy + 6 * u}px) scale(0.97)`, offset: 0.85 },
-        { opacity: 1, transform: arrTf(p.pose) },
-      ], 700, at, 'cubic-bezier(0.35, 0, 0.25, 1)');
-      lands.push(at + 700);
-      return p;
-    });
-    lands.forEach((t, k) => {
-      run.anim(slots[k], [
-        { backgroundColor: 'rgba(227,165,58,0)', borderColor: '#2E3D5C' },
-        { backgroundColor: 'rgba(227,165,58,0.12)', borderColor: '#E3A53A' },
-      ], 250, t - 50, 'ease', 'forwards');
-      run.at(t - 40, () => fxHaptic(12));
-      const last = k === N - 1;
-      run.anim(counts[k], last
-        ? [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }]
-        : [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none', offset: 0.12 },
-           { opacity: 1, transform: 'none', offset: 0.88 }, { opacity: 0, transform: 'translateY(-6px)' }],
-        last ? 250 : lands[k + 1] - t, t, last ? 'ease' : 'linear', 'forwards');
-    });
-    const lastLand = lands[N - 1];
-    [who, tray].forEach(el => run.anim(el, [{ opacity: 1 }, { opacity: 0 }], 300, lastLand + 200, 'ease', 'forwards'));
-    return {
-      goes: papers.map((p, i) => ({ p, at: lastLand + 400 + i * 90 })),
-      backdropAt: lastLand + 450, revealAt: lastLand + 700,
-    };
-  },
-
-  transferAnon(run) { return ARRIVAL_RUNNERS.transfer(run, true); },
 };
 
 // Play a shared block's arrival. `sender` is the name the share carried, if
@@ -5825,7 +5691,7 @@ function fxArrivalTour(blockIdx, sender, forceStyle) {
   const ids = getGameIds().filter(g => gs[g] && gs[g].strips && gs[g].paperEl);
   const first = ids[0];
   const style = (first && fxEnabled())
-    ? (forceStyle || pickArrivalStyle(!!(sender && sender.trim())))
+    ? (forceStyle || pickArrivalStyle())
     : null;
   const runner = style && ARRIVAL_RUNNERS[style];
   if (!runner) {
@@ -8242,7 +8108,14 @@ function initPhone() {
     const none = document.createElement("div");
     none.className = "arr-pick-none";
     none.textContent = "Ingen valgt — delte blokker vises uten animasjon.";
-    const paintNone = () => { none.style.display = feedback.arrivalStyles.length ? "none" : "block"; };
+    // The folded row still says how many are on, so it doesn't have to be
+    // opened just to check.
+    const count = document.getElementById("bv-arrival-count");
+    const paintNone = () => {
+      const n = feedback.arrivalStyles.length;
+      none.style.display = n ? "none" : "block";
+      if (count) count.textContent = n ? `${n} av ${ARRIVAL_STYLES.length} valgt` : "Ingen valgt";
+    };
     ARRIVAL_STYLES.forEach(s => {
       const row = document.createElement("div");
       row.className = "arr-pick-row";
