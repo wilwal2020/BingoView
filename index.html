@@ -3365,6 +3365,12 @@ header { padding: 7px 13px; gap: 5px 7px; }
 }
 .btn-phone-connect:disabled { opacity: 0.6; cursor: default; }
 
+/* "Hva heter du?" — asked once on connecting when block 1 has no name */
+.name-prompt-card { display: flex; flex-direction: column; gap: 10px; }
+.name-prompt-card h3 { margin-bottom: 0; }
+.name-prompt-sub { font-size: 0.78rem; line-height: 1.45; color: var(--nav-dim); margin-bottom: 4px; }
+.name-prompt-input { text-transform: none; letter-spacing: 0.02em; font-size: 1.15rem; }
+
 /* "Hent blokk" next to the +, for a phone that came in through the claim QR */
 .block-tab-add.block-tab-claim {
   flex: 0 0 auto;
@@ -3590,6 +3596,18 @@ header { padding: 7px 13px; gap: 5px 7px; }
         <button id="share-close-btn">Lukk</button>
       </div>
     </div>
+  </div>
+
+  <!-- Hva heter du? — see maybePromptName() -->
+  <div id="name-prompt" class="share-overlay" style="display:none">
+    <form class="share-card name-prompt-card" id="name-prompt-form" autocomplete="off">
+      <h3>Hva heter du?</h3>
+      <div class="name-prompt-sub">Navnet vises på bingo-skjermen, og blir husket til neste gang.</div>
+      <input id="name-prompt-input" class="phone-code-input name-prompt-input" type="text"
+             maxlength="24" placeholder="Navnet ditt" autocomplete="given-name" spellcheck="false">
+      <button class="btn-phone-connect" type="submit">Lagre</button>
+      <button id="name-prompt-skip" class="claim-skip" type="button">Ikke nå</button>
+    </form>
   </div>
 
   <!-- Hent blokk — reached from the host's block-claim QR (?code=X&hent=1).
@@ -6718,6 +6736,25 @@ function getStoredUserName(bIdx) {
   }
   return "";
 }
+// The user's own name, remembered across weeks. Set from block 1 only.
+function saveOwnName(v) {
+  try { localStorage.setItem("bv_userName", (v || '').trim().slice(0, 24)); } catch (e) {}
+}
+
+// Builds before the block-1-only rule saved whichever block was named last.
+// Once, take block 1's name from the most recent session instead.
+function repairSavedUserName() {
+  try {
+    if (localStorage.getItem('bv_userName_v2')) return;
+    localStorage.setItem('bv_userName_v2', '1');
+    const last = (localStorage.getItem('bv_last_code') || '').trim().toUpperCase();
+    const saved = last && JSON.parse(localStorage.getItem('bv_paper_' + last) || 'null');
+    const first = saved && Array.isArray(saved.blocks) && saved.blocks[0];
+    const name = first && !first._sharedAway ? String(first._userName || '').trim() : '';
+    if (!isDefaultBlockName(name)) saveOwnName(name);
+  } catch (e) {}
+}
+
 // Full display label for a block, including "(Blokk N)" suffix when
 // multiple blocks exist. Used everywhere we write userName to Firebase.
 function getBlockLabel(bIdx) {
@@ -6785,6 +6822,8 @@ function reclaimSharedBlock() {
 // nothing on screen asked for one. A block that already carries a real name
 // is left alone.
 function nudgeNameIfDefault() {
+  // No name of their own at all: ask outright rather than just point.
+  if (maybePromptName()) return;
   const blk   = blocks[activeBlockIdx];
   const row   = document.getElementById("user-name-row");
   const input = document.getElementById("user-name-input");
@@ -6800,6 +6839,51 @@ function clearNameNudge() {
   const input = document.getElementById("user-name-input");
   if (row)   row.classList.remove('name-nudge');
   if (input) input.classList.remove('name-nudge');
+}
+
+// Ask for a name when block 1 — the user's own — has none, so it isn't
+// missed. Once per page load; "Ikke nå" quiets it for the rest of that
+// session code. Held back while a shared block is arriving: the arrival
+// calls back through nudgeNameIfDefault when it's done.
+const NAME_SKIP_KEY = 'bv_namePromptSkip';
+let _namePromptShown = false;
+function maybePromptName() {
+  if (_namePromptShown || manualMode || !channelRef || !sessionCode) return false;
+  if (_fxPendingArrival != null || _fxArrivalTouring || _fxShareEntry) return false;
+  if (document.getElementById('bv-claim').style.display !== 'none') return false;
+  const blk = blocks[0];
+  if (!blk || blk.sharedAway || getStoredUserName(0)) return false;
+  try { if (localStorage.getItem(NAME_SKIP_KEY) === sessionCode) return false; } catch (e) {}
+  _namePromptShown = true;
+  const input = document.getElementById('name-prompt-input');
+  input.value = '';
+  document.getElementById('name-prompt').style.display = 'flex';
+  input.focus();
+  return true;
+}
+function initNamePrompt() {
+  const overlay = document.getElementById('name-prompt');
+  const input   = document.getElementById('name-prompt-input');
+  document.getElementById('name-prompt-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const v = input.value.trim().slice(0, 24);
+    if (!v) { input.focus(); return; }
+    blocks[0].userName = v;
+    saveOwnName(v);
+    if (activeBlockIdx === 0) document.getElementById('user-name-input').value = v;
+    input.blur();
+    overlay.style.display = 'none';
+    clearNameNudge();
+    refreshBlockTabs();
+    publishUserName();
+    saveSession();
+    toast('Hei, ' + v + '!', 'ok', 2500);
+  });
+  document.getElementById('name-prompt-skip').addEventListener('click', () => {
+    try { localStorage.setItem(NAME_SKIP_KEY, sessionCode || ''); } catch (e) {}
+    input.blur();
+    overlay.style.display = 'none';
+  });
 }
 
 // Latest papers_meta snapshot for the whole channel (all phones' blocks).
@@ -8259,6 +8343,10 @@ function initPhone() {
       blocks.push(createEmptyBlock());
       activeBlockIdx = 0;
       gameState = blocks[0].gameState;
+      // Block 1 is the user's own, so it starts out with their saved name.
+      blocks[0].userName = getStoredUserName(0);
+      document.getElementById("user-name-input").value = blocks[0].userName;
+      syncSharedAwayUI();
       gameList.forEach(g => ensureGameState(g.id));
       activeGame = gameList[0].id;
       latestCell = null;
@@ -8593,6 +8681,7 @@ function initPhone() {
   // Debounced so rapid keystrokes don't spam Firebase writes.
   const nameInput = document.getElementById("user-name-input");
   if (nameInput) {
+    repairSavedUserName();
     // Load initial name: per-block name if set, otherwise the global fallback
     // — but only for the first block (see getStoredUserName).
     const savedGlobal = (() => { try { return localStorage.getItem("bv_userName") || ""; } catch(e) { return ""; } })();
@@ -8612,8 +8701,10 @@ function initPhone() {
     nameInput.addEventListener("input", () => {
       const v = nameInput.value.trim().slice(0, 24);
       blocks[activeBlockIdx].userName = v;
-      // Also keep global fallback in sync for backward compat
-      try { localStorage.setItem("bv_userName", v); } catch (e) {}
+      // The saved name is block 1's — the user's own. Naming the other
+      // blocks used to overwrite it, so next week's first block came up
+      // with whichever block had been named last.
+      if (activeBlockIdx === 0) saveOwnName(v);
       // Refresh block tab so the label reflects the new name immediately
       refreshBlockTabs();
       if (nameTimer) clearTimeout(nameTimer);
@@ -8624,6 +8715,7 @@ function initPhone() {
   // Auto-connect from QR code scan: ?code=XXXXXX. With &hent=1 it's the
   // host's block-claim QR — ask for a control number before connecting.
   initClaim();
+  initNamePrompt();
   const urlCode = new URLSearchParams(location.search).get('code');
   const claimParam = new URLSearchParams(location.search).get('hent');
   if (urlCode) {
@@ -8631,7 +8723,11 @@ function initPhone() {
     document.getElementById("phone-code-input").value = code;
     history.replaceState(null, '', location.pathname);
     if (claimParam) showClaimScreen(code);
-    else connectPhone(code);
+    // The same code as last time is this page coming back (connectPhone keeps
+    // it in the address): reconnect as quietly as the saved-code path below,
+    // so a reopened tab from a finished bingo night doesn't greet the user
+    // with an error.
+    else connectPhone(code, { quiet: !!lastCode && lastCode.trim().toUpperCase() === code });
   } else if (!shareKeyParam && !compactParam && lastCode && lastCode.trim().length >= 4
              && localStorage.getItem('bv_paper_' + lastCode.trim().toUpperCase())) {
     // Auto-reconnect after a refresh: a last-used code WITH saved paper data
@@ -8711,6 +8807,11 @@ async function connectPhone(code, opts = {}) {
 
   sessionCode = code;
   try { localStorage.setItem('bv_last_code', code); } catch(e) {}
+  // Keep the code in the address bar as well. A phone that loses its saved
+  // code — an iPhone in private browsing, or a page opened inside a QR app's
+  // own browser and later reopened elsewhere — still gets it back from a
+  // reload, the history list or a reopened tab.
+  try { history.replaceState(null, '', location.pathname + '?code=' + encodeURIComponent(code)); } catch(e) {}
   channelRef = db.ref('bingoview/' + code);
   console.log('[BV phone] connecting to bingoview/' + code);
 
@@ -8957,6 +9058,8 @@ async function connectPhone(code, opts = {}) {
   };
   metaRef.on('value', metaHandler);
   _channelDetachFns.push(() => metaRef.off('value', metaHandler));
+
+  setTimeout(maybePromptName, 600);
 }
 
 function setConnStatus(state, label) {
@@ -10086,6 +10189,7 @@ function enterManualMode() {
   manualMode = true;
   sessionCode = null;
   channelRef = null;
+  try { history.replaceState(null, '', location.pathname); } catch(e) {}
 
   leaveStartScreen();
   document.getElementById("phone-code-display").style.display = "none";
