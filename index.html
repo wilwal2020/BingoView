@@ -7984,6 +7984,12 @@ function deliverClaim(code, hits, opts = {}) {
     receiveSharedPaper({ code, blocks: entries }, code, entries[0].from, { noArrival: true });
     return;
   }
+  if (opts.direct) {
+    // Straight onto the main page with the block open — no entrance at all.
+    hideClaimScreen();
+    receiveSharedPaper({ code, blocks: entries }, code, entries[0].from, { noArrival: true });
+    return;
+  }
   hideClaimScreen();
   // Same entry as a share link: header stripped, wait screen up, arrival.
   _fxShareEntry = true;
@@ -8023,9 +8029,14 @@ function initClaim() {
 // the numbers alone say nothing — what identifies it is which numbers share
 // a row, plus any control number that reads cleanly.
 const CLAIM_OCR_SRC = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
-let _claimOcr = null;          // Promise<worker>, kept for the page's lifetime
+let _claimOcr = null;          // Promise<worker[]>, kept for the page's lifetime
 let _claimCamStream = null;
 let _claimCamRun = 0;          // bumped on every start/stop; stale loops bail
+
+// Each frame is cut into bands that are read side by side, one reader per
+// band — a read has a fixed cost per word, so two readers on half a sheet
+// each finish in a little over half the time. Three on phones with the cores.
+const CLAIM_READERS = (navigator.hardwareConcurrency || 4) >= 8 ? 3 : 2;
 
 function loadClaimOcr() {
   if (_claimOcr) return _claimOcr;
@@ -8036,16 +8047,38 @@ function loadClaimOcr() {
     el.onload = () => resolve();
     el.onerror = () => reject(new Error('OCR script failed to load'));
     document.head.appendChild(el);
-  }).then(() => Tesseract.createWorker('eng'))
-    .then(async worker => {
+  }).then(() => Promise.all(Array.from({ length: CLAIM_READERS }, async () => {
+      const worker = await Tesseract.createWorker('eng');
       await worker.setParameters({
         tessedit_char_whitelist: '0123456789',
         tessedit_pageseg_mode: '11',   // sparse text: numbers scattered in a grid
       });
       return worker;
-    })
+    })))
     .catch(e => { _claimOcr = null; throw e; });
   return _claimOcr;
+}
+
+// Read one frame with every reader at once: horizontal bands, overlapping
+// so no row of numbers is cut in two, merged back into one word list.
+async function readClaimFrame(workers, frame) {
+  const n = workers.length;
+  const ov = Math.round(frame.height * 0.06);
+  const bands = workers.map((w, i) => {
+    const y0 = Math.max(0, Math.round(frame.height * i / n) - ov);
+    const y1 = Math.min(frame.height, Math.round(frame.height * (i + 1) / n) + ov);
+    const c = document.createElement('canvas');
+    c.width = frame.width; c.height = y1 - y0;
+    c.getContext('2d').drawImage(frame, 0, y0, frame.width, y1 - y0, 0, 0, frame.width, y1 - y0);
+    return { c, y0 };
+  });
+  const results = await Promise.all(bands.map((b, i) => workers[i].recognize(b.c)));
+  const words = [];
+  results.forEach((r, i) => (r.data.words || []).forEach(w => words.push({
+    text: w.text,
+    bbox: { x0: w.bbox.x0, x1: w.bbox.x1, y0: w.bbox.y0 + bands[i].y0, y1: w.bbox.y1 + bands[i].y0 },
+  })));
+  return words;
 }
 
 // Per block: its Spill 1 control numbers and the 18 rows as number sets.
@@ -8108,9 +8141,11 @@ function splitClaimRun(t) {
   return best && best.length >= 2 ? best : null;
 }
 
-// Score every block against one frame. A row counts when at least 3 of its
+// Score every block against one frame. A row counts when at least 4 of its
 // 5 numbers were read lying on one line — the line may slope a little, since
-// nobody holds a paper perfectly level.
+// nobody holds a paper perfectly level. Three proved too easy to hit by
+// chance: a block that wasn't in view reached 4 such rows in testing, where
+// with four it never got past 1 (and the sheet in view never below 6).
 function claimScoreFrame(index, tokens) {
   const grid = new Map();
   const heights = [];
@@ -8137,7 +8172,7 @@ function claimScoreFrame(index, tokens) {
         seen.forEach(b => { if (sameLine(a, b)) mates.add(b.n); });
         best = Math.max(best, mates.size);
       });
-      if (best >= 3) rowHits++;
+      if (best >= 4) rowHits++;
     });
     let idHits = 0;
     blk.ids.forEach(id => { if (longs.has(id)) idHits++; });
@@ -8149,14 +8184,15 @@ function claimScoreFrame(index, tokens) {
 // frame; weaker evidence has to name the same block twice running.
 function claimVerdict(scores, prevPid) {
   const top = scores[0];
-  if (!top || top.score < 3) return { pid: null, close: false };
+  if (!top || top.score < 2) return { pid: null, close: false };
   const second = scores[1] ? scores[1].score : 0;
   const clear = top.score >= second * 2 + 1;
-  const strong = (top.rowHits >= 6 || (top.idHits >= 1 && top.rowHits >= 3)) && clear;
-  const steady = top.rowHits >= 4 && clear && top.pid === prevPid;
+  // A block that isn't in view never got past 1 row in testing.
+  const strong = (top.rowHits >= 4 || (top.idHits >= 1 && top.rowHits >= 2)) && clear;
+  const steady = top.rowHits >= 3 && clear && top.pid === prevPid;
   // Only a frame that clears the bar itself can vouch for the next one.
   return { pid: (strong || steady) ? top.pid : null, close: true,
-           lead: (top.rowHits >= 4 && clear) ? top.pid : null };
+           lead: (top.rowHits >= 3 && clear) ? top.pid : null };
 }
 
 function setClaimCamStatus(status, sub) {
@@ -8185,13 +8221,54 @@ function grabClaimFrame(video) {
     sw = Math.min(vw - sx, (gr.width + 2 * mx) / k);
     sh = Math.min(vh - sy, (gr.height + 2 * my) / k);
   }
-  const scale = Math.min(1.5, 1400 / Math.max(sw, sh));
+  // 900px on the long side: as accurate as larger frames in testing, and
+  // noticeably quicker to read.
+  const scale = Math.min(1.5, 900 / Math.max(sw, sh));
   const c = document.createElement('canvas');
   c.width = Math.round(sw * scale);
   c.height = Math.round(sh * scale);
   c.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
   return levelClaimFrame(binarizeClaimFrame(c));
 }
+
+// Keep only ink blobs the size of a printed digit; grid lines, background
+// shapes and specks are wiped. Returns how many digit blobs are left. A
+// background is what makes a read slow — the reader works through every
+// blob — and it leaves almost no digit-sized ones (14 in testing, against
+// 170+ for a sheet), so too few means there's no sheet to read.
+function keepClaimDigits(bin) {
+  const w = bin.width, h = bin.height, N = w * h;
+  const ctx = bin.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h), d = img.data;
+  const seen = new Uint8Array(N);
+  const stack = new Int32Array(N);
+  const comp = new Int32Array(N);
+  const minH = h * 0.012, maxH = h * 0.06, maxW = w * 0.09;
+  let digits = 0;
+  for (let i = 0; i < N; i++) {
+    if (seen[i] || d[i * 4] >= 128) continue;
+    let sp = 0, n = 0, x0 = w, x1 = 0, y0 = h, y1 = 0;
+    stack[sp++] = i; seen[i] = 1;
+    while (sp) {
+      const p = stack[--sp];
+      comp[n++] = p;
+      const x = p % w, y = (p / w) | 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (x > 0     && !seen[p - 1] && d[(p - 1) * 4] < 128) { seen[p - 1] = 1; stack[sp++] = p - 1; }
+      if (x < w - 1 && !seen[p + 1] && d[(p + 1) * 4] < 128) { seen[p + 1] = 1; stack[sp++] = p + 1; }
+      if (y > 0     && !seen[p - w] && d[(p - w) * 4] < 128) { seen[p - w] = 1; stack[sp++] = p - w; }
+      if (y < h - 1 && !seen[p + w] && d[(p + w) * 4] < 128) { seen[p + w] = 1; stack[sp++] = p + w; }
+    }
+    const bh = y1 - y0 + 1, bw = x1 - x0 + 1;
+    if (n >= 12 && bh >= minH && bh <= maxH && bw <= maxW && bw <= bh * 1.2) { digits++; continue; }
+    for (let k = 0; k < n; k++) { const j = comp[k] * 4; d[j] = d[j + 1] = d[j + 2] = 255; }
+  }
+  ctx.putImageData(img, 0, 0);
+  return digits;
+}
+// Fewer digit blobs than this: no sheet in view, so the frame isn't read.
+const CLAIM_MIN_DIGITS = 40;
 
 // How far the sheet leans, in degrees. The thick vertical grid lines are
 // the strongest straight feature on it: projected along the right angle,
@@ -8309,8 +8386,8 @@ async function startClaimCamera(code) {
   try { await video.play(); } catch (e) {}
 
   setClaimCamStatus('Gjør klar leseren…');
-  let worker;
-  try { worker = await ocr; }
+  let workers;
+  try { workers = await ocr; }
   catch (e) {
     if (run !== _claimCamRun) return;
     stopClaimCamera();
@@ -8319,31 +8396,45 @@ async function startClaimCamera(code) {
     return;
   }
 
-  let pool = null, index = [], poolAt = 0, prevPid = null;
+  let pool = null, index = [], poolAt = 0, prevPid = null, refreshing = false;
   while (run === _claimCamRun) {
-    // Fresh blocks may be scanned in while this phone is looking.
-    if (!pool || Date.now() - poolAt > 15000) {
+    if (!pool) {
       try { pool = await loadClaimPool(code); index = claimMatchIndex(pool); poolAt = Date.now(); }
       catch (e) { await new Promise(r => setTimeout(r, 1500)); continue; }
       if (run !== _claimCamRun) return;
+    } else if (!refreshing && Date.now() - poolAt > 15000) {
+      // Fresh blocks may be scanned in while this phone is looking. Fetched
+      // alongside the reading, so no frame waits on the network.
+      refreshing = true;
+      loadClaimPool(code).then(p => { pool = p; index = claimMatchIndex(p); })
+        .catch(() => {})
+        .finally(() => { poolAt = Date.now(); refreshing = false; });
     }
     if (!index.length) {
       setClaimCamStatus('Ingen blokker ennå', 'Ingen blokker er skannet inn i denne bingoen ennå');
       await new Promise(r => setTimeout(r, 3000));
-      poolAt = 0;
+      pool = null;
       continue;
     }
     const frame = grabClaimFrame(video);
     if (!frame) { await new Promise(r => setTimeout(r, 300)); continue; }
+    // Nothing sheet-like: skip the read and look again at once, so a sheet
+    // moved into view isn't kept waiting behind a slow read of the table.
+    if (keepClaimDigits(frame) < CLAIM_MIN_DIGITS) {
+      setClaimCamStatus('Leter etter arket…');
+      await new Promise(r => setTimeout(r, 60));
+      continue;
+    }
     let words = [];
-    try { words = (await worker.recognize(frame)).data.words; } catch (e) {}
+    try { words = await readClaimFrame(workers, frame); } catch (e) {}
     if (run !== _claimCamRun) return;
     const verdict = claimVerdict(claimScoreFrame(index, claimTokens(words)), prevPid);
     prevPid = verdict.lead || null;
     if (verdict.pid) {
       const hit = findClaimBlockByPid(pool, verdict.pid);
       try { if (VIBRATE_SUPPORTED) navigator.vibrate(60); } catch (e) {}
-      playClaimMorph(code, hit);
+      if (CLAIM_MORPH) playClaimMorph(code, hit);
+      else deliverClaim(code, [hit], { direct: true });
       return;
     }
     setClaimCamStatus(verdict.close ? 'Nesten — hold arket stille' : 'Leter etter arket…');
@@ -8355,6 +8446,8 @@ async function startClaimCamera(code) {
 // strips appear over it as it passes; then the photo falls away and the
 // digital sheet glides into its place in the app, which has been filled in
 // underneath the whole time.
+// Off for now: a found block opens straight on the main page instead.
+const CLAIM_MORPH = false;
 async function playClaimMorph(code, hit) {
   const overlay = document.getElementById('claim-cam');
   const video   = document.getElementById('claim-cam-video');
