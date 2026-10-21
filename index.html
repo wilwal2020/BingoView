@@ -3346,6 +3346,33 @@ header { padding: 7px 13px; gap: 5px 7px; }
 @keyframes claimRing { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
 
 .claim-input { letter-spacing: 0.3em; }
+.claim-input.is-bad { border-color: #ff6b5e; }
+/* One row per block to fetch; extra rows carry a remove button */
+.claim-rows { display: flex; flex-direction: column; gap: 8px; }
+.claim-row { position: relative; }
+.claim-row-remove {
+  position: absolute; top: 50%; right: 8px;
+  transform: translateY(-50%);
+  width: 34px; height: 34px;
+  background: transparent;
+  border: none;
+  color: var(--nav-dim);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.claim-row-remove:hover { color: var(--paper); }
+.claim-more {
+  background: transparent;
+  border: 1px dashed var(--nav-line-2);
+  border-radius: 8px;
+  color: var(--nav-dim);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  padding: 10px;
+  cursor: pointer;
+}
+.claim-more:hover { border-color: var(--gold); color: var(--gold); }
 .claim-error {
   min-height: 1.2em;
   font-size: 0.78rem;
@@ -3627,9 +3654,8 @@ header { padding: 7px 13px; gap: 5px 7px; }
         kontrollnummeret som står langs kanten på ett av brettene.
       </div>
       <form class="connect-form" id="claim-form" style="max-width:none" autocomplete="off">
-        <input id="claim-input" class="phone-code-input claim-input"
-               type="text" inputmode="numeric" pattern="[0-9]*" maxlength="5"
-               placeholder="0000" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div class="claim-rows" id="claim-rows"></div>
+        <button id="btn-claim-more" class="claim-more" type="button">+ Hent en blokk til samtidig</button>
         <div class="claim-error" id="claim-error"></div>
         <button id="btn-claim" class="btn-phone-connect" type="submit">Hent blokk</button>
         <button id="btn-claim-skip" class="claim-skip" type="button">Bare koble til</button>
@@ -7508,8 +7534,15 @@ function receiveSharedPaper(result, codeParam, fromId) {
     if (arrivedBlockIdx < 0) arrivedBlockIdx = activeBlockIdx;
     // Published on this copy's papers_meta; the sharer's phone sees its own
     // id there and hands the name over (see reconcileSharedNames).
-    if (receivedFrom) {
-      blocks[activeBlockIdx].receivedFrom = receivedFrom;
+    // A claim can gather blocks off several phones, so an entry may name
+    // its own sender.
+    let blockFrom = receivedFrom;
+    if (entry.from) {
+      const f = String(entry.from).replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
+      blockFrom = (f && f !== devicePhoneId()) ? f : '';
+    }
+    if (blockFrom) {
+      blocks[activeBlockIdx].receivedFrom = blockFrom;
       blocks[activeBlockIdx].receivedAt = serverNow();
     }
     Object.entries(games).forEach(([g, strips]) => {
@@ -7618,16 +7651,66 @@ function claimInSession(code) {
   return !!(channelRef && sessionCode === code);
 }
 
+// Fetching for a partner or the family too? Each row is one block, by any
+// of its Spill 1 control numbers.
+const CLAIM_MAX_ROWS = 8;
+function claimInputs() {
+  return [...document.querySelectorAll('#claim-rows .claim-input')];
+}
+// Counts the rows with a number in them — a blank extra row is ignored.
+function claimButtonLabel() {
+  const n = claimInputs().filter(i => /\d/.test(i.value)).length;
+  return n > 1 ? 'Hent ' + n + ' blokker' : 'Hent blokk';
+}
+function syncClaimRows() {
+  document.getElementById('btn-claim').textContent = claimButtonLabel();
+  document.getElementById('btn-claim-more').style.display =
+    claimInputs().length >= CLAIM_MAX_ROWS ? 'none' : '';
+}
+function addClaimRow() {
+  const wrap = document.getElementById('claim-rows');
+  const row = document.createElement('div');
+  row.className = 'claim-row';
+  const input = document.createElement('input');
+  input.className = 'phone-code-input claim-input';
+  input.type = 'text';
+  input.inputMode = 'numeric';
+  input.pattern = '[0-9]*';
+  input.maxLength = 5;
+  input.placeholder = '0000';
+  input.autocomplete = 'off';
+  input.setAttribute('autocorrect', 'off');
+  input.spellcheck = false;
+  input.addEventListener('input', () => {
+    input.classList.remove('is-bad');
+    if (!document.getElementById('btn-claim').disabled) syncClaimRows();
+  });
+  row.appendChild(input);
+  // The first row is the block they came for — only the extras come off.
+  if (wrap.children.length) {
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'claim-row-remove';
+    x.textContent = '×';
+    x.setAttribute('aria-label', 'Fjern');
+    x.addEventListener('click', () => { row.remove(); syncClaimRows(); });
+    row.appendChild(x);
+  }
+  wrap.appendChild(row);
+  syncClaimRows();
+  return input;
+}
+
 function showClaimScreen(code) {
   _claimCode = code;
   try { localStorage.setItem(CLAIM_KEY, code); } catch (e) {}
   buildClaimDemo();
-  const input = document.getElementById('claim-input');
-  input.value = '';
+  document.getElementById('claim-rows').innerHTML = '';
+  addClaimRow();
   document.getElementById('claim-error').textContent = '';
   const btn = document.getElementById('btn-claim');
   btn.disabled = false;
-  btn.textContent = 'Hent blokk';
+  btn.textContent = claimButtonLabel();
   // Already on the session: backing out just goes back to the sheet.
   document.getElementById('btn-claim-skip').textContent =
     claimInSession(code) ? 'Avbryt' : 'Bare koble til';
@@ -7645,20 +7728,21 @@ function claimList(v) {
   return (v && typeof v === 'object') ? Object.values(v) : [];
 }
 
-// The block in this session whose Spill 1 paper carries control number `num`.
-// Several phones can hold the same block once it's been passed on; the
-// current holder is the copy that hasn't been shared away, freshest first.
-// Resolves to null when no block matches, or { empty: true } when the session
-// has no blocks at all.
-async function findClaimBlock(code, num) {
+// Every scanned block in the session, read once per "Hent".
+async function loadClaimPool(code) {
   const base = db.ref('bingoview/' + code);
   const [pSnap, mSnap] = await Promise.all([
     base.child('papers').once('value'),
     base.child('papers_meta').once('value'),
   ]);
-  const papers = pSnap.val() || {};
-  const meta   = mSnap.val() || {};
-  if (!Object.keys(papers).length) return { empty: true };
+  return { papers: pSnap.val() || {}, meta: mSnap.val() || {} };
+}
+
+// The block whose Spill 1 paper carries control number `num`, or null.
+// Several phones can hold the same block once it's been passed on; the
+// current holder is the copy that hasn't been shared away, freshest first.
+function findClaimBlock(pool, num) {
+  const { papers, meta } = pool;
   let best = null;
   Object.entries(papers).forEach(([pid, games]) => {
     const first = claimList(games && games[CLAIM_GAME]);
@@ -7689,42 +7773,68 @@ function claimGames(games) {
 }
 
 async function submitClaim() {
-  const code  = _claimCode;
-  const input = document.getElementById('claim-input');
-  const err   = document.getElementById('claim-error');
-  const btn   = document.getElementById('btn-claim');
-  const digits = input.value.replace(/\D/g, '');
-  if (!digits) { err.textContent = 'Skriv inn kontrollnummeret'; input.focus(); return; }
+  const code   = _claimCode;
+  const err    = document.getElementById('claim-error');
+  const btn    = document.getElementById('btn-claim');
+  const inputs = claimInputs();
+  inputs.forEach(i => i.classList.remove('is-bad'));
+  // Blank extra rows are just left over; only an all-blank form is a mistake.
+  const wanted = inputs
+    .map(input => ({ input, digits: input.value.replace(/\D/g, '') }))
+    .filter(w => w.digits);
+  if (!wanted.length) {
+    err.textContent = 'Skriv inn kontrollnummeret';
+    inputs[0].classList.add('is-bad');
+    inputs[0].focus();
+    return;
+  }
   err.textContent = '';
   btn.disabled = true;
   btn.textContent = 'Leter…';
-  let found = null;
+  let pool = null;
   try {
-    found = await findClaimBlock(code, parseInt(digits, 10));
+    pool = await loadClaimPool(code);
   } catch (e) {
     console.warn('[BV] claim lookup error', e);
-    err.textContent = 'Kunne ikke nå serveren. Prøv igjen.';
   }
   btn.disabled = false;
-  btn.textContent = 'Hent blokk';
-  if (!found) {
-    if (!err.textContent) err.textContent = 'Fant ingen blokk med kontrollnummer ' + digits + ' på Spill 1';
-    return;
-  }
-  if (found.empty) {
+  btn.textContent = claimButtonLabel();
+  if (!pool) { err.textContent = 'Kunne ikke nå serveren. Prøv igjen.'; return; }
+  if (!Object.keys(pool.papers).length) {
     err.textContent = 'Ingen blokker er skannet inn i denne bingoen ennå';
     return;
   }
 
-  // The owner's name only if they actually gave the block one.
-  const m = found.meta;
-  const rawName = (typeof m.baseName === 'string')
-    ? m.baseName
-    : (m.userName || '').toString().replace(/\s*\(Blokk\s*\d+\)\s*$/i, '');
-  const userName = isDefaultBlockName(rawName) ? '' : rawName.trim();
-  // Block virtual phones are <deviceId>_b<N>; the device id is what the
-  // owner's phone looks for in receivedFrom to let the block go.
-  const owner = found.pid.split('_b')[0];
+  // Every number has to match before anything is fetched, so a typo doesn't
+  // leave the user with half the blocks and no idea which one went missing.
+  const missing = [];
+  const found = [];
+  wanted.forEach(w => {
+    const hit = findClaimBlock(pool, parseInt(w.digits, 10));
+    if (!hit) { missing.push(w.digits); w.input.classList.add('is-bad'); return; }
+    // Two numbers off the same block fetch it once.
+    if (!found.some(f => f.pid === hit.pid)) found.push(hit);
+  });
+  if (missing.length) {
+    err.textContent = 'Fant ingen blokk med kontrollnummer ' + missing.join(', ') + ' på Spill 1';
+    return;
+  }
+
+  const entries = found.map(hit => {
+    // The owner's name only if they actually gave the block one.
+    const m = hit.meta;
+    const rawName = (typeof m.baseName === 'string')
+      ? m.baseName
+      : (m.userName || '').toString().replace(/\s*\(Blokk\s*\d+\)\s*$/i, '');
+    return {
+      games: claimGames(hit.games),
+      userName: isDefaultBlockName(rawName) ? '' : rawName.trim(),
+      // Block virtual phones are <deviceId>_b<N>; the device id is what the
+      // owner's phone looks for in receivedFrom to let the block go. Each
+      // block can come off a different phone.
+      from: hit.pid.split('_b')[0],
+    };
+  });
 
   hideClaimScreen();
   // Same entry as a share link: header stripped, wait screen up, arrival.
@@ -7733,13 +7843,16 @@ async function submitClaim() {
   document.body.classList.add('fx-arrival');
   fxShowArrivalWait();
   audioUnlock();
-  receiveSharedPaper({ code, blocks: [{ games: claimGames(found.games), userName }] }, code, owner);
+  receiveSharedPaper({ code, blocks: entries }, code, entries[0].from);
 }
 
 function initClaim() {
   document.getElementById('claim-form').addEventListener('submit', e => {
     e.preventDefault();
     submitClaim();
+  });
+  document.getElementById('btn-claim-more').addEventListener('click', () => {
+    addClaimRow().focus();
   });
   document.getElementById('btn-claim-skip').addEventListener('click', () => {
     const code = _claimCode;
