@@ -3392,6 +3392,106 @@ header { padding: 7px 13px; gap: 5px 7px; }
 }
 .btn-phone-connect:disabled { opacity: 0.6; cursor: default; }
 
+/* Hent blokk med kamera: the viewfinder opens straight from the claim QR and
+   reads the Spill 1 paper on the phone itself (no API key involved). */
+#claim-cam {
+  display: none;
+  position: fixed; inset: 0;
+  z-index: 3000;
+  background: #000;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+#claim-cam-video { width: 100%; height: 100%; object-fit: cover; background: #000; }
+/* Portrait guide the paper should fill */
+.claim-cam-frame {
+  position: absolute;
+  top: calc(70px + env(safe-area-inset-top));
+  bottom: calc(170px + env(safe-area-inset-bottom));
+  left: 50%;
+  aspect-ratio: 5 / 7;
+  max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+  border: 2px solid rgba(255,255,255,0.7);
+  border-radius: 12px;
+  box-shadow: 0 0 0 100vmax rgba(0,0,0,0.35);
+  pointer-events: none;
+}
+#claim-cam.is-found .claim-cam-frame { border-color: var(--gold); border-width: 4px; }
+.claim-cam-bottom {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+  text-align: center;
+}
+.claim-cam-status {
+  font-family: var(--display);
+  font-size: 1.5rem;
+  letter-spacing: 0.05em;
+  color: #fff;
+}
+#claim-cam.is-found .claim-cam-status { color: var(--gold); }
+.claim-cam-sub { font-size: 0.76rem; color: rgba(255,255,255,0.8); max-width: 300px; line-height: 1.4; }
+.claim-cam-type {
+  margin-top: 8px;
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 8px;
+  color: #fff;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+/* Real → digital: the frozen photo, a gold scan line, and the app's own
+   strips appearing over the paper as the line passes. Transform/opacity only. */
+#claim-cam-still {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+.claim-morph-scan {
+  position: absolute;
+  height: 3px;
+  background: var(--gold);
+  box-shadow: 0 0 18px 6px rgba(227,165,58,0.55);
+  pointer-events: none;
+  opacity: 0;
+}
+.claim-morph-paper {
+  position: absolute;
+  transform-origin: 0 0;
+  background: #fff;
+  border-radius: 6px;
+  padding: 6px;
+  display: flex; flex-direction: column; gap: 3px;
+  color: #111;
+  --strip-id-bg: #4c569e;
+  --strip-id-fg: #fff;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.55);
+  pointer-events: none;
+}
+.claim-morph-paper .strip { grid-template-columns: 22px 1fr; opacity: 0; }
+.claim-morph-paper .strip-id { font-size: 0.6rem; }
+.claim-morph-paper .cell { font-size: 0.8rem; aspect-ratio: auto; height: 20px; }
+#claim-cam.is-morphing .claim-cam-bottom,
+#claim-cam.is-morphing .cam-bar,
+#claim-cam.is-morphing .claim-cam-frame { transition: opacity 0.3s; opacity: 0; }
+
+/* Back on the typing form: a way into the camera again */
+.claim-cam-open {
+  background: transparent;
+  border: 1px solid var(--gold);
+  border-radius: 10px;
+  color: var(--gold);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  padding: 11px;
+  cursor: pointer;
+}
+
 /* "Hva heter du?" — asked once on connecting when block 1 has no name */
 .name-prompt-card { display: flex; flex-direction: column; gap: 10px; }
 .name-prompt-card h3 { margin-bottom: 0; }
@@ -3625,6 +3725,22 @@ header { padding: 7px 13px; gap: 5px 7px; }
     </div>
   </div>
 
+  <!-- Hent blokk med kamera — see startClaimCamera() -->
+  <div id="claim-cam">
+    <video id="claim-cam-video" playsinline autoplay muted></video>
+    <div class="claim-cam-frame"></div>
+    <div class="cam-bar cam-bar-top">
+      <button type="button" id="claim-cam-close" class="cam-btn" aria-label="Lukk kamera">✕</button>
+      <span class="cam-hint">Hent blokken din</span>
+      <span style="width:44px"></span>
+    </div>
+    <div class="claim-cam-bottom">
+      <div class="claim-cam-status" id="claim-cam-status">Starter kameraet…</div>
+      <div class="claim-cam-sub" id="claim-cam-sub">Hold det første arket (Spill 1) inne i rammen</div>
+      <button type="button" id="claim-cam-type" class="claim-cam-type">Skriv inn kontrollnummeret i stedet</button>
+    </div>
+  </div>
+
   <!-- Hva heter du? — see maybePromptName() -->
   <div id="name-prompt" class="share-overlay" style="display:none">
     <form class="share-card name-prompt-card" id="name-prompt-form" autocomplete="off">
@@ -3654,6 +3770,7 @@ header { padding: 7px 13px; gap: 5px 7px; }
         kontrollnummeret som står langs kanten på ett av brettene.
       </div>
       <form class="connect-form" id="claim-form" style="max-width:none" autocomplete="off">
+        <button id="btn-claim-cam" class="claim-cam-open" type="button">📷 Skann arket med kameraet</button>
         <div class="claim-rows" id="claim-rows"></div>
         <button id="btn-claim-more" class="claim-more" type="button">+ Hent en blokk til samtidig</button>
         <div class="claim-error" id="claim-error"></div>
@@ -6877,6 +6994,7 @@ function maybePromptName() {
   if (_namePromptShown || manualMode || !channelRef || !sessionCode) return false;
   if (_fxPendingArrival != null || _fxArrivalTouring || _fxShareEntry) return false;
   if (document.getElementById('bv-claim').style.display !== 'none') return false;
+  if (document.getElementById('claim-cam').style.display === 'flex') return false;
   const blk = blocks[0];
   if (!blk || blk.sharedAway || getStoredUserName(0)) return false;
   try { if (localStorage.getItem(NAME_SKIP_KEY) === sessionCode) return false; } catch (e) {}
@@ -7431,7 +7549,9 @@ function publishShareLink(encoded, code) {
 // Shared import path for both ?p= (payload decoded inline) and ?s= (payload
 // fetched from Firebase). `result` is the decoded { code, blocks } object;
 // `fromId` is the sharing device's id, when the link carries one.
-function receiveSharedPaper(result, codeParam, fromId) {
+// opts.noArrival: the caller plays its own entrance (the camera claim's
+// real-to-digital morph), so the share arrival is skipped.
+function receiveSharedPaper(result, codeParam, fromId, opts = {}) {
   // Opening your own link is not receiving anything from anyone.
   const sender = (fromId || '').toString().replace(/[^A-Za-z0-9]/g, '').slice(0, 16);
   const receivedFrom = (sender && sender !== devicePhoneId()) ? sender : '';
@@ -7566,10 +7686,16 @@ function receiveSharedPaper(result, codeParam, fromId) {
   // Queued BEFORE the first render, so that render leaves the sheet out and
   // shows the empty block instead. Queue it afterwards and the user gets a
   // full look at paper 1 before the tour starts counting down to it.
-  if (importedBlocks > 0) fxQueueArrival(arrivedBlockIdx, senderName);
+  if (importedBlocks > 0 && !opts.noArrival) fxQueueArrival(arrivedBlockIdx, senderName);
   // A link to a block we already have: no arrival is coming, so hand the app
   // back now. Left set, the header stayed stripped for the whole session.
   else _fxShareEntry = false;
+  // The morph lands on the sheet it just showed: Spill 1 of the new block.
+  if (importedBlocks > 0 && opts.noArrival && arrivedBlockIdx >= 0) {
+    activeBlockIdx = arrivedBlockIdx;
+    gameState = blocks[activeBlockIdx].gameState;
+    if (gameState[CLAIM_GAME] && gameState[CLAIM_GAME].strips) activeGame = CLAIM_GAME;
+  }
   showGameTabs();
   refreshBlockTabs();
   renderActiveGame();
@@ -7623,7 +7749,12 @@ const CLAIM_DEMO_STRIPS = [
 function buildClaimDemo() {
   const paper = document.getElementById('claim-demo-paper');
   if (!paper || paper.firstChild) return;
-  CLAIM_DEMO_STRIPS.forEach(strip => {
+  renderClaimStrips(paper, CLAIM_DEMO_STRIPS);
+}
+
+// Strips in the app's own markup (.strip / .strip-id / .cell), into `paper`.
+function renderClaimStrips(paper, strips) {
+  strips.forEach(strip => {
     const stripEl = document.createElement('div');
     stripEl.className = 'strip';
     const idEl = document.createElement('div');
@@ -7715,9 +7846,12 @@ function showClaimScreen(code) {
   document.getElementById('btn-claim-skip').textContent =
     claimInSession(code) ? 'Avbryt' : 'Bare koble til';
   document.getElementById('bv-claim').style.display = 'flex';
+  // Straight into the camera; the typing form waits underneath it.
+  startClaimCamera(code);
 }
 
 function hideClaimScreen() {
+  stopClaimCamera();
   document.getElementById('bv-claim').style.display = 'none';
 }
 
@@ -7820,7 +7954,13 @@ async function submitClaim() {
     return;
   }
 
-  const entries = found.map(hit => {
+  deliverClaim(code, found);
+}
+
+// Hand the found blocks to this phone — the same entry as a share link, so
+// each phone that held one lets it go. `hits` come from findClaimBlock.
+function deliverClaim(code, hits, opts = {}) {
+  const entries = hits.map(hit => {
     // The owner's name only if they actually gave the block one.
     const m = hit.meta;
     const rawName = (typeof m.baseName === 'string')
@@ -7836,13 +7976,19 @@ async function submitClaim() {
     };
   });
 
+  document.getElementById('phone-connect').style.display = 'none';
+  audioUnlock();
+  if (opts.morph) {
+    // The camera's morph is still on screen and plays the entrance itself.
+    document.getElementById('bv-claim').style.display = 'none';
+    receiveSharedPaper({ code, blocks: entries }, code, entries[0].from, { noArrival: true });
+    return;
+  }
   hideClaimScreen();
   // Same entry as a share link: header stripped, wait screen up, arrival.
-  document.getElementById('phone-connect').style.display = 'none';
   _fxShareEntry = true;
   document.body.classList.add('fx-arrival');
   fxShowArrivalWait();
-  audioUnlock();
   receiveSharedPaper({ code, blocks: entries }, code, entries[0].from);
 }
 
@@ -7859,6 +8005,483 @@ function initClaim() {
     hideClaimScreen();
     if (!claimInSession(code)) connectPhone(code);
   });
+  document.getElementById('btn-claim-cam').addEventListener('click', () => startClaimCamera(_claimCode));
+  const toForm = () => {
+    stopClaimCamera();
+    const first = claimInputs()[0];
+    if (first) first.focus();
+  };
+  document.getElementById('claim-cam-close').addEventListener('click', toForm);
+  document.getElementById('claim-cam-type').addEventListener('click', toForm);
+}
+
+// ── Hent blokk med kamera ─────────────────────────────────────
+// The paper is read on the phone itself: the players scanning this QR have
+// no Anthropic key, so the Claude reader that scans blocks in isn't an
+// option. Tesseract (digits only) reads each frame, and the frame is matched
+// against the session's scanned blocks. A sheet holds every number 1–90, so
+// the numbers alone say nothing — what identifies it is which numbers share
+// a row, plus any control number that reads cleanly.
+const CLAIM_OCR_SRC = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+let _claimOcr = null;          // Promise<worker>, kept for the page's lifetime
+let _claimCamStream = null;
+let _claimCamRun = 0;          // bumped on every start/stop; stale loops bail
+
+function loadClaimOcr() {
+  if (_claimOcr) return _claimOcr;
+  _claimOcr = new Promise((resolve, reject) => {
+    if (window.Tesseract) return resolve();
+    const el = document.createElement('script');
+    el.src = CLAIM_OCR_SRC;
+    el.onload = () => resolve();
+    el.onerror = () => reject(new Error('OCR script failed to load'));
+    document.head.appendChild(el);
+  }).then(() => Tesseract.createWorker('eng'))
+    .then(async worker => {
+      await worker.setParameters({
+        tessedit_char_whitelist: '0123456789',
+        tessedit_pageseg_mode: '11',   // sparse text: numbers scattered in a grid
+      });
+      return worker;
+    })
+    .catch(e => { _claimOcr = null; throw e; });
+  return _claimOcr;
+}
+
+// Per block: its Spill 1 control numbers and the 18 rows as number sets.
+function claimMatchIndex(pool) {
+  return Object.entries(pool.papers).map(([pid, games]) => {
+    const strips = claimList(games && games[CLAIM_GAME]).filter(st => st && st.id != null);
+    const rows = [];
+    strips.forEach(st => [0, 1, 2].forEach(r => {
+      const nums = claimList(st.rows && st.rows[r]).map(Number).filter(n => n >= 1 && n <= 90);
+      if (nums.length) rows.push(nums);
+    }));
+    return { pid, ids: new Set(strips.map(st => parseInt(st.id, 10))), rows };
+  }).filter(b => b.rows.length);
+}
+
+// OCR words → number tokens with their centre and height. The reader skips
+// the grid lines, so neighbouring cells often come back as one run of digits
+// ("31465063"); those are split back into cells (see splitClaimRun). The
+// whole run is kept too, since a control number is a run of its own.
+function claimTokens(words) {
+  const out = [];
+  (words || []).forEach(w => {
+    const t = String(w.text || '').replace(/\D/g, '');
+    const b = w.bbox || {};
+    if (!t) return;
+    const y = (b.y0 + b.y1) / 2, h = Math.max(1, b.y1 - b.y0);
+    const wide = b.x1 - b.x0;
+    if (t.length <= 2) { out.push({ t, n: parseInt(t, 10), x: (b.x0 + b.x1) / 2, y, h }); return; }
+    out.push({ t, n: parseInt(t, 10), x: (b.x0 + b.x1) / 2, y, h, run: true });
+    let at = 0;
+    (splitClaimRun(t) || []).forEach(n => {
+      const len = String(n).length;
+      const x = b.x0 + wide * (at + len / 2) / t.length;
+      at += len;
+      out.push({ t: String(n), n, x, y, h });
+    });
+  });
+  return out.filter(k => Number.isFinite(k.n));
+}
+
+// Split a run of digits into the numbers of neighbouring cells. On the sheet
+// each cell's number sits in its own tens column, left to right, so a valid
+// split rises strictly and never puts two numbers in the same column. Of the
+// valid splits the one with the most numbers wins; none valid → null.
+function splitClaimRun(t) {
+  const colOf = n => Math.min(Math.floor(n / 10), 8);
+  let best = null;
+  (function walk(i, prev, acc) {
+    if (i === t.length) { if (!best || acc.length > best.length) best = acc.slice(); return; }
+    for (const len of [2, 1]) {
+      if (i + len > t.length) continue;
+      const s = t.slice(i, i + len);
+      if (s[0] === '0') continue;
+      const n = parseInt(s, 10);
+      if (n < 1 || n > 90) continue;
+      if (prev && colOf(n) <= colOf(prev)) continue;
+      acc.push(n); walk(i + len, n, acc); acc.pop();
+    }
+  })(0, 0, []);
+  return best && best.length >= 2 ? best : null;
+}
+
+// Score every block against one frame. A row counts when at least 3 of its
+// 5 numbers were read lying on one line — the line may slope a little, since
+// nobody holds a paper perfectly level.
+function claimScoreFrame(index, tokens) {
+  const grid = new Map();
+  const heights = [];
+  tokens.forEach(k => {
+    if (k.t.length > 2 || k.n < 1 || k.n > 90) return;
+    if (!grid.has(k.n)) grid.set(k.n, []);
+    grid.get(k.n).push(k);
+    heights.push(k.h);
+  });
+  heights.sort((a, b) => a - b);
+  const h = heights.length ? heights[heights.length >> 1] : 20;
+  const longs = new Set(tokens.filter(k => k.t.length >= 3).map(k => k.n));
+  const sameLine = (a, b) => Math.abs(a.y - b.y) <= Math.max(h * 0.75, Math.abs(a.x - b.x) * 0.14);
+
+  return index.map(blk => {
+    let rowHits = 0;
+    blk.rows.forEach(row => {
+      const seen = [];
+      row.forEach(n => { if (grid.has(n)) seen.push(...grid.get(n)); });
+      if (seen.length < 3) return;
+      let best = 0;
+      seen.forEach(a => {
+        const mates = new Set();
+        seen.forEach(b => { if (sameLine(a, b)) mates.add(b.n); });
+        best = Math.max(best, mates.size);
+      });
+      if (best >= 3) rowHits++;
+    });
+    let idHits = 0;
+    blk.ids.forEach(id => { if (longs.has(id)) idHits++; });
+    return { pid: blk.pid, rowHits, idHits, score: rowHits + idHits * 3 };
+  }).sort((a, b) => b.score - a.score);
+}
+
+// Is the best block clearly the one? Strong evidence settles it in one
+// frame; weaker evidence has to name the same block twice running.
+function claimVerdict(scores, prevPid) {
+  const top = scores[0];
+  if (!top || top.score < 3) return { pid: null, close: false };
+  const second = scores[1] ? scores[1].score : 0;
+  const clear = top.score >= second * 2 + 1;
+  const strong = (top.rowHits >= 6 || (top.idHits >= 1 && top.rowHits >= 3)) && clear;
+  const steady = top.rowHits >= 4 && clear && top.pid === prevPid;
+  // Only a frame that clears the bar itself can vouch for the next one.
+  return { pid: (strong || steady) ? top.pid : null, close: true,
+           lead: (top.rowHits >= 4 && clear) ? top.pid : null };
+}
+
+function setClaimCamStatus(status, sub) {
+  document.getElementById('claim-cam-status').textContent = status;
+  if (sub != null) document.getElementById('claim-cam-sub').textContent = sub;
+}
+
+// One frame off the video, big enough for the digits to read.
+// One frame off the video: the part inside the guide frame (plus a margin),
+// big enough for the digits to read, cleaned up by binarizeClaimFrame.
+function grabClaimFrame(video) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  // The video is drawn object-fit: cover, so map the guide's screen rect
+  // back into video pixels.
+  let sx = 0, sy = 0, sw = vw, sh = vh;
+  const guide = document.querySelector('.claim-cam-frame');
+  const vr = video.getBoundingClientRect();
+  if (guide && vr.width && vr.height) {
+    const gr = guide.getBoundingClientRect();
+    const k = Math.max(vr.width / vw, vr.height / vh);
+    const offX = (vr.width - vw * k) / 2, offY = (vr.height - vh * k) / 2;
+    const mx = gr.width * 0.12, my = gr.height * 0.08;
+    sx = Math.max(0, (gr.left - vr.left - mx - offX) / k);
+    sy = Math.max(0, (gr.top - vr.top - my - offY) / k);
+    sw = Math.min(vw - sx, (gr.width + 2 * mx) / k);
+    sh = Math.min(vh - sy, (gr.height + 2 * my) / k);
+  }
+  const scale = Math.min(1.5, 1400 / Math.max(sw, sh));
+  const c = document.createElement('canvas');
+  c.width = Math.round(sw * scale);
+  c.height = Math.round(sh * scale);
+  c.getContext('2d').drawImage(video, sx, sy, sw, sh, 0, 0, c.width, c.height);
+  return levelClaimFrame(binarizeClaimFrame(c));
+}
+
+// How far the sheet leans, in degrees. The thick vertical grid lines are
+// the strongest straight feature on it: projected along the right angle,
+// their ink piles up into a few sharp columns. Measured on a small copy.
+function claimSkew(bin) {
+  const S = 360 / Math.max(bin.width, bin.height);
+  const w = Math.max(1, Math.round(bin.width * S)), h = Math.max(1, Math.round(bin.height * S));
+  const small = document.createElement('canvas');
+  small.width = w; small.height = h;
+  const sctx = small.getContext('2d');
+  sctx.drawImage(bin, 0, 0, w, h);
+  const d = sctx.getImageData(0, 0, w, h).data;
+  const xs = [], ys = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (d[(y * w + x) * 4] < 110) { xs.push(x); ys.push(y); }
+  }
+  if (xs.length < 200) return 0;
+  const span = w + h;
+  let bestA = 0, bestScore = -1;
+  for (let a = -30; a <= 30; a += 1.5) {
+    const r = a * Math.PI / 180, cs = Math.cos(r), sn = Math.sin(r);
+    const bins = new Float32Array(span * 2);
+    for (let i = 0; i < xs.length; i++) bins[Math.round(xs[i] * cs + ys[i] * sn) + h] += 1;
+    let score = 0;
+    for (let i = 0; i < bins.length; i++) score += bins[i] * bins[i];
+    if (score > bestScore) { bestScore = score; bestA = a; }
+  }
+  return bestA;
+}
+
+// Turn the frame level before it's read — the reader needs upright text.
+function levelClaimFrame(bin) {
+  const a = claimSkew(bin);
+  if (Math.abs(a) < 2) return bin;
+  const r = -a * Math.PI / 180;
+  const out = document.createElement('canvas');
+  out.width = bin.width; out.height = bin.height;
+  const g = out.getContext('2d');
+  g.fillStyle = '#fff';
+  g.fillRect(0, 0, out.width, out.height);
+  g.translate(out.width / 2, out.height / 2);
+  g.rotate(r);
+  g.drawImage(bin, -bin.width / 2, -bin.height / 2);
+  return out;
+}
+
+// Black print on white, whatever the light. Each pixel is judged against the
+// brightness around it rather than one global cut-off, so a shadow across
+// half the sheet or a lamp's glare doesn't swallow the numbers. The cut-off
+// sits well below the local paper tone: the faint grey numbers printed in
+// the empty cells drop out, the bold black ones stay.
+function binarizeClaimFrame(c) {
+  const w = c.width, h = c.height;
+  const ctx = c.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h);
+  const px = img.data;
+  const gray = new Float32Array(w * h);
+  for (let i = 0, j = 0; i < gray.length; i++, j += 4) {
+    gray[i] = px[j] * 0.299 + px[j + 1] * 0.587 + px[j + 2] * 0.114;
+  }
+  // Summed-area table for O(1) local means
+  const W1 = w + 1;
+  const sat = new Float64Array(W1 * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let row = 0;
+    for (let x = 0; x < w; x++) {
+      row += gray[y * w + x];
+      sat[(y + 1) * W1 + x + 1] = sat[y * W1 + x + 1] + row;
+    }
+  }
+  const r = Math.max(8, Math.round(Math.min(w, h) / 24));
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+      const sum = sat[y1 * W1 + x1] - sat[y0 * W1 + x1] - sat[y1 * W1 + x0] + sat[y0 * W1 + x0];
+      const mean = sum / ((x1 - x0) * (y1 - y0));
+      const v = gray[y * w + x] < mean * CLAIM_INK ? 0 : 255;
+      const j = (y * w + x) * 4;
+      px[j] = px[j + 1] = px[j + 2] = v;
+      px[j + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c;
+}
+// Darker than this share of the surrounding tone counts as ink.
+const CLAIM_INK = 0.68;
+
+async function startClaimCamera(code) {
+  const run = ++_claimCamRun;
+  const overlay = document.getElementById('claim-cam');
+  const video = document.getElementById('claim-cam-video');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+  overlay.classList.remove('is-found');
+  overlay.style.display = 'flex';
+  setClaimCamStatus('Starter kameraet…', 'Hold det første arket (Spill 1) inne i rammen');
+  // The reader is a few MB the first time — fetch it alongside the camera.
+  const ocr = loadClaimOcr();
+  ocr.catch(() => {});
+  try {
+    _claimCamStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 } },
+      audio: false,
+    });
+  } catch (e) {
+    if (run !== _claimCamRun) return;
+    stopClaimCamera();
+    document.getElementById('claim-error').textContent =
+      'Fikk ikke åpnet kameraet — skriv inn kontrollnummeret i stedet';
+    return;
+  }
+  if (run !== _claimCamRun) { stopClaimCamera(); return; }
+  video.srcObject = _claimCamStream;
+  try { await video.play(); } catch (e) {}
+
+  setClaimCamStatus('Gjør klar leseren…');
+  let worker;
+  try { worker = await ocr; }
+  catch (e) {
+    if (run !== _claimCamRun) return;
+    stopClaimCamera();
+    document.getElementById('claim-error').textContent =
+      'Kunne ikke laste inn leseren — skriv inn kontrollnummeret i stedet';
+    return;
+  }
+
+  let pool = null, index = [], poolAt = 0, prevPid = null;
+  while (run === _claimCamRun) {
+    // Fresh blocks may be scanned in while this phone is looking.
+    if (!pool || Date.now() - poolAt > 15000) {
+      try { pool = await loadClaimPool(code); index = claimMatchIndex(pool); poolAt = Date.now(); }
+      catch (e) { await new Promise(r => setTimeout(r, 1500)); continue; }
+      if (run !== _claimCamRun) return;
+    }
+    if (!index.length) {
+      setClaimCamStatus('Ingen blokker ennå', 'Ingen blokker er skannet inn i denne bingoen ennå');
+      await new Promise(r => setTimeout(r, 3000));
+      poolAt = 0;
+      continue;
+    }
+    const frame = grabClaimFrame(video);
+    if (!frame) { await new Promise(r => setTimeout(r, 300)); continue; }
+    let words = [];
+    try { words = (await worker.recognize(frame)).data.words; } catch (e) {}
+    if (run !== _claimCamRun) return;
+    const verdict = claimVerdict(claimScoreFrame(index, claimTokens(words)), prevPid);
+    prevPid = verdict.lead || null;
+    if (verdict.pid) {
+      const hit = findClaimBlockByPid(pool, verdict.pid);
+      try { if (VIBRATE_SUPPORTED) navigator.vibrate(60); } catch (e) {}
+      playClaimMorph(code, hit);
+      return;
+    }
+    setClaimCamStatus(verdict.close ? 'Nesten — hold arket stille' : 'Leter etter arket…');
+  }
+}
+
+// Found it: the real sheet becomes the digital one, no taps. The camera
+// freezes on the photo; a gold line sweeps down the paper and the app's own
+// strips appear over it as it passes; then the photo falls away and the
+// digital sheet glides into its place in the app, which has been filled in
+// underneath the whole time.
+async function playClaimMorph(code, hit) {
+  const overlay = document.getElementById('claim-cam');
+  const video   = document.getElementById('claim-cam-video');
+  const guide   = overlay.querySelector('.claim-cam-frame');
+  _claimCamRun++;                          // the read loop is done
+
+  if (!fxEnabled() || !guide) {
+    stopClaimCamera();
+    deliverClaim(code, [hit]);
+    return;
+  }
+
+  // Freeze the frame exactly as it was on screen (object-fit: cover).
+  const ow = overlay.clientWidth, oh = overlay.clientHeight;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const still = document.createElement('canvas');
+  still.id = 'claim-cam-still';
+  still.width = Math.round(ow * dpr); still.height = Math.round(oh * dpr);
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (vw && vh) {
+    const k = Math.max(ow / vw, oh / vh) * dpr;
+    still.getContext('2d').drawImage(video, (still.width - vw * k) / 2, (still.height - vh * k) / 2, vw * k, vh * k);
+  }
+  overlay.insertBefore(still, video.nextSibling);
+  if (_claimCamStream) { _claimCamStream.getTracks().forEach(t => t.stop()); _claimCamStream = null; }
+  video.srcObject = null;
+
+  overlay.classList.add('is-found');
+  const ownerName = (hit.meta && (hit.meta.baseName || '')).trim();
+  setClaimCamStatus('Fant blokken!', isDefaultBlockName(ownerName) ? '' : ownerName);
+
+  // The digital sheet, laid over the paper inside the guide.
+  const gr = guide.getBoundingClientRect(), orr = overlay.getBoundingClientRect();
+  const paper = document.createElement('div');
+  paper.className = 'claim-morph-paper';
+  const strips = claimGames(hit.games)[CLAIM_GAME] || [];
+  renderClaimStrips(paper, strips);
+  const pw = gr.width * 0.92;
+  paper.style.width = pw + 'px';
+  paper.style.left = (gr.left - orr.left + (gr.width - pw) / 2) + 'px';
+  paper.style.top = '0px';
+  paper.style.visibility = 'hidden';
+  overlay.appendChild(paper);
+  const ph = paper.offsetHeight;
+  const top = gr.top - orr.top + Math.max(0, (gr.height - ph) / 2);
+  paper.style.top = top + 'px';
+  paper.style.visibility = '';
+  paper.style.background = 'transparent';
+  paper.style.boxShadow = 'none';
+
+  const scan = document.createElement('div');
+  scan.className = 'claim-morph-scan';
+  scan.style.left = (gr.left - orr.left) + 'px';
+  scan.style.width = gr.width + 'px';
+  scan.style.top = top + 'px';
+  overlay.appendChild(scan);
+
+  // Hand the block over now, so the app is ready underneath by the landing.
+  deliverClaim(code, [hit], { morph: true });
+
+  const ease = 'cubic-bezier(.2,.7,.2,1)';
+  const SWEEP = 900;
+  scan.animate([
+    { opacity: 0, transform: 'translateY(0)' },
+    { opacity: 1, offset: 0.08 },
+    { opacity: 1, offset: 0.92 },
+    { opacity: 0, transform: 'translateY(' + ph + 'px)' },
+  ], { duration: SWEEP, easing: 'linear', fill: 'forwards' });
+  still.animate([{ opacity: 1 }, { opacity: 0.35 }], { duration: SWEEP, easing: 'ease-in', fill: 'forwards' });
+  // Each strip turns digital as the line reaches it.
+  [...paper.children].forEach(el => {
+    const at = (el.offsetTop / ph) * SWEEP;
+    el.animate([
+      { opacity: 0, transform: 'scale(1.04)' },
+      { opacity: 1, transform: 'scale(1)' },
+    ], { duration: 260, delay: at, easing: ease, fill: 'forwards' });
+  });
+  // The white sheet itself firms up once the line is past.
+  const sheet = paper.animate([
+    { backgroundColor: 'rgba(255,255,255,0)', boxShadow: '0 10px 40px rgba(0,0,0,0)' },
+    { backgroundColor: 'rgba(255,255,255,1)', boxShadow: '0 10px 40px rgba(0,0,0,0.55)' },
+  ], { duration: 300, delay: SWEEP * 0.75, fill: 'forwards' });
+  await sheet.finished.catch(() => {});
+  await new Promise(r => setTimeout(r, 350));
+
+  // Land: the photo and chrome go, the sheet glides onto the app's paper.
+  overlay.classList.add('is-morphing');
+  overlay.style.background = 'transparent';
+  still.animate([{ opacity: 0.35 }, { opacity: 0 }], { duration: 380, fill: 'forwards' });
+  const target = document.getElementById('digital-paper');
+  const tr = target && target.getBoundingClientRect();
+  const pr = paper.getBoundingClientRect();
+  let landing;
+  if (tr && tr.width > 0 && tr.height > 0) {
+    const k = tr.width / pr.width;
+    landing = paper.animate([
+      { transform: 'translate(0,0) scale(1)', opacity: 1 },
+      { transform: 'translate(' + (tr.left - pr.left) + 'px,' + (tr.top - pr.top) + 'px) scale(' + k + ')', opacity: 1, offset: 0.85 },
+      { transform: 'translate(' + (tr.left - pr.left) + 'px,' + (tr.top - pr.top) + 'px) scale(' + k + ')', opacity: 0 },
+    ], { duration: 650, easing: ease, fill: 'forwards' });
+  } else {
+    landing = paper.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 380, fill: 'forwards' });
+  }
+  await landing.finished.catch(() => {});
+
+  overlay.style.display = 'none';
+  overlay.style.background = '';
+  overlay.classList.remove('is-found', 'is-morphing');
+  still.remove(); scan.remove(); paper.remove();
+  // Ask for a name now if the block came without one — held back while the
+  // morph had the screen.
+  nudgeNameIfDefault();
+}
+
+function findClaimBlockByPid(pool, pid) {
+  return { pid, games: pool.papers[pid], meta: pool.meta[pid] || {} };
+}
+
+function stopClaimCamera() {
+  _claimCamRun++;
+  if (_claimCamStream) {
+    _claimCamStream.getTracks().forEach(t => t.stop());
+    _claimCamStream = null;
+  }
+  const video = document.getElementById('claim-cam-video');
+  if (video) video.srcObject = null;
+  document.getElementById('claim-cam').style.display = 'none';
 }
 
 function showShareModal(url) {
