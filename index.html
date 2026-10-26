@@ -8314,6 +8314,48 @@ function setClaimCamStatus(status, sub) {
 // One frame off the video, big enough for the digits to read.
 // One frame off the video: the part inside the guide frame (plus a margin),
 // big enough for the digits to read, cleaned up by binarizeClaimFrame.
+// ── Middle of the sheet first ─────────────────────────────────
+// Four rows decide a block, and the middle half of the sheet holds nine.
+// Reading only that, split across every reader, took about half the time of
+// the whole sheet and settled every test frame on its own; the top and
+// bottom quarters are read only when it doesn't. (Reading the sideways
+// control numbers first was tried too: their print is so small that the
+// strip has to be enlarged to read, which made it slower than this, and
+// glare or blur defeated it.)
+
+// Read the part of `frame` between the fractions y0f..y1f, split across
+// `workers`, with the word boxes put back in frame coordinates.
+async function readClaimRange(workers, frame, y0f, y1f) {
+  const y0 = Math.round(frame.height * y0f), y1 = Math.round(frame.height * y1f);
+  const part = document.createElement('canvas');
+  part.width = frame.width; part.height = y1 - y0;
+  part.getContext('2d').drawImage(frame, 0, y0, frame.width, y1 - y0, 0, 0, frame.width, y1 - y0);
+  const words = await readClaimFrame(workers, part);
+  return words.map(w => ({ text: w.text, bbox: { x0: w.bbox.x0, x1: w.bbox.x1, y0: w.bbox.y0 + y0, y1: w.bbox.y1 + y0 } }));
+}
+
+// One frame, in up to two passes. Resolves to a claimVerdict, or null when
+// the readers had to be restarted (see readSheetWords).
+async function readClaimStaged(frame, index, prevPid) {
+  const ocr = loadClaimOcr();
+  try {
+    const workers = await withTimeout(ocr, CLAIM_LOAD_TIMEOUT);
+    const mid = claimTokens(await withTimeout(readClaimRange(workers, frame, 0.25, 0.75), CLAIM_READ_TIMEOUT));
+    const first = claimVerdict(claimScoreFrame(index, mid), prevPid);
+    if (first.pid) return first;
+    // Not settled: the top and bottom quarters too, judged with the middle.
+    const half = Math.ceil(workers.length / 2);
+    const [top, bottom] = await withTimeout(Promise.all([
+      readClaimRange(workers.slice(0, half), frame, 0, 0.29),
+      readClaimRange(workers.slice(half), frame, 0.71, 1),
+    ]), CLAIM_READ_TIMEOUT);
+    return claimVerdict(claimScoreFrame(index, mid.concat(claimTokens(top), claimTokens(bottom))), prevPid);
+  } catch (e) {
+    resetClaimOcr(ocr);
+    return null;
+  }
+}
+
 function grabClaimFrame(video) {
   return grabSheetFrame(video, document.querySelector('.claim-cam-frame'));
 }
@@ -8555,10 +8597,9 @@ async function startClaimCamera(code) {
       await new Promise(r => setTimeout(r, 60));
       continue;
     }
-    const words = await readSheetWords(frame);
+    const verdict = await readClaimStaged(frame, index, prevPid);
     if (run !== _claimCamRun) return;
-    if (!words) { setClaimCamStatus('Starter leseren på nytt…'); prevPid = null; continue; }
-    const verdict = claimVerdict(claimScoreFrame(index, claimTokens(words)), prevPid);
+    if (!verdict) { setClaimCamStatus('Starter leseren på nytt…'); prevPid = null; continue; }
     prevPid = verdict.lead || null;
     if (verdict.pid) {
       const hit = findClaimBlockByPid(pool, verdict.pid);
