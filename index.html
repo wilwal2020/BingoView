@@ -3561,13 +3561,37 @@ header { padding: 7px 13px; gap: 5px 7px; }
   color: var(--nav-dim);
 }
 .funfact-existing-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
   font-size: 0.86rem;
   line-height: 1.4;
   color: rgba(255,255,255,0.88);
   background: rgba(255,255,255,0.05);
+  border: none;
   border-left: 3px solid var(--gold);
   border-radius: 6px;
   padding: 7px 10px;
+  cursor: pointer;
+}
+.funfact-existing-item > span:first-child { flex: 1; }
+.funfact-existing-item:active { background: rgba(255,255,255,0.10); }
+.funfact-existing-pen { color: var(--gold); opacity: 0.75; flex-shrink: 0; }
+.funfact-edit { display: flex; flex-direction: column; gap: 6px; }
+.funfact-edit-row { display: flex; justify-content: flex-end; align-items: center; gap: 12px; }
+.funfact-edit-save {
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #160c27;
+  background: var(--gold);
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
 }
 .funfact-existing-empty { font-size: 0.8rem; color: var(--nav-dim); font-style: italic; }
 .funfact-count { font-size: 0.72rem; color: var(--nav-dim); text-align: right; margin-top: -4px; }
@@ -7214,9 +7238,13 @@ function openFunFactSheet(num) {
 }
 // list: null while loading, else the facts. `screenOn`: false when the host
 // has fun facts switched off, so a new one won't show until it's turned on.
+// Tapping a fact opens it for editing in place (editFunFact).
+let _funFactList = [];
+let _funFactScreenOn = true;
 function renderExistingFunFacts(list, screenOn = true) {
   const box = document.getElementById('funfact-existing');
   box.innerHTML = '';
+  if (list !== null) { _funFactList = list; _funFactScreenOn = screenOn; }
   const head = document.createElement('div');
   head.className = 'funfact-existing-head';
   if (list === null) {
@@ -7225,7 +7253,7 @@ function renderExistingFunFacts(list, screenOn = true) {
     return;
   }
   head.textContent = list.length
-    ? (list.length === 1 ? '1 faktum på skjermen' : list.length + ' fakta på skjermen')
+    ? (list.length === 1 ? '1 faktum på skjermen' : list.length + ' fakta på skjermen') + ' · trykk for å endre'
     : 'På skjermen nå';
   box.appendChild(head);
   if (!list.length) {
@@ -7234,16 +7262,84 @@ function renderExistingFunFacts(list, screenOn = true) {
     empty.textContent = 'Ingen fakta for dette tallet ennå — bli den første!';
     box.appendChild(empty);
   }
-  list.forEach(text => {
-    const item = document.createElement('div');
+  list.forEach((text, i) => {
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = 'funfact-existing-item';
-    item.textContent = text;
+    item.title = 'Trykk for å endre';
+    const span = document.createElement('span');
+    span.textContent = text;
+    const pen = document.createElement('span');
+    pen.className = 'funfact-existing-pen';
+    pen.textContent = '✎';
+    item.append(span, pen);
+    item.addEventListener('click', () => editFunFact(i, item));
     box.appendChild(item);
   });
   if (!screenOn) {
     document.getElementById('funfact-sub').textContent =
       'Legges til på bingoskjermen. Fun facts er slått av der nå, så det vises først når de slås på.';
   }
+}
+// Swap fact `i` for a box to change it in. The host matches the edit on the
+// old text rather than the index, so a list that moved under us (someone
+// else adding or deleting meanwhile) still changes the right fact.
+function editFunFact(i, item) {
+  const old = _funFactList[i];
+  if (old == null) return;
+  // One at a time: any other open editor goes back to plain text.
+  renderExistingFunFacts(_funFactList, _funFactScreenOn);
+  item = document.querySelectorAll('#funfact-existing .funfact-existing-item')[i];
+  if (!item) return;
+  const wrap = document.createElement('div');
+  wrap.className = 'funfact-edit';
+  const area = document.createElement('textarea');
+  area.className = 'funfact-input';
+  area.rows = 3;
+  area.maxLength = FUNFACT_MAX;
+  area.value = old;
+  const row = document.createElement('div');
+  row.className = 'funfact-edit-row';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'claim-skip';
+  cancel.textContent = 'Avbryt';
+  cancel.addEventListener('click', () => renderExistingFunFacts(_funFactList, _funFactScreenOn));
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'funfact-edit-save';
+  save.textContent = 'Lagre endring';
+  save.addEventListener('click', () => sendFunFactEdit(i, area.value));
+  row.append(cancel, save);
+  wrap.append(area, row);
+  item.replaceWith(wrap);
+  area.focus();
+  area.setSelectionRange(area.value.length, area.value.length);
+}
+function sendFunFactEdit(i, value) {
+  const old  = _funFactList[i];
+  const text = String(value || '').replace(/\s+/g, ' ').trim().slice(0, FUNFACT_MAX);
+  const n = _funFactNum;
+  if (old == null || n == null) return;
+  if (!text) { toast('Faktumet kan ikke være tomt', 'warn', 2500); return; }
+  if (text === old) { renderExistingFunFacts(_funFactList, _funFactScreenOn); return; }
+  if (!channelRef || !sessionCode) {
+    toast('Ikke tilkoblet en sesjon', 'err', 2600);
+    return;
+  }
+  channelRef.child('funFacts').push({
+    action: 'edit',
+    number: String(n),
+    old,
+    text,
+    from:  getStoredUserName(activeBlockIdx) || '',
+    phone: phoneId || '',
+    ts:    firebase.database.ServerValue.TIMESTAMP
+  }).then(() => toast('Endret!', 'ok', 2200))
+    .catch(() => toast('Fikk ikke lagret endringen', 'err', 3000));
+  const list = _funFactList.slice();
+  list[i] = text;
+  renderExistingFunFacts(list, _funFactScreenOn);
 }
 function closeFunFactSheet() {
   document.getElementById('funfact-input').blur();
