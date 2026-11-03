@@ -3529,6 +3529,51 @@ header { padding: 7px 13px; gap: 5px 7px; }
 .name-prompt-sub { font-size: 0.78rem; line-height: 1.45; color: var(--nav-dim); margin-bottom: 4px; }
 .name-prompt-input { text-transform: none; letter-spacing: 0.02em; font-size: 1.15rem; }
 
+/* Fun fact sheet — opened by holding a number (initFunFact) */
+.funfact-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  background: rgba(0,0,0,0.35);
+  color: #fff;
+  border: 1px solid rgba(132,164,216,0.35);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.4;
+  text-align: left;
+}
+.funfact-input:focus { outline: none; border-color: var(--gold); }
+.funfact-existing {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 34vh;
+  overflow-y: auto;
+  text-align: left;
+}
+.funfact-existing-head {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--nav-dim);
+}
+.funfact-existing-item {
+  font-size: 0.86rem;
+  line-height: 1.4;
+  color: rgba(255,255,255,0.88);
+  background: rgba(255,255,255,0.05);
+  border-left: 3px solid var(--gold);
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+.funfact-existing-empty { font-size: 0.8rem; color: var(--nav-dim); font-style: italic; }
+.funfact-count { font-size: 0.72rem; color: var(--nav-dim); text-align: right; margin-top: -4px; }
+/* A hold on a number must not start a text selection or the iOS callout. */
+#digital-paper .cell[data-num] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+
 /* "Hent blokk" next to the +, for a phone that came in through the claim QR */
 .block-tab-add.block-tab-claim {
   flex: 0 0 auto;
@@ -3781,6 +3826,20 @@ header { padding: 7px 13px; gap: 5px 7px; }
              maxlength="24" placeholder="Navnet ditt" autocomplete="given-name" spellcheck="false">
       <button class="btn-phone-connect" type="submit">Lagre</button>
       <button id="name-prompt-skip" class="claim-skip" type="button">Ikke nå</button>
+    </form>
+  </div>
+
+  <!-- Fun fact for a held number — see initFunFact() -->
+  <div id="funfact-sheet" class="share-overlay" style="display:none">
+    <form class="share-card name-prompt-card" id="funfact-form" autocomplete="off">
+      <h3 id="funfact-title">Fun fact</h3>
+      <div class="name-prompt-sub" id="funfact-sub"></div>
+      <div class="funfact-existing" id="funfact-existing"></div>
+      <textarea id="funfact-input" class="funfact-input" rows="4" maxlength="200"
+                placeholder="Visste du at …"></textarea>
+      <div class="funfact-count" id="funfact-count"></div>
+      <button class="btn-phone-connect" type="submit">Send til bingoskjermen</button>
+      <button id="funfact-cancel" class="claim-skip" type="button">Avbryt</button>
     </form>
   </div>
 
@@ -7116,6 +7175,157 @@ function initNamePrompt() {
   });
 }
 
+// ── Fun fact ──────────────────────────────────────────────────
+// Hold a number on the sheet to send the bingo screen a fun fact about it.
+// It goes into the session's funFacts queue; the host adds it to its own
+// list for that number (bingoFunFacts there) and shows it when the number
+// is called, the same as a fact typed in on the host.
+const FUNFACT_HOLD_MS = 550;
+const FUNFACT_MAX     = 200;
+let _funFactNum = null;
+let _funFactHold = null;           // { timer, x, y } while a finger is down
+let _funFactSwallowClick = false;  // the click a hold ends in is not a tap
+
+function openFunFactSheet(num) {
+  if (manualMode || !channelRef || !sessionCode) {
+    toast('Koble til en bingo for å sende fun facts', 'warn', 3000);
+    return;
+  }
+  _funFactNum = num;
+  const input = document.getElementById('funfact-input');
+  document.getElementById('funfact-title').textContent = 'Fun fact om ' + num;
+  document.getElementById('funfact-sub').textContent =
+    'Legges til på bingoskjermen og vises når ' + num + ' blir trukket.';
+  input.value = '';
+  updateFunFactCount();
+  renderExistingFunFacts(null);
+  document.getElementById('funfact-sheet').style.display = 'flex';
+  input.focus();
+  // What the bingo screen already has for this number (the host mirrors its
+  // list into funFactInfo). Read fresh each time — it's one small node.
+  channelRef.child('funFactInfo').once('value').then(snap => {
+    if (_funFactNum !== num) return;           // closed, or another number since
+    const info = snap.val() || {};
+    const raw  = info.facts && info.facts[String(num)];
+    const list = (Array.isArray(raw) ? raw : (raw && typeof raw === 'object' ? Object.values(raw) : []))
+      .map(t => String(t == null ? '' : t).trim()).filter(Boolean);
+    renderExistingFunFacts(list, info.enabled !== false);
+  }).catch(() => { if (_funFactNum === num) renderExistingFunFacts([]); });
+}
+// list: null while loading, else the facts. `screenOn`: false when the host
+// has fun facts switched off, so a new one won't show until it's turned on.
+function renderExistingFunFacts(list, screenOn = true) {
+  const box = document.getElementById('funfact-existing');
+  box.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'funfact-existing-head';
+  if (list === null) {
+    head.textContent = 'Henter fakta…';
+    box.appendChild(head);
+    return;
+  }
+  head.textContent = list.length
+    ? (list.length === 1 ? '1 faktum på skjermen' : list.length + ' fakta på skjermen')
+    : 'På skjermen nå';
+  box.appendChild(head);
+  if (!list.length) {
+    const empty = document.createElement('div');
+    empty.className = 'funfact-existing-empty';
+    empty.textContent = 'Ingen fakta for dette tallet ennå — bli den første!';
+    box.appendChild(empty);
+  }
+  list.forEach(text => {
+    const item = document.createElement('div');
+    item.className = 'funfact-existing-item';
+    item.textContent = text;
+    box.appendChild(item);
+  });
+  if (!screenOn) {
+    document.getElementById('funfact-sub').textContent =
+      'Legges til på bingoskjermen. Fun facts er slått av der nå, så det vises først når de slås på.';
+  }
+}
+function closeFunFactSheet() {
+  document.getElementById('funfact-input').blur();
+  document.getElementById('funfact-sheet').style.display = 'none';
+  _funFactNum = null;
+}
+function updateFunFactCount() {
+  const n = document.getElementById('funfact-input').value.length;
+  document.getElementById('funfact-count').textContent = n + '/' + FUNFACT_MAX;
+}
+function sendFunFact() {
+  const input = document.getElementById('funfact-input');
+  const text = input.value.replace(/\s+/g, ' ').trim().slice(0, FUNFACT_MAX);
+  if (!text) { input.focus(); return; }
+  const n = _funFactNum;
+  if (n == null) return;
+  if (!channelRef || !sessionCode) {
+    toast('Ikke tilkoblet en sesjon', 'err', 2600);
+    return;
+  }
+  channelRef.child('funFacts').push({
+    number: String(n),
+    text,
+    from:  getStoredUserName(activeBlockIdx) || '',
+    phone: phoneId || '',
+    ts:    firebase.database.ServerValue.TIMESTAMP
+  }).then(() => toast('Sendt! Vises når ' + n + ' blir trukket', 'ok', 3000))
+    .catch(() => toast('Fikk ikke sendt faktumet', 'err', 3000));
+  closeFunFactSheet();
+}
+
+function initFunFact() {
+  const paper = document.getElementById('digital-paper');
+  const sheet = document.getElementById('funfact-sheet');
+  const cancelHold = () => {
+    if (!_funFactHold) return;
+    clearTimeout(_funFactHold.timer);
+    _funFactHold = null;
+  };
+  paper.addEventListener('pointerdown', e => {
+    _funFactSwallowClick = false;
+    cancelHold();
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    const cell = e.target.closest('.cell[data-num]');
+    if (!cell) return;
+    _funFactHold = {
+      x: e.clientX, y: e.clientY,
+      timer: setTimeout(() => {
+        _funFactHold = null;
+        _funFactSwallowClick = true;
+        fxReleaseCell();
+        vibrateShort();
+        openFunFactSheet(Number(cell.dataset.num));
+      }, FUNFACT_HOLD_MS),
+    };
+  });
+  // A finger that wanders is scrolling, not holding.
+  paper.addEventListener('pointermove', e => {
+    if (_funFactHold && Math.hypot(e.clientX - _funFactHold.x, e.clientY - _funFactHold.y) > 10) cancelHold();
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => paper.addEventListener(ev, cancelHold));
+  // Capture phase, ahead of the cell-tap handler: in manual trykking the
+  // release would otherwise mark the number that was only being held.
+  paper.addEventListener('click', e => {
+    if (!_funFactSwallowClick) return;
+    _funFactSwallowClick = false;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+  }, true);
+  paper.addEventListener('contextmenu', e => {
+    if (e.target.closest('.cell[data-num]')) e.preventDefault();
+  });
+
+  document.getElementById('funfact-form').addEventListener('submit', e => {
+    e.preventDefault();
+    sendFunFact();
+  });
+  document.getElementById('funfact-cancel').addEventListener('click', closeFunFactSheet);
+  document.getElementById('funfact-input').addEventListener('input', updateFunFactCount);
+  sheet.addEventListener('click', e => { if (e.target === sheet) closeFunFactSheet(); });
+}
+
 // Latest papers_meta snapshot for the whole channel (all phones' blocks).
 let _remoteMeta = {};
 
@@ -9769,6 +9979,7 @@ function initPhone() {
   // host's block-claim QR — ask for a control number before connecting.
   initClaim();
   initNamePrompt();
+  initFunFact();
   const urlCode = new URLSearchParams(location.search).get('code');
   const claimParam = new URLSearchParams(location.search).get('hent');
   if (urlCode) {
