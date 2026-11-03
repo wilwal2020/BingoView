@@ -3775,8 +3775,8 @@ header { padding: 7px 13px; gap: 5px 7px; }
   <!-- Hva heter du? — see maybePromptName() -->
   <div id="name-prompt" class="share-overlay" style="display:none">
     <form class="share-card name-prompt-card" id="name-prompt-form" autocomplete="off">
-      <h3>Hva heter du?</h3>
-      <div class="name-prompt-sub">Navnet vises på bingo-skjermen, og blir husket til neste gang.</div>
+      <h3 id="name-prompt-title">Hva heter du?</h3>
+      <div class="name-prompt-sub" id="name-prompt-sub">Navnet vises på bingo-skjermen, og blir husket til neste gang.</div>
       <input id="name-prompt-input" class="phone-code-input name-prompt-input" type="text"
              maxlength="24" placeholder="Navnet ditt" autocomplete="given-name" spellcheck="false">
       <button class="btn-phone-connect" type="submit">Lagre</button>
@@ -6996,13 +6996,34 @@ function reclaimSharedBlock() {
   toast("Arket er ditt igjen", "ok", 2500);
 }
 
-// Point at the name field once a shared block has finished arriving — but only
-// when it came without a name. Blocks shared nameless mostly stayed that way:
-// nothing on screen asked for one. A block that already carries a real name
-// is left alone.
+// Ask for a name once a block has finished arriving — but only when it came
+// without one. Blocks shared nameless mostly stayed that way: nothing on
+// screen asked for one. A block that already carries a real name is left
+// alone. The glowing field (pointAtNameField) is what's left when the ask
+// is turned down.
 function nudgeNameIfDefault() {
-  // No name of their own at all: ask outright rather than just point.
-  if (maybePromptName()) return;
+  const bi    = activeBlockIdx;
+  const blk   = blocks[bi];
+  const input = document.getElementById("user-name-input");
+  if (!blk || !input || blk.sharedAway) return;
+  if (namePromptOpen()) return;
+  // Block 1 with no name of its own already goes by the remembered one (see
+  // getStoredUserName) — show it, rather than an empty field that looks
+  // unnamed while the host is showing the name.
+  if (bi === 0 && !blk.userName && getStoredUserName(0)) {
+    blk.userName = getStoredUserName(0);
+    input.value = blk.userName;
+    refreshBlockTabs();
+    saveSession();
+    return;
+  }
+  // The block that arrived has no name: ask outright rather than just point.
+  if (maybePromptName(bi, true)) return;
+  // It came named, but the user's own block 1 may still be waiting for one.
+  if (bi !== 0 && !isDefaultBlockName(blk.userName) && maybePromptName(0, true)) return;
+  pointAtNameField();
+}
+function pointAtNameField() {
   const blk   = blocks[activeBlockIdx];
   const row   = document.getElementById("user-name-row");
   const input = document.getElementById("user-name-input");
@@ -7020,21 +7041,43 @@ function clearNameNudge() {
   if (input) input.classList.remove('name-nudge');
 }
 
-// Ask for a name when block 1 — the user's own — has none, so it isn't
-// missed. Once per page load; "Ikke nå" quiets it for the rest of that
-// session code. Held back while a shared block is arriving: the arrival
-// calls back through nudgeNameIfDefault when it's done.
+// Ask for a name when a block has none, so it isn't missed.
+// Block 1 — the user's own — is asked for once per page load after
+// connecting, and "Ikke nå" quiets that for the rest of the session code.
+// A block that just arrived is asked for by nudgeNameIfDefault once it's in
+// (`arriving`); until then the connect-time ask is held back, so it can't go
+// up in the middle of the arrival and use up the one ask block 1 gets.
 const NAME_SKIP_KEY = 'bv_namePromptSkip';
 let _namePromptShown = false;
-function maybePromptName() {
-  if (_namePromptShown || manualMode || !channelRef || !sessionCode) return false;
-  if (_fxPendingArrival != null || _fxArrivalTouring || _fxShareEntry) return false;
+let _namePromptBlock = 0;
+function namePromptOpen() {
+  return document.getElementById('name-prompt').style.display === 'flex';
+}
+function maybePromptName(bIdx = 0, arriving = false) {
+  if (manualMode || namePromptOpen()) return false;
+  if (!arriving) {
+    if (!channelRef || !sessionCode) return false;
+    if (_fxPendingArrival != null || _fxArrivalTouring || _fxShareEntry || _arrRun) return false;
+  }
   if (document.getElementById('bv-claim').style.display !== 'none') return false;
   if (document.getElementById('claim-cam').style.display === 'flex') return false;
-  const blk = blocks[0];
-  if (!blk || blk.sharedAway || getStoredUserName(0)) return false;
-  try { if (localStorage.getItem(NAME_SKIP_KEY) === sessionCode) return false; } catch (e) {}
-  _namePromptShown = true;
+  const blk = blocks[bIdx];
+  if (!blk || blk.sharedAway || getStoredUserName(bIdx)) return false;
+  if (bIdx === 0) {
+    if (_namePromptShown) return false;
+    try {
+      const skipped = localStorage.getItem(NAME_SKIP_KEY);
+      if (skipped && skipped === sessionCode) return false;
+    } catch (e) {}
+    _namePromptShown = true;
+  }
+  _namePromptBlock = bIdx;
+  document.getElementById('name-prompt-title').textContent = bIdx === 0
+    ? 'Hva heter du?'
+    : 'Hvem spiller Blokk ' + (bIdx + 1) + '?';
+  document.getElementById('name-prompt-sub').textContent = bIdx === 0
+    ? 'Navnet vises på bingo-skjermen, og blir husket til neste gang.'
+    : 'Navnet vises på bingo-skjermen for denne blokken.';
   const input = document.getElementById('name-prompt-input');
   input.value = '';
   document.getElementById('name-prompt').style.display = 'flex';
@@ -7048,21 +7091,28 @@ function initNamePrompt() {
     e.preventDefault();
     const v = input.value.trim().slice(0, 24);
     if (!v) { input.focus(); return; }
-    blocks[0].userName = v;
-    saveOwnName(v);
-    if (activeBlockIdx === 0) document.getElementById('user-name-input').value = v;
+    const bi = _namePromptBlock;
     input.blur();
     overlay.style.display = 'none';
+    if (!blocks[bi]) return;
+    blocks[bi].userName = v;
+    if (bi === 0) saveOwnName(v);
+    if (activeBlockIdx === bi) document.getElementById('user-name-input').value = v;
     clearNameNudge();
     refreshBlockTabs();
     publishUserName();
     saveSession();
-    toast('Hei, ' + v + '!', 'ok', 2500);
+    toast(bi === 0 ? 'Hei, ' + v + '!' : 'Lagret: ' + v, 'ok', 2500);
   });
   document.getElementById('name-prompt-skip').addEventListener('click', () => {
-    try { localStorage.setItem(NAME_SKIP_KEY, sessionCode || ''); } catch (e) {}
+    // Only block 1's ask is quieted for the session; a skipped block that
+    // just arrived still gets its field pointed at.
+    if (_namePromptBlock === 0) {
+      try { localStorage.setItem(NAME_SKIP_KEY, sessionCode || ''); } catch (e) {}
+    }
     input.blur();
     overlay.style.display = 'none';
+    pointAtNameField();
   });
 }
 
@@ -7762,6 +7812,7 @@ function receiveSharedPaper(result, codeParam, fromId, opts = {}) {
     // assumption one is coming; this is where that assumption is checked.
     showConnectScreen();
   }
+  return importedBlocks;
 }
 
 // ── Hent blokk ────────────────────────────────────────────────
@@ -8021,9 +8072,12 @@ function deliverClaim(code, hits, opts = {}) {
     return;
   }
   if (opts.direct) {
-    // Straight onto the main page with the block open — no entrance at all.
+    // Straight onto the main page with the block open — no entrance at all,
+    // so nothing else asks for the block's name.
     hideClaimScreen();
-    receiveSharedPaper({ code, blocks: entries }, code, entries[0].from, { noArrival: true });
+    if (receiveSharedPaper({ code, blocks: entries }, code, entries[0].from, { noArrival: true })) {
+      setTimeout(nudgeNameIfDefault, 300);
+    }
     return;
   }
   hideClaimScreen();
@@ -10058,7 +10112,7 @@ async function connectPhone(code, opts = {}) {
   metaRef.on('value', metaHandler);
   _channelDetachFns.push(() => metaRef.off('value', metaHandler));
 
-  setTimeout(maybePromptName, 600);
+  setTimeout(() => maybePromptName(), 600);
 }
 
 function setConnStatus(state, label) {
