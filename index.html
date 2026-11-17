@@ -645,6 +645,80 @@ body.start-parked #rekke-buttons { display: none !important; }
   text-transform: uppercase;
 }
 
+/* A scan that FAILED. This is deliberately not a toast: the read finishes
+   while the user is already in the camera shooting the next block, so a
+   message that disappears after 7 seconds is a message nobody sees — which is
+   how a block could end up published with three of its four games and look
+   perfectly finished. The banner waits for the user instead, and sits above
+   the camera overlay (z-index 3000) so it shows up mid-shoot too. */
+.scan-warn {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 20px);
+  max-width: 440px;
+  box-sizing: border-box;
+  background: rgba(46, 10, 8, 0.97);
+  border: 1px solid var(--red);
+  border-radius: 14px;
+  padding: 8px 9px 8px 12px;
+  z-index: 3200;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55);
+  animation: scanWarnIn 0.25s ease-out, scanWarnPulse 1.5s ease-in-out 3;
+}
+@keyframes scanWarnIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(-14px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+@keyframes scanWarnPulse {
+  0%, 100% { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.55); }
+  50%      { box-shadow: 0 0 0 4px rgba(200, 40, 30, 0.3), 0 4px 16px rgba(0, 0, 0, 0.55); }
+}
+.scan-warn-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+  color: #ffb4ac;
+  text-align: left;
+}
+.scan-warn-text b { color: #fff; }
+.scan-warn-fix,
+.scan-warn-ack {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 9px;
+  padding: 8px 9px;
+  cursor: pointer;
+}
+.scan-warn-fix { background: var(--red); color: #fff; border: none; }
+.scan-warn-ack {
+  background: transparent;
+  color: #ff8d80;
+  border: 1px solid rgba(255, 141, 128, 0.45);
+}
+
+/* The hole stays marked after the banner is dismissed: a block missing a
+   paper is wrong until it is scanned, not until it is acknowledged. */
+.block-tab.incomplete { border-color: var(--red) !important; }
+.block-tab.incomplete .block-label::after { content: " ⚠"; color: var(--red); }
+.game-tab .game-dot.missing {
+  background: var(--red);
+  box-shadow: 0 0 5px var(--red);
+}
+.game-tab.active .game-dot.missing { background: #6e0f0a; box-shadow: none; }
+
 /* Pending / multi-photo queue screen */
 #phone-pending {
   display: none;
@@ -4010,6 +4084,10 @@ header { padding: 7px 13px; gap: 5px 7px; }
       <span class="scan-badge-label">Behandler 0 ark…</span>
     </div>
 
+    <!-- Sticks around until the missing ark is scanned or the user says it's
+         fine. Filled by refreshScanWarning(). -->
+    <div id="scan-warn" class="scan-warn" style="display:none"></div>
+
     <!-- Step 2b: Multi-photo queue -->
     <div id="phone-pending">
       <div class="pending-header">
@@ -6757,6 +6835,9 @@ function computeBlockMinRemaining(blockIdx) {
 }
 
 function refreshBlockTabs() {
+  // The banner lives above everything and has to track the same state, so it
+  // is refreshed wherever the tabs are.
+  refreshScanWarning();
   const wrap = document.getElementById("block-tabs");
   // Show block row when game tabs are visible (papers loaded or manual mode)
   // Skip in manual mode — blocks are a connected-mode concept
@@ -6771,6 +6852,9 @@ function refreshBlockTabs() {
     blocks.forEach((blk, idx) => {
       const btn = document.createElement("button");
       btn.className = "block-tab" + (idx === activeBlockIdx ? " active" : "");
+      // A block that was scanned but came up short keeps a red edge and a ⚠
+      // on its label until the missing ark is read.
+      if (blockMissingGames(blk).length) btn.classList.add("incomplete");
       const label = document.createElement("span");
       label.className = "block-label";
       // Prefer the block's own typed name; fall back to "Blokk N"
@@ -10449,10 +10533,16 @@ function enqueueScan(file, gameKey, blockIdx) {
   const blk = blocks[blockIdx];
   if (!blk) return;
   blk._queued = (blk._queued || 0) + 1;
+  // A fresh photo for this game supersedes whatever the last attempt decided,
+  // including a "Dropp" — if the rescan fails too, the user hears about it
+  // again rather than the warning staying dismissed.
+  if (blk._scanFail) delete blk._scanFail[gameKey];
+  if (blk._scanAck)  delete blk._scanAck[gameKey];
   // Held by the block object, not its index: blocks can be removed (and the
   // rest shift down) while a photo waits its turn.
   _scanQueue.push({ file, gameKey, blk });
   updateScanBadge();
+  refreshScanWarning();
   pumpScanQueue();
 }
 function pumpScanQueue() {
@@ -10502,6 +10592,149 @@ function updateScanBadge() {
   }
 }
 
+// ── Incomplete-scan warning ───────────────────────────────────
+// A failed read used to be a toast and nothing else. The toast fires while
+// the user is in the camera shooting the NEXT block, so in practice it was
+// never seen: the block quietly ended up with three of its four games, got
+// published to the host like that, and the hole only turned up mid-game when
+// a called number had nowhere to land. Everything below exists to make a
+// failed scan impossible to walk past — a banner that waits for the user, and
+// marks on the block and game tabs that stay until the ark is actually read.
+
+function blockScanBusy(blk) {
+  return !!blk && ((blk._scanning > 0) || (blk._queued > 0));
+}
+
+// Which games this block has no paper for. Only meaningful once the block has
+// been scanned into and its queue has drained: an untouched block is empty,
+// not incomplete, and a block mid-scan isn't missing anything yet.
+function blockMissingGames(blk) {
+  if (!blk || blockScanBusy(blk)) return [];
+  const ids = getGameIds();
+  const anyPaper = ids.some(g => blk.gameState[g] && blk.gameState[g].strips);
+  if (!anyPaper) return [];
+  return ids.filter(g => !(blk.gameState[g] && blk.gameState[g].strips));
+}
+
+function blockLabelFor(idx) {
+  const blk = blocks[idx];
+  return (blk && (blk.userName || '').trim()) || ('Blokk ' + (idx + 1));
+}
+
+// "Spill 3 (fant 87/90 tall)" — the reason when we have one, so the user knows
+// whether the photo was bad or never taken.
+function blockMissingLabel(blk, g) {
+  const why = blk._scanFail && blk._scanFail[g];
+  return getGameName(g) + ' (' + (why || 'ikke skannet') + ')';
+}
+
+// Holes the user hasn't explicitly waved through yet.
+function unackedScanIssues() {
+  const out = [];
+  blocks.forEach((blk, idx) => {
+    const missing = blockMissingGames(blk)
+      .filter(g => !(blk._scanAck && blk._scanAck[g]));
+    if (missing.length) out.push({ idx, blk, missing });
+  });
+  return out;
+}
+
+function refreshScanWarning() {
+  const el = document.getElementById('scan-warn');
+  if (!el) return;
+  const issues = unackedScanIssues();
+  if (!issues.length) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+  const first = issues[0];
+  const names = first.missing.map(g => blockMissingLabel(first.blk, g)).join(', ');
+  const more  = issues.length > 1 ? ` · +${issues.length - 1} blokk til` : '';
+
+  el.innerHTML = '';
+  const txt = document.createElement('div');
+  txt.className = 'scan-warn-text';
+  const nameEl = document.createElement('b');
+  nameEl.textContent = blockLabelFor(first.idx);
+  txt.appendChild(document.createTextNode('⚠ '));
+  txt.appendChild(nameEl);
+  txt.appendChild(document.createTextNode(' mangler ark: ' + names + more));
+
+  const fix = document.createElement('button');
+  fix.type = 'button';
+  fix.className = 'scan-warn-fix';
+  fix.textContent = 'Skann';
+  fix.addEventListener('click', () => goFixScan(first.idx, first.missing[0]));
+
+  // Deliberately per-game and not sticky-forever: a user who really only wants
+  // three games can say so once. The tab marks stay either way.
+  const ack = document.createElement('button');
+  ack.type = 'button';
+  ack.className = 'scan-warn-ack';
+  ack.textContent = 'Dropp';
+  ack.title = 'Fortsett uten dette arket';
+  ack.addEventListener('click', () => {
+    first.blk._scanAck = first.blk._scanAck || {};
+    first.missing.forEach(g => { first.blk._scanAck[g] = true; });
+    refreshScanWarning();
+    refreshBlockTabs();
+    refreshGameTabs();
+  });
+
+  el.appendChild(txt);
+  el.appendChild(fix);
+  el.appendChild(ack);
+  // Sit clear of whatever is already at the top of the screen: under the
+  // camera's own top bar while shooting, under the app header otherwise, so a
+  // warning that stays up doesn't swallow taps on the cog or the wordmark —
+  // and never on top of the "Behandler N ark…" badge.
+  const camOpen = (document.getElementById('camera-overlay') || {}).style
+    && document.getElementById('camera-overlay').style.display === 'flex';
+  if (camOpen) {
+    el.style.top = 'calc(68px + env(safe-area-inset-top))';
+  } else {
+    const hdr = document.querySelector('header');
+    const h = hdr ? Math.round(hdr.getBoundingClientRect().height) : 0;
+    el.style.top = (h + 8) + 'px';
+  }
+  el.style.display = 'flex';
+}
+
+// Jump straight to the block + game that failed, with the camera open on it.
+function goFixScan(idx, gameKey) {
+  const cam = document.getElementById('camera-overlay');
+  if (cam && cam.style.display === 'flex') closeCamera();
+  if (idx !== activeBlockIdx) switchBlock(idx);
+  if (getGameIds().includes(gameKey)) {
+    activeGame = gameKey;
+    refreshGameTabs();
+  }
+  document.getElementById('phone-paper').style.display   = 'none';
+  document.getElementById('phone-pending').style.display = 'none';
+  document.getElementById('phone-upload').style.display  = 'flex';
+  updateUploadTitle();
+  refreshScanWarning();
+  openCamera();
+}
+
+// Every finished scan calls this. Once the block's queue has drained we know
+// for certain whether an ark is missing — that is the moment to say so.
+function settleBlockScans(blk) {
+  if (!blk || blockScanBusy(blk)) return;
+  refreshScanWarning();
+  refreshBlockTabs();
+  refreshGameTabs();
+  const missing = blockMissingGames(blk)
+    .filter(g => !(blk._scanAck && blk._scanAck[g]));
+  if (!missing.length) return;
+  const idx = blocks.indexOf(blk);
+  if (idx < 0) return;
+  toast(`⚠ ${blockLabelFor(idx)}: mangler ark for ` +
+        missing.map(g => getGameName(g)).join(', '), 'err', 8000);
+  fxHaptic([45, 70, 45]);
+}
+
 // processImage(file, targetGame, [targetBlockIdx], [opts])
 // When called WITHOUT targetBlockIdx, runs in legacy foreground mode
 // (shows phone-processing overlay, writes via current gameState pointer).
@@ -10510,6 +10743,9 @@ function updateScanBadge() {
 // scanning other blocks in parallel.
 async function processImage(file, targetGame, targetBlockIdx, opts) {
   const isBackground = (targetBlockIdx != null);
+  // Hold the block itself: indices shift when a block is removed mid-scan.
+  const targetBlk = isBackground ? blocks[targetBlockIdx] : null;
+  if (isBackground && !targetBlk) return;
   if (!isBackground) {
     document.getElementById("phone-pending").style.display    = "none";
     document.getElementById("phone-upload").style.display     = "none";
@@ -10519,9 +10755,16 @@ async function processImage(file, targetGame, targetBlockIdx, opts) {
     // Per-block in-flight counter (lives on the block object so it survives
     // block reordering). Lets us tell a genuinely-empty block apart from one
     // that merely hasn't finished its background scan yet.
-    blocks[targetBlockIdx]._scanning = (blocks[targetBlockIdx]._scanning || 0) + 1;
+    targetBlk._scanning = (targetBlk._scanning || 0) + 1;
     updateScanBadge();
   }
+  // Every exit below records a verdict for this game on the block, so the
+  // block knows afterwards whether all four arks actually made it in.
+  const noteFail = reason => {
+    if (!targetBlk) return;
+    targetBlk._scanFail = targetBlk._scanFail || {};
+    targetBlk._scanFail[targetGame] = reason;
+  };
   const setLabel = t => {
     if (!isBackground) document.getElementById("proc-label").textContent = t;
   };
@@ -10539,8 +10782,14 @@ async function processImage(file, targetGame, targetBlockIdx, opts) {
       document.getElementById("phone-upload").style.display = "flex";
       document.getElementById("phone-processing").style.display = "none";
     } else {
+      // This return is ahead of the try, so the finally below never runs —
+      // release the per-block counter here or the block stays "busy" forever
+      // and its missing ark is never reported.
       _activeScanCount--;
+      targetBlk._scanning = Math.max(0, (targetBlk._scanning || 1) - 1);
+      noteFail("mangler API-nøkkel");
       updateScanBadge();
+      settleBlockScans(targetBlk);
     }
     toast("Legg inn Anthropic API-nøkkel først", "err", 4000);
     return;
@@ -10665,6 +10914,7 @@ Example:
           updateUploadTitle();
         }
       }
+      noteFail(`fant ${count}/90 tall`);
       refreshBlockTabs();
       toast(`⚠ Fant ${count}/90 numre${lbl} (${diff}) — arket ble ikke godtatt. Skann på nytt.`, "err", 7000);
       return;
@@ -10682,6 +10932,7 @@ Example:
       document.getElementById("phone-processing").style.display = "none";
     }
 
+    if (targetBlk && targetBlk._scanFail) delete targetBlk._scanFail[resolvedGame];
     saveSession();
     publishStripsToHost(resolvedGame, isBackground ? targetBlockIdx : null);
     refreshBlockTabs();
@@ -10690,6 +10941,7 @@ Example:
 
   } catch(err) {
     console.error(err);
+    noteFail(String(err && err.message || err).slice(0, 48));
     if (!isBackground) {
       document.getElementById("phone-processing").style.display = "none";
       document.getElementById("phone-upload").style.display = "flex";
@@ -10701,11 +10953,10 @@ Example:
   } finally {
     if (isBackground) {
       _activeScanCount--;
-      if (blocks[targetBlockIdx]) {
-        blocks[targetBlockIdx]._scanning =
-          Math.max(0, (blocks[targetBlockIdx]._scanning || 1) - 1);
-      }
+      targetBlk._scanning = Math.max(0, (targetBlk._scanning || 1) - 1);
       updateScanBadge();
+      // Last scan of this block out of the queue → say what's missing.
+      settleBlockScans(targetBlk);
     }
   }
 }
@@ -10952,9 +11203,13 @@ function refreshGameTabs() {
     // Host's current game gets a subtle brass border instead of a text dot
     if (g.id === currentGame) btn.classList.add("host-current");
     btn.appendChild(document.createTextNode(g.name));
-    // Slot dot on every tab: green when a paper is loaded for this game
+    // Slot dot on every tab: green when a paper is loaded for this game, red
+    // when this block was scanned and this game's ark never made it in.
     const slotDot = document.createElement("span");
-    slotDot.className = "game-dot" + ((gameState[g.id] && gameState[g.id].strips) ? " on" : "");
+    const loaded  = !!(gameState[g.id] && gameState[g.id].strips);
+    const missing = !loaded &&
+      blockMissingGames(blocks[activeBlockIdx]).includes(g.id);
+    slotDot.className = "game-dot" + (loaded ? " on" : (missing ? " missing" : ""));
     btn.appendChild(slotDot);
     btn.addEventListener("click", () => selectActiveGame(g.id));
 
@@ -11752,6 +12007,26 @@ function updateUploadTitle() {
 // paper, switch to the first block that does. switchBlock/renderActiveGame
 // hide the upload view when a paper exists.
 function finishScanning() {
+  // The last place a missing ark could slip past as "done". Blocking here is
+  // the point: the user is leaving the scan flow, and after this the hole is
+  // only found mid-game.
+  const issues = unackedScanIssues();
+  if (issues.length) {
+    const lines = issues.map(o =>
+      '• ' + blockLabelFor(o.idx) + ': ' +
+      o.missing.map(g => blockMissingLabel(o.blk, g)).join(', ')).join('\n');
+    const go = confirm('Noen ark ble ikke lest:\n\n' + lines +
+      '\n\nAvbryt for å skanne dem på nytt, eller OK for å fortsette uten dem.');
+    if (!go) {
+      goFixScan(issues[0].idx, issues[0].missing[0]);
+      return;
+    }
+    issues.forEach(o => {
+      o.blk._scanAck = o.blk._scanAck || {};
+      o.missing.forEach(g => { o.blk._scanAck[g] = true; });
+    });
+    refreshScanWarning();
+  }
   const activeHasPaper = getGameIds().some(g =>
     gameState[g] && gameState[g].strips);
   if (activeHasPaper) {
