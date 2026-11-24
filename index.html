@@ -268,50 +268,6 @@ body.start-parked #rekke-buttons { display: none !important; }
 }
 .upload-gallery:active { color: var(--gold); }
 
-/* "Flere blokker i ett bilde" — a multi-block round (see setMultiScan). */
-.upload-multi {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 12px;
-  border: 1.5px solid var(--nav-line-2);
-  border-radius: 10px;
-  background: var(--nav-panel);
-  text-align: left;
-  font-family: inherit;
-  cursor: pointer;
-}
-.upload-multi[aria-pressed="true"] {
-  border-color: var(--gold);
-  background: rgba(227,165,58,0.1);
-}
-.upload-multi-box {
-  flex: 0 0 auto;
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  border: 1.5px solid var(--nav-line-2);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8rem;
-  color: transparent;
-}
-.upload-multi[aria-pressed="true"] .upload-multi-box {
-  border-color: var(--gold);
-  background: var(--gold);
-  color: var(--ink);
-}
-.upload-multi-txt { font-size: 0.7rem; line-height: 1.4; color: var(--nav-dim); }
-.upload-multi-txt b {
-  display: block;
-  font-family: var(--display);
-  font-size: 0.92rem;
-  letter-spacing: 0.04em;
-  color: var(--paper);
-  margin-bottom: 2px;
-}
 
 /* ── In-page camera (live viewfinder, no native camera app) ── */
 #camera-overlay {
@@ -393,8 +349,7 @@ body.start-parked #rekke-buttons { display: none !important; }
 /* Equal-width flanks keep the shutter optically centred no matter how wide
    the "Prosesser" button on the right grows. */
 .cam-side-slot { flex: 1 1 0; display: flex; align-items: center; min-width: 0; }
-/* AUTO above FLERE: two small toggles, the shutter still centred. */
-.cam-side-slot-left  { justify-content: flex-start; flex-direction: column; align-items: flex-start; gap: 7px; }
+.cam-side-slot-left  { justify-content: flex-start; }
 .cam-side-slot-right { justify-content: flex-end; }
 
 /* AUTO — the camera takes each sheet's photo itself (see autoShutter). */
@@ -410,9 +365,6 @@ body.start-parked #rekke-buttons { display: none !important; }
   cursor: pointer;
 }
 .cam-auto-btn[aria-pressed="true"] { background: var(--gold); color: var(--ink); border-color: var(--gold); }
-.cam-auto-btn:disabled { opacity: 0.3; cursor: default; }
-/* FLERE — several blocks side by side in one photo (see setMultiScan). */
-.cam-multi-btn { font-size: 0.7rem; padding: 8px 11px; }
 .cam-auto-status {
   position: absolute;
   left: 50%;
@@ -4077,14 +4029,6 @@ header { padding: 7px 13px; gap: 5px 7px; }
            camera isn't available (no getUserMedia / permission denied). -->
       <input type="file" id="file-input" accept="image/*" style="display:none">
       <button type="button" id="btn-pick-gallery" class="upload-gallery">📁 Velg fra galleri</button>
-      <!-- Flere blokker i ett bilde — see setMultiScan() -->
-      <button type="button" id="btn-multi-toggle" class="upload-multi" aria-pressed="false">
-        <span class="upload-multi-box">✓</span>
-        <span class="upload-multi-txt">
-          <b>Flere ark i ett bilde</b>
-          Legg arkene side om side — appen leser selv hvilket spill hvert ark er
-        </span>
-      </button>
       <div class="upload-or">eller</div>
       <button id="btn-generate-paper" class="pending-btn pending-btn-secondary" style="width:100%;font-size:0.95rem;">
         🎲 Generer tilfeldig ark
@@ -4117,8 +4061,6 @@ header { padding: 7px 13px; gap: 5px 7px; }
           <div class="cam-side-slot cam-side-slot-left">
             <button type="button" id="cam-auto" class="cam-auto-btn" aria-pressed="true"
                     title="Ta bildet automatisk når arket holdes stille">AUTO</button>
-            <button type="button" id="cam-multi" class="cam-auto-btn cam-multi-btn" aria-pressed="false"
-                    title="Flere blokker side om side i ett bilde">FLERE</button>
           </div>
           <button type="button" id="cam-shutter" aria-label="Ta bilde"></button>
           <div class="cam-side-slot cam-side-slot-right">
@@ -7707,6 +7649,7 @@ function restoreSession(opts = {}) {
   // Reset blocks array to match saved. The round's blocks are these objects,
   // so it cannot survive them.
   resetMultiBatch();
+  _multiUsed = new Set();
   blocks.length = 0;
   saved.blocks.forEach(blkData => {
     const blk = createEmptyBlock();
@@ -9530,17 +9473,6 @@ function initPhone() {
   });
   document.getElementById("cam-shutter").addEventListener("click", captureCamera);
 
-  // FLERE / "Flere blokker i ett bilde" — the same toggle in the camera and
-  // on the scan screen (see setMultiScan).
-  document.getElementById("cam-multi").addEventListener("click", () => setMultiScan(!_multiScan));
-  document.getElementById("btn-multi-toggle").addEventListener("click", () => {
-    setMultiScan(!_multiScan);
-    toast(_multiScan
-      ? "Flere blokker: legg dem side om side og ta ett bilde per spill"
-      : "Én blokk per bilde", "ok", 3000);
-  });
-  syncMultiBtns();
-
   // "Prosesser" inside the camera — send the queued shots to OCR without a
   // detour through the pending screen. Pressed after the last photo is taken.
   document.getElementById("cam-process").addEventListener("click", async () => {
@@ -10607,7 +10539,7 @@ let _activeScanCount = 0;
 const SCAN_CONCURRENCY = 4;
 const _scanQueue = [];
 let _scanRunning = 0;
-function enqueueScan(file, gameKey, blockIdx) {
+function enqueueScan(file, gameKey, blockIdx, opts) {
   const blk = blocks[blockIdx];
   if (!blk) return;
   blk._queued = (blk._queued || 0) + 1;
@@ -10618,7 +10550,7 @@ function enqueueScan(file, gameKey, blockIdx) {
   if (blk._scanAck)  delete blk._scanAck[gameKey];
   // Held by the block object, not its index: blocks can be removed (and the
   // rest shift down) while a photo waits its turn.
-  _scanQueue.push({ file, gameKey, blk });
+  _scanQueue.push({ file, gameKey, blk, opts });
   updateScanBadge();
   refreshScanWarning();
   pumpScanQueue();
@@ -10630,7 +10562,7 @@ function pumpScanQueue() {
     const bi = blocks.indexOf(job.blk);
     if (bi < 0) { updateScanBadge(); continue; }   // block was removed
     _scanRunning++;
-    processImage(job.file, job.gameKey, bi).catch(() => {}).finally(() => {
+    processImage(job.file, job.gameKey, bi, job.opts).catch(() => {}).finally(() => {
       _scanRunning--;
       updateScanBadge();
       pumpScanQueue();
@@ -10821,6 +10753,9 @@ function settleBlockScans(blk) {
 // scanning other blocks in parallel.
 async function processImage(file, targetGame, targetBlockIdx, opts) {
   const isBackground = (targetBlockIdx != null);
+  // An ark cut out of a photo of several is read as an ordinary single ark —
+  // never counted and cut up a second time.
+  const allowSplit = !(opts && opts.split === false);
   // Hold the block itself: indices shift when a block is removed mid-scan.
   const targetBlk = isBackground ? blocks[targetBlockIdx] : null;
   if (isBackground && !targetBlk) return;
@@ -10878,7 +10813,9 @@ async function processImage(file, targetGame, targetBlockIdx, opts) {
   try {
     // Resize image for API — max 1600px on longest side to keep tokens low
     setLabel("Forbereder bilde…");
-    const bitmap = await createImageBitmap(file);
+    // The same decode the cropper uses, so a photo with an orientation tag is
+    // turned the same way in both and the boxes mean what they say.
+    const bitmap = await decodeSheetBitmap(file);
     const MAX = 1600;
     let sendCanvas = document.createElement("canvas");
     const scale = Math.min(1, MAX / Math.max(bitmap.width, bitmap.height));
@@ -10891,18 +10828,7 @@ async function processImage(file, targetGame, targetBlockIdx, opts) {
 
     setLabel("Sender til Claude…");
 
-    const prompt = `This is a Norwegian 90-ball bingo ticket (bingoark). It has 6 strips stacked vertically, each identified by a 4-digit number printed in the left margin (e.g. "4201"). Each strip is a 3-row × 9-column grid holding exactly 15 numbers (5 per row); the other 12 cells are blank.
-
-Return a JSON array of exactly 6 strip objects in top-to-bottom order. Each object must have:
-- "id": the 4-digit strip identifier as a string
-- "rows": array of exactly 3 subarrays (row 0 = top row, row 2 = bottom row). Each subarray contains the 5 numbers that appear in that row, in any order.
-
-The sheet may be photographed at an angle, or lying on its side — read it whichever way it is turned. Answer with the JSON array and nothing else, even where you are unsure of a number; never answer with a sentence.
-
-Output raw JSON only — no prose, no markdown fences.
-
-Example:
-[{"id":"4201","rows":[[11,27,41,70,87],[9,24,37,53,63],[2,36,55,65,74]]},{"id":"4202","rows":[[14,22,34,42,86],[3,12,32,59,60],[26,46,68,77,89]]}, ...]`;
+    const prompt = buildScanPrompt(allowSplit);
 
     const response = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -10935,6 +10861,17 @@ Example:
     const raw  = data.content.find(b => b.type === "text")?.text || "";
 
     const parsed = parseStripsReply(raw, getGameName(targetGame || activeGame));
+
+    // Several arks in the one photo: the reply says where they are instead of
+    // what they hold. Cut them out and send each one back through the queue.
+    if (parsed && !Array.isArray(parsed) && Array.isArray(parsed.sheets)) {
+      if (!allowSplit) throw new Error("uventet svar fra lesingen");
+      setLabel("Deler opp bildet…");
+      const arks = await queueSheetsFromPhoto(
+        file, parsed, targetGame || activeGame, targetBlk);
+      if (arks) return;                 // handed on; nothing failed here
+      throw new Error("fant ikke arkene i bildet");
+    }
     if (!Array.isArray(parsed)) throw new Error("uventet svar fra lesingen");
 
     // Render into the target game slot. For background scans we write
@@ -12058,19 +11995,15 @@ function updateUploadTitle() {
   const sub   = document.getElementById("upload-sub");
   if (!title || !sub) return;
   const blockLabel = blocks.length > 1 ? ` (Blokk ${activeBlockIdx + 1})` : '';
-  if (_multiScan) {
-    const n = _multiBatch ? _multiBatch.length : 0;
-    title.textContent = "Skann flere ark i ett bilde";
-    sub.textContent = n
-      ? `${n} blokk${n === 1 ? '' : 'er'} i runden · legg frem neste spill og ta ett bilde til`
-      : "Legg arkene side om side og ta bildet — appen leser selv hvilket spill hvert ark er, og bildet kan tas på tvers";
-  } else if (gs.strips) {
+  if (gs.strips) {
     title.textContent = `Skann nytt ark (${getGameName(activeGame)}${blockLabel})`;
-    sub.textContent = "Trykk for å ta bilde av bingoarket for det aktive spillet";
   } else {
     title.textContent = `Skann ark — ${getGameName(activeGame)}${blockLabel}`;
-    sub.textContent = "Trykk for å ta bilde av bingoarket for det aktive spillet";
   }
+  const n = _multiBatch ? _multiBatch.length : 0;
+  sub.textContent = n > 1
+    ? `${n} blokker i runden · legg frem neste spill på alle og ta ett bilde`
+    : "Ett ark, eller flere side om side — appen finner selv ut hvor mange";
 
   // "Ferdig" shortcut — an escape hatch from the empty block the app opened
   // by itself after a scan batch, so it's shown on exactly that screen. On a
@@ -12080,8 +12013,7 @@ function updateUploadTitle() {
   if (finishBtn) {
     const anyPaper = blocks.some(blk =>
       getGameIds().some(g => blk.gameState[g] && blk.gameState[g].strips));
-    const autoOpened = (_autoOpenedBlockIdx === activeBlockIdx) ||
-                       (_multiScan && !!_multiBatch);
+    const autoOpened = (_autoOpenedBlockIdx === activeBlockIdx) || !!_multiBatch;
     finishBtn.style.display = (anyPaper && autoOpened) ? "block" : "none";
   }
 }
@@ -12165,10 +12097,8 @@ async function startCamStream() {
       // request makes the browser crop the top and bottom of the sensor, which
       // is what made the in-page view look far more zoomed-in than the phone's
       // own camera app. 4:3 gives back the full field of view.
-      // A round packs several sheets into one frame, so each sheet gets only
-      // a fraction of it — ask for everything the sensor will give.
-      width:  { ideal: _multiScan ? 4096 : 2048 },
-      height: { ideal: _multiScan ? 3072 : 1536 }
+      width:  { ideal: 2048 },
+      height: { ideal: 1536 }
     },
     audio: false
   });
@@ -12203,7 +12133,6 @@ async function openCamera() {
   confirm.innerHTML = "";
   renderCamThumbs();
   syncAutoBtn();
-  syncMultiBtns();
   updateCamHint();
   try {
     await startCamStream();
@@ -12409,9 +12338,7 @@ function autoKnownSheets() {
 }
 
 async function startAutoShutter() {
-  // A round shows the camera a row of sheets, none of them filling the
-  // frame: nothing for the on-phone reader to lock onto.
-  if (!_autoOn || _multiScan) return;
+  if (!_autoOn) return;
   const run = ++_autoRun;
   const video = document.getElementById('camera-video');
   setAutoStatus('Gjør klar automatisk bilde…');
@@ -12423,6 +12350,11 @@ async function startAutoShutter() {
     return;
   }
   let prevRows = null;
+  // When nothing has come of it for a while, the photo is probably not the
+  // one ark held still that AUTO waits for — several arks laid out on a
+  // table, most likely. The shutter takes those.
+  let since = Date.now();
+  const stuck = () => Date.now() - since > 7000;
   while (run === _autoRun) {
     // Back from the background with the camera stopped: start it again.
     if (streamEnded(_camStream)) {
@@ -12439,7 +12371,9 @@ async function startAutoShutter() {
     const frame = grabSheetFrame(still, null);
     if (keepClaimDigits(frame) < CLAIM_MIN_DIGITS) {
       prevRows = null;
-      setAutoStatus(`Hold ${getGameName(activeGame)}-arket foran kameraet`);
+      setAutoStatus(stuck()
+        ? 'Flere ark i bildet? Trykk utløseren'
+        : `Hold ${getGameName(activeGame)}-arket foran kameraet`);
       await new Promise(r => setTimeout(r, 80));
       continue;
     }
@@ -12467,7 +12401,9 @@ async function startAutoShutter() {
     }
     if (rows.length < AUTO_READY_ROWS) {
       prevRows = null;
-      setAutoStatus('Hold hele arket i bildet, stille og skarpt');
+      setAutoStatus(stuck()
+        ? 'Flere ark i bildet? Trykk utløseren'
+        : 'Hold hele arket i bildet, stille og skarpt');
       continue;
     }
     if (!prevRows || !sameSheetRows(prevRows, rows)) {
@@ -12482,6 +12418,7 @@ async function startAutoShutter() {
       setAutoStatus('');
       _autoLastRows = rows; _autoLastAt = Date.now();   // what rememberShotSheet keeps
       captureCamera(still);
+      since = Date.now();
       await new Promise(r => setTimeout(r, 700));
     } else if (pendingPhotos[activeGame]) {
       // This game already has a photo waiting (AUTO switched on after the
@@ -12502,10 +12439,7 @@ function stopAutoShutter() {
 function updateCamHint() {
   const hint = document.getElementById("cam-hint");
   if (!hint) return;
-  hint.textContent = _multiScan
-    ? 'Flere ark i ett bilde'
-    : `Ta bilde av ${getGameName(activeGame)}`;
-  refreshMultiStatus();
+  hint.textContent = `Ta bilde av ${getGameName(activeGame)}`;
 }
 
 // White shutter flash + a short haptic buzz — the unmistakable "photo taken".
@@ -12549,9 +12483,7 @@ function captureCamera(still) {
   canvas.toBlob((blob) => {
     if (!blob) { shutter.disabled = false; return; }
     const file = new File([blob], `scan-${Date.now()}.jpg`, { type: "image/jpeg" });
-    // In a round the paper says which game it is, so the shot is just "the
-    // photo" until the reader has been over it.
-    const savedName = _multiScan ? 'Bildet' : getGameName(activeGame);
+    const savedName = getGameName(activeGame);
     pendingPhotos[activeGame] = file;
     // Remember what this sheet looked like, so the auto-shutter never takes
     // it again for another game (see autoKnownSheets).
@@ -12568,7 +12500,7 @@ function captureCamera(still) {
       updateUploadTitle();
       updateCamHint();
       showCamConfirm(savedName, getGameName(nextEmpty));
-    } else if (_autoOn && !_multiScan) {
+    } else if (_autoOn) {
       // Auto: the block is complete, so send it off and carry straight on
       // with the next block's first sheet — no stop between blocks.
       processAllPending();
@@ -12577,10 +12509,6 @@ function captureCamera(still) {
       updateUploadTitle();
       updateCamHint();
       showCamConfirm(savedName, `Blokk ${activeBlockIdx + 1} · ${getGameName(activeGame)}`);
-    } else if (_multiScan) {
-      // In a round the games fill up as soon as one photo of a block's arks
-      // has been taken — the next photo is simply the next block.
-      showCamConfirm(savedName, 'en blokk til, eller trykk Prosesser');
     } else {
       // Every game has a photo queued. Stay in the camera so the user can
       // review the thumbnails, retake anything that came out wrong, and then
@@ -12628,7 +12556,6 @@ function showPendingScreen() {
 // the photo is straightened before anything is cut out of it, and the sheets
 // are ordered in the straightened frame: left to right as they lie, whichever
 // way the phone was held.
-let _multiScan = (() => { try { return localStorage.getItem('bv_multiScan') === '1'; } catch (e) { return false; } })();
 // The blocks this round's photos map onto, held as block OBJECTS (indices
 // shift when a block is removed). Set by the round's first photo.
 let _multiBatch = null;
@@ -12638,55 +12565,16 @@ let _multiShotGames = new Set();
 // "<place in the round>:<game>" for every ark sent off this round, so a photo
 // that would land on top of one can be spotted as the next block instead.
 let _multiSent = new Set();
-// How many sheets the round's first photo held — passed to the layout pass
-// as what to expect in the ones after it.
-let _multiSheetCount = 0;
+// Every block a photo's arks have been sent to. A block with arks on the way
+// is not a free block for the next photo, even before they have come back —
+// without this, two photos read at the same time both land on it.
+let _multiUsed = new Set();
 
 // Start a fresh round: the next photo decides how many blocks it has.
 function resetMultiBatch() {
   _multiBatch = null;
   _multiShotGames = new Set();
   _multiSent = new Set();
-  _multiSheetCount = 0;
-}
-
-function setMultiScan(on) {
-  if (_multiScan === !!on) return;
-  _multiScan = !!on;
-  try { localStorage.setItem('bv_multiScan', _multiScan ? '1' : '0'); } catch (e) {}
-  resetMultiBatch();
-  syncMultiBtns();
-  updateUploadTitle();
-  renderCamThumbs();
-  // AUTO watches for ONE sheet filling the frame, which a row of blocks never
-  // does — in a round the shutter is the user's.
-  if (_multiScan) stopAutoShutter();
-  else if (_autoOn) startAutoShutter();
-  else setAutoStatus('');
-  updateCamHint();
-  // Each sheet only gets a fraction of the frame in a round, so the stream is
-  // reopened at whatever the sensor will give (see startCamStream).
-  const cam = document.getElementById('camera-overlay');
-  if (cam && cam.style.display === 'flex') {
-    stopCamStream();
-    startCamStream().catch(() => closeCamera());
-  }
-}
-
-function syncMultiBtns() {
-  [document.getElementById('cam-multi'), document.getElementById('btn-multi-toggle')]
-    .forEach(el => { if (el) el.setAttribute('aria-pressed', _multiScan ? 'true' : 'false'); });
-  const auto = document.getElementById('cam-auto');
-  if (auto) auto.disabled = _multiScan;
-}
-
-// The camera's status line, which AUTO is not using in a round.
-function refreshMultiStatus() {
-  if (!_multiScan) return;
-  const n = _multiBatch ? _multiBatch.length : 0;
-  setAutoStatus(n
-    ? n + ' blokk' + (n === 1 ? '' : 'er') + ' i runden — legg frem neste spill'
-    : 'Legg arkene side om side og ta bildet');
 }
 
 // The next game with no ark yet: queued, read, or — in a round — already
@@ -12695,12 +12583,15 @@ function nextUnshotGame() {
   return getGameIds().find(g =>
     !pendingPhotos[g] &&
     !(gameState[g] && gameState[g].strips) &&
-    !(_multiScan && _multiShotGames.has(g)));
+    !_multiShotGames.has(g));
+}
+
+function blockHasNoPapers(blk) {
+  return !!blk && getGameIds().every(g => !(blk.gameState[g] && blk.gameState[g].strips));
 }
 
 function blockIsEmptyIdle(blk) {
-  return !!blk && !blockScanBusy(blk) &&
-    getGameIds().every(g => !(blk.gameState[g] && blk.gameState[g].strips));
+  return blockHasNoPapers(blk) && !blockScanBusy(blk);
 }
 
 // A new empty block without addBlock's switch-and-toast: a round adds
@@ -12715,27 +12606,31 @@ function appendBlock() {
 // photo turned out to hold; once a round has its blocks the count has to
 // match, or it is the photo that is wrong (a block out of frame), not the
 // blocks — the caller says so and the photo is retaken.
-function multiBatchBlocks(n) {
+function multiBatchBlocks(n, preferBlk) {
   if (_multiBatch) {
     const live = _multiBatch.filter(b => blocks.indexOf(b) >= 0);
     if (live.length !== _multiBatch.length) _multiBatch = live.length ? live : null;
   }
   if (_multiBatch) return _multiBatch.length === n ? _multiBatch : null;
-  // Fill the round from blocks that are standing empty — the one being
-  // scanned into first — before making new ones, so a round never leaves a
-  // row of blank tabs behind.
+  // Fill the round from blocks that are standing empty — the one the photo
+  // was taken on first — before making new ones, so a round never leaves a
+  // row of blank tabs behind. That block's own scan is still running (it is
+  // this photo), so being busy is no reason to pass it over; arks already on
+  // their way to it are.
   const take = [];
-  if (blockIsEmptyIdle(blocks[activeBlockIdx])) take.push(blocks[activeBlockIdx]);
+  const first = preferBlk && blocks.indexOf(preferBlk) >= 0 ? preferBlk : blocks[activeBlockIdx];
+  if (blockHasNoPapers(first) && !_multiUsed.has(first)) take.push(first);
   blocks.forEach(blk => {
-    if (take.length < n && !take.includes(blk) && blockIsEmptyIdle(blk)) take.push(blk);
+    if (take.length < n && !take.includes(blk) &&
+        blockIsEmptyIdle(blk) && !_multiUsed.has(blk)) take.push(blk);
   });
   while (take.length < n) take.push(appendBlock());
+  take.forEach(blk => _multiUsed.add(blk));
   _multiBatch = take;
   return take;
 }
 
 // ── Cutting one photo into its sheets ─────────────────────────
-const SHEET_SPLIT_MAX = 1800;   // long side sent to the layout pass
 const SHEET_CROP_MAX  = 1800;   // long side of each sheet cut out of the photo
 const SHEET_CROP_PAD  = 0.05;   // air kept around a sheet, as a share of it
 const SHEET_MAX_IN_SHOT = 10;   // more than this is a misread, not a round
@@ -12918,6 +12813,54 @@ function parseStripsReply(raw, where) {
   throw new Error(clean ? 'uventet svar fra lesingen' : 'tomt svar fra lesingen');
 }
 
+// What the reader is asked of a photo. A photo of one ark comes back as its
+// 6 strips; a photo with several arks laid out comes back as where they are,
+// and those are cut out and sent through one at a time (see
+// queueSheetsFromPhoto). Asking both in the one call is what lets the app
+// work out for itself how many arks are in front of it without costing a
+// single ark anything: counting is free when the answer is "one".
+// `allowSplit` is false for the cut-out arks themselves — whatever they come
+// back as, they are never cut up again.
+const SHEET_SHAPE = `A Norwegian 90-ball bingo sheet (bingoark) is a tall portrait page with 6 strips stacked one above another, each identified by a 4-digit control number printed sideways in its left margin (e.g. "4201"). Each strip is a 3-row × 9-column grid holding exactly 15 numbers (5 per row); the other 12 cells are blank.`;
+
+const SHEET_READ_ONE = `Return a JSON array of exactly 6 strip objects in top-to-bottom order. Each object must have:
+- "id": the 4-digit strip identifier as a string
+- "rows": array of exactly 3 subarrays (row 0 = top row, row 2 = bottom row). Each subarray contains the 5 numbers that appear in that row, in any order.
+
+Example:
+[{"id":"4201","rows":[[11,27,41,70,87],[9,24,37,53,63],[2,36,55,65,74]]},{"id":"4202","rows":[[14,22,34,42,86],[3,12,32,59,60],[26,46,68,77,89]]}, ...]
+
+The sheet may be photographed at an angle, or lying on its side — read it whichever way it is turned. Answer with the JSON and nothing else, even where you are unsure of a number; never answer with a sentence.`;
+
+function buildScanPrompt(allowSplit) {
+  if (!allowSplit) {
+    return `This is a photo of one Norwegian 90-ball bingo sheet (bingoark).
+
+${SHEET_SHAPE}
+
+${SHEET_READ_ONE}
+
+Output raw JSON only — no prose, no markdown fences.`;
+  }
+  return `This is a photo of Norwegian 90-ball bingo paper.
+
+${SHEET_SHAPE}
+
+First count the sheets in the photo.
+
+ONE SHEET — read it.
+${SHEET_READ_ONE}
+
+SEVERAL SHEETS lying next to each other — do NOT read them. Say where they are instead, as a JSON object:
+{"rotate":270,"idEdge":"top","sheets":[{"x":0.01,"y":0.04,"w":0.19,"h":0.92,"spill":1}]}
+- "rotate": the turn CLOCKWISE, in degrees (0, 90, 180 or 270), that makes the numbers inside the grid cells read upright. Turned that way every sheet stands taller than it is wide, its 6 strips stacked one above another. Do NOT judge this by the 4-digit control numbers: they are printed sideways in the margin, so they read upright exactly when the sheet itself does not.
+- "idEdge": which edge of the photo the 4-digit control numbers run along, in the photo as given to you: "left", "right", "top" or "bottom". (On an upright sheet they run down its left-hand side.)
+- "sheets": one entry per sheet, in any order. "x","y","w","h" are its bounding box in the photo EXACTLY AS GIVEN TO YOU — do not rotate the coordinates — as fractions of the photo's width and height, "x","y" being the top-left corner. The box must hold the whole sheet (all 6 strips and the control numbers along its edge) and as little of the neighbouring sheets as possible. "spill" is which game the sheet is, 1 to 4, printed as "Spill N" along one edge of it; the sheets are colour-coded as well (Spill 1 blue, Spill 2 yellow, Spill 3 pink, Spill 4 white or grey). Use null for "spill" if you cannot tell.
+Ignore anything that is not a bingo sheet, and ignore a sheet of which only a narrow sliver is in the photo.
+
+Output raw JSON only — no prose, no markdown fences.`;
+}
+
 function getScanApiKey() {
   const el = document.getElementById('apikey-input');
   const typed = el ? el.value.trim() : '';
@@ -12926,19 +12869,16 @@ function getScanApiKey() {
   return typed || stored;
 }
 
-// Where the sheets are in this photo, and which way up it is. A cheap pass
-// on a small copy: it only has to find the pages, not read them. Each sheet
-// is then cut out at full resolution and read by the ordinary scanner, so a
-// round is as accurate as scanning the arks one by one — as long as the
-// photo has the pixels to spare.
-// `expect` (0 = unknown) is how many sheets the round's first photo held,
-// which is worth telling the reader: a block half out of frame is then one it
-// says is missing rather than one it quietly leaves out.
-// Each sheet comes back with the game printed on it, so the arks go where the
-// paper says and not where the camera happened to be pointed.
-async function splitSheetsInPhoto(file, expect) {
-  const apiKey = getScanApiKey();
-  if (!apiKey) throw new Error('mangler API-nøkkel');
+// The boxes a photo's reply gave, cut out of the photo at full size. The
+// photo is straightened first, so every ark comes out standing up — the way
+// the scanner expects to be handed one.
+async function cropSheetsFromLayout(file, layout) {
+  const boxes = (Array.isArray(layout.sheets) ? layout.sheets : [])
+    .map(b => ({ x: Number(b.x), y: Number(b.y), w: Number(b.w), h: Number(b.h),
+                 game: gameFromSpill(b.spill) }))
+    .filter(b => [b.x, b.y, b.w, b.h].every(Number.isFinite) && b.w > 0.02 && b.h > 0.02);
+  if (!boxes.length) return [];
+  if (boxes.length > SHEET_MAX_IN_SHOT) throw new Error('fant ' + boxes.length + ' ark');
 
   const bitmap = await decodeSheetBitmap(file);
   const full = document.createElement('canvas');
@@ -12946,150 +12886,55 @@ async function splitSheetsInPhoto(file, expect) {
   full.getContext('2d').drawImage(bitmap, 0, 0);
   if (bitmap.close) { try { bitmap.close(); } catch (e) {} }
 
-  const small = document.createElement('canvas');
-  const k = Math.min(1, SHEET_SPLIT_MAX / Math.max(full.width, full.height));
-  small.width  = Math.max(1, Math.round(full.width * k));
-  small.height = Math.max(1, Math.round(full.height * k));
-  small.getContext('2d').drawImage(full, 0, 0, small.width, small.height);
-  const b64 = small.toDataURL('image/jpeg', 0.9).split(',')[1];
-
-  const prompt = `This photo shows Norwegian 90-ball bingo sheets (bingoark) lying next to each other on a table. Each sheet is one game out of a player's block: a tall portrait page with 6 strips stacked one above another, every strip a 3-row × 9-column grid of numbers.
-${expect ? `There should be ${expect} sheets in this photo.\n` : ''}
-WHICH WAY UP THE PHOTO IS
-The sheets may lie upright in the photo, or turned by 90, 180 or 270 degrees — a row of tall sheets only fits a photo held sideways. Judge this by the numbers INSIDE the grid cells. Do NOT judge it by the 4-digit control numbers: those are printed sideways in each strip's margin, so they read upright exactly when the sheet itself does not.
-
-Return raw JSON only — no prose, no markdown fences:
-{"rotate":270,"idEdge":"top","sheets":[{"x":0.01,"y":0.04,"w":0.19,"h":0.92,"spill":1}]}
-
-"rotate": the turn CLOCKWISE, in degrees (0, 90, 180 or 270), that makes the numbers in the grid cells read upright. Turned that way every sheet must stand taller than it is wide, with its 6 strips stacked one above another.
-"idEdge": which edge of the photo the 4-digit control numbers run along, in the photo as given to you: "left", "right", "top" or "bottom". (On an upright sheet they run down its left-hand side.)
-"sheets": one entry per bingo sheet, in any order:
-  "x","y","w","h": the sheet's bounding box in the photo EXACTLY AS GIVEN TO YOU — do not rotate the coordinates — as fractions of the photo's width and height, "x","y" being the top-left corner. The box must hold the whole sheet (all 6 strips and the control numbers along its edge) and as little of the neighbouring sheets as possible.
-  "spill": which game the sheet is, 1 to 4, printed as "Spill N" along one edge of it. The sheets are colour-coded as well: Spill 1 blue, Spill 2 yellow, Spill 3 pink, Spill 4 white or grey. Use null if you cannot tell.
-Ignore anything that is not a bingo sheet, and ignore a sheet of which only a narrow sliver is in the photo.`;
-
-  const response = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: SCAN_MODEL,
-      max_tokens: 1000,
-      messages: [{
-        role: 'user',
-        content: [
-          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-          { type: 'text',  text: prompt },
-        ],
-      }],
-    }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error((err && err.error && err.error.message) || ('API-feil ' + response.status));
-  }
-  const data = await response.json();
-  const raw = (data.content.find(b => b.type === 'text') || {}).text || '';
-  const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
-
-  const boxes = (Array.isArray(parsed.sheets) ? parsed.sheets : [])
-    .map(b => ({ x: Number(b.x), y: Number(b.y), w: Number(b.w), h: Number(b.h),
-                 game: gameFromSpill(b.spill) }))
-    .filter(b => [b.x, b.y, b.w, b.h].every(Number.isFinite) && b.w > 0.02 && b.h > 0.02);
-  if (!boxes.length) return [];
-  if (boxes.length > SHEET_MAX_IN_SHOT) throw new Error('fant ' + boxes.length + ' ark');
-
-  const turn = pickSheetTurn(boxes, parsed.rotate, parsed.idEdge, full.width, full.height);
+  const turn = pickSheetTurn(boxes, layout.rotate, layout.idEdge, full.width, full.height);
   const upright = rotateCanvas(full, turn);
   const ordered = orderSheetBoxes(boxes.map(b =>
     Object.assign(rotateSheetBox(b, turn), { game: b.game })));
-  return Promise.all(ordered.map(async (b, i) => ({ file: await cropSheetFile(upright, b, i), game: b.game })));
+  return Promise.all(ordered.map(async (b, i) =>
+    ({ file: await cropSheetFile(upright, b, i), game: b.game })));
 }
 
-// A round's photos: one ark per block in each, cut up and handed to the
-// ordinary scan queue, block by block in the order they lie.
-async function processMultiPending(scans) {
-  const order = getGameIds();
-  scans.sort((a, b) => order.indexOf(a.gameKey) - order.indexOf(b.gameKey));
+// A photo the reader counted several arks in. Cut them out, work out which
+// block and which game each one is, and send them back through the same
+// queue one at a time — a cut-out ark is just an ordinary photo of an ark.
+// Returns how many went off.
+async function queueSheetsFromPhoto(file, layout, fallbackGame, preferBlk) {
+  const sheets = await cropSheetsFromLayout(file, layout);
+  if (!sheets.length) return 0;
 
-  document.getElementById('phone-pending').style.display    = 'none';
-  document.getElementById('phone-upload').style.display     = 'none';
-  document.getElementById('phone-paper').style.display      = 'none';
-  document.getElementById('phone-processing').style.display = 'flex';
-  const label = t => {
-    const el = document.getElementById('proc-label');
-    if (el) el.textContent = t;
-  };
+  // Where each ark goes is what the paper says, with the camera's own game as
+  // the fallback when the reader couldn't make the label out.
+  const groups = groupSheetsByGame(sheets, fallbackGame);
+  if (roundWouldClash(groups)) resetMultiBatch();
 
-  let added = 0, sent = 0, firstBlk = null, arks = 0;
-  for (const s of scans) {
-    const gname = getGameName(s.gameKey);
-    label(scans.length > 1 ? 'Finner arkene — bilde ' + (scans.indexOf(s) + 1) + ' av ' + scans.length + '…'
-                           : 'Finner arkene i bildet…');
-    let sheets;
-    try {
-      sheets = await splitSheetsInPhoto(s.file, _multiSheetCount);
-    } catch (err) {
-      console.error(err);
-      toast('⚠ ' + gname + ': fant ikke arkene (' +
-            String((err && err.message) || err).slice(0, 40) + ') — ta bildet på nytt', 'err', 7000);
-      continue;
-    }
-    if (!sheets.length) {
-      toast('⚠ ' + gname + ': fant ingen ark i bildet — ta det på nytt med arkene side om side', 'err', 7000);
-      continue;
-    }
-    // Where each ark goes is what the paper says, with the camera's own game
-    // as the fallback when the reader couldn't make the label out.
-    const groups = groupSheetsByGame(sheets, s.gameKey);
-    if (roundWouldClash(groups)) resetMultiBatch();
-
-    const need = Math.max(...groups.map(gr => gr.sheets.length));
-    const before = blocks.length;
-    const target = multiBatchBlocks(need);
-    if (!target) {
-      toast('⚠ ' + gname + ': bildet viser ' + need + ' blokk' + (need === 1 ? '' : 'er') +
-            ', men runden har ' + _multiBatch.length +
-            ' — ta bildet på nytt med alle i bildet', 'err', 9000);
-      continue;
-    }
-    added += blocks.length - before;
-    if (!_multiSheetCount) _multiSheetCount = sheets.length;
-    if (!firstBlk) firstBlk = target[0];
-    groups.forEach(gr => gr.sheets.forEach((sh, i) => {
-      const blk = target[i];
-      const bi = blk ? blocks.indexOf(blk) : -1;
-      if (bi < 0) return;
-      enqueueScan(sh.file, gr.game, bi);
-      _multiShotGames.add(gr.game);
-      _multiSent.add(i + ':' + gr.game);
-      arks++;
-    }));
-    sent++;
+  const need = Math.max(...groups.map(gr => gr.sheets.length));
+  const before = blocks.length;
+  const target = multiBatchBlocks(need, preferBlk);
+  if (!target) {
+    toast('⚠ Bildet viser ' + need + ' blokk' + (need === 1 ? '' : 'er') +
+          ', men runden har ' + _multiBatch.length +
+          ' — ta bildet på nytt med alle i bildet', 'err', 9000);
+    return 0;
   }
 
-  if (added) { publishUserName(); refreshBlockTabs(); saveSession(); }
-  document.getElementById('phone-processing').style.display = 'none';
+  let arks = 0;
+  groups.forEach(gr => gr.sheets.forEach((sh, i) => {
+    const blk = target[i];
+    const bi = blk ? blocks.indexOf(blk) : -1;
+    if (bi < 0) return;
+    enqueueScan(sh.file, gr.game, bi, { split: false });
+    _multiShotGames.add(gr.game);
+    _multiSent.add(i + ':' + gr.game);
+    arks++;
+  }));
 
-  // Back on the scan screen, on the first block this batch filled and the next
-  // ark it still needs, so the next shot is one tap away.
-  if (firstBlk) {
-    const bi = blocks.indexOf(firstBlk);
-    if (bi >= 0 && bi !== activeBlockIdx) switchBlock(bi);
-  }
-  const next = nextUnshotGame();
-  if (next) { activeGame = next; refreshGameTabs(); }
-  document.getElementById('phone-paper').style.display  = 'none';
-  document.getElementById('phone-upload').style.display = 'flex';
-  updateUploadTitle();
-  refreshScanWarning();
+  if (blocks.length > before) { publishUserName(); refreshBlockTabs(); saveSession(); }
   if (arks) {
-    toast('✓ ' + arks + ' ark sendt til lesing', 'ok', 3500);
+    toast('✓ Fant ' + sheets.length + ' ark i bildet' +
+          (target.length > 1 ? ' · ' + target.length + ' blokker' : ''), 'ok', 4000);
+    updateUploadTitle();
   }
+  return arks;
 }
 
 async function processAllPending() {
@@ -13104,10 +12949,6 @@ async function processAllPending() {
   // block. We hold onto the file refs locally for the parallel scans.
   const scans = entries.map(([gameKey, file]) => ({ gameKey, file }));
   scans.forEach(s => { delete pendingPhotos[s.gameKey]; });
-
-  // A multi-block round: every photo holds one ark per block, so it is cut
-  // into one file per sheet first and those go to their own blocks.
-  if (_multiScan) return processMultiPending(scans);
 
   // Into the scan queue: they run in parallel up to a cap, so a second
   // block can be scanned while this one is still being read.
