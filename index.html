@@ -4081,8 +4081,8 @@ header { padding: 7px 13px; gap: 5px 7px; }
       <button type="button" id="btn-multi-toggle" class="upload-multi" aria-pressed="false">
         <span class="upload-multi-box">✓</span>
         <span class="upload-multi-txt">
-          <b>Flere blokker i ett bilde</b>
-          Ett bilde per spill i stedet for ett per ark
+          <b>Flere ark i ett bilde</b>
+          Legg arkene side om side — appen leser selv hvilket spill hvert ark er
         </span>
       </button>
       <div class="upload-or">eller</div>
@@ -10897,6 +10897,8 @@ Return a JSON array of exactly 6 strip objects in top-to-bottom order. Each obje
 - "id": the 4-digit strip identifier as a string
 - "rows": array of exactly 3 subarrays (row 0 = top row, row 2 = bottom row). Each subarray contains the 5 numbers that appear in that row, in any order.
 
+The sheet may be photographed at an angle, or lying on its side — read it whichever way it is turned. Answer with the JSON array and nothing else, even where you are unsure of a number; never answer with a sentence.
+
 Output raw JSON only — no prose, no markdown fences.
 
 Example:
@@ -10932,10 +10934,8 @@ Example:
     const data = await response.json();
     const raw  = data.content.find(b => b.type === "text")?.text || "";
 
-    // Strip any accidental markdown fences
-    const clean = raw.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
-    if (!Array.isArray(parsed)) throw new Error("Expected array of strips");
+    const parsed = parseStripsReply(raw, getGameName(targetGame || activeGame));
+    if (!Array.isArray(parsed)) throw new Error("uventet svar fra lesingen");
 
     // Render into the target game slot. For background scans we write
     // straight to the captured gs so block-switches don't corrupt anything.
@@ -12060,10 +12060,10 @@ function updateUploadTitle() {
   const blockLabel = blocks.length > 1 ? ` (Blokk ${activeBlockIdx + 1})` : '';
   if (_multiScan) {
     const n = _multiBatch ? _multiBatch.length : 0;
-    title.textContent = `Skann ${getGameName(activeGame)} — alle blokkene`;
+    title.textContent = "Skann flere ark i ett bilde";
     sub.textContent = n
-      ? `${n} blokker i runden · flytt alle til ${getGameName(activeGame)} og ta ett bilde`
-      : "Legg blokkene side om side og ta ett bilde — bildet kan tas på tvers";
+      ? `${n} blokk${n === 1 ? '' : 'er'} i runden · legg frem neste spill og ta ett bilde til`
+      : "Legg arkene side om side og ta bildet — appen leser selv hvilket spill hvert ark er, og bildet kan tas på tvers";
   } else if (gs.strips) {
     title.textContent = `Skann nytt ark (${getGameName(activeGame)}${blockLabel})`;
     sub.textContent = "Trykk for å ta bilde av bingoarket for det aktive spillet";
@@ -12503,7 +12503,7 @@ function updateCamHint() {
   const hint = document.getElementById("cam-hint");
   if (!hint) return;
   hint.textContent = _multiScan
-    ? `Alle blokkene · ${getGameName(activeGame)}`
+    ? 'Flere ark i ett bilde'
     : `Ta bilde av ${getGameName(activeGame)}`;
   refreshMultiStatus();
 }
@@ -12549,7 +12549,9 @@ function captureCamera(still) {
   canvas.toBlob((blob) => {
     if (!blob) { shutter.disabled = false; return; }
     const file = new File([blob], `scan-${Date.now()}.jpg`, { type: "image/jpeg" });
-    const savedName = getGameName(activeGame);
+    // In a round the paper says which game it is, so the shot is just "the
+    // photo" until the reader has been over it.
+    const savedName = _multiScan ? 'Bildet' : getGameName(activeGame);
     pendingPhotos[activeGame] = file;
     // Remember what this sheet looked like, so the auto-shutter never takes
     // it again for another game (see autoKnownSheets).
@@ -12575,6 +12577,10 @@ function captureCamera(still) {
       updateUploadTitle();
       updateCamHint();
       showCamConfirm(savedName, `Blokk ${activeBlockIdx + 1} · ${getGameName(activeGame)}`);
+    } else if (_multiScan) {
+      // In a round the games fill up as soon as one photo of a block's arks
+      // has been taken — the next photo is simply the next block.
+      showCamConfirm(savedName, 'en blokk til, eller trykk Prosesser');
     } else {
       // Every game has a photo queued. Stay in the camera so the user can
       // review the thumbnails, retake anything that came out wrong, and then
@@ -12629,11 +12635,19 @@ let _multiBatch = null;
 // Games already sent off for this round. A photo on its way to the reader
 // has no strips yet, so without this the camera would offer Spill 1 again.
 let _multiShotGames = new Set();
+// "<place in the round>:<game>" for every ark sent off this round, so a photo
+// that would land on top of one can be spotted as the next block instead.
+let _multiSent = new Set();
+// How many sheets the round's first photo held — passed to the layout pass
+// as what to expect in the ones after it.
+let _multiSheetCount = 0;
 
 // Start a fresh round: the next photo decides how many blocks it has.
 function resetMultiBatch() {
   _multiBatch = null;
   _multiShotGames = new Set();
+  _multiSent = new Set();
+  _multiSheetCount = 0;
 }
 
 function setMultiScan(on) {
@@ -12671,8 +12685,8 @@ function refreshMultiStatus() {
   if (!_multiScan) return;
   const n = _multiBatch ? _multiBatch.length : 0;
   setAutoStatus(n
-    ? n + ' blokker i runden — vis ' + getGameName(activeGame) + ' på alle'
-    : 'Legg blokkene side om side — alle på ' + getGameName(activeGame));
+    ? n + ' blokk' + (n === 1 ? '' : 'er') + ' i runden — legg frem neste spill'
+    : 'Legg arkene side om side og ta bildet');
 }
 
 // The next game with no ark yet: queued, read, or — in a round — already
@@ -12721,7 +12735,7 @@ function multiBatchBlocks(n) {
 }
 
 // ── Cutting one photo into its sheets ─────────────────────────
-const SHEET_SPLIT_MAX = 1400;   // long side sent to the layout pass
+const SHEET_SPLIT_MAX = 1800;   // long side sent to the layout pass
 const SHEET_CROP_MAX  = 1800;   // long side of each sheet cut out of the photo
 const SHEET_CROP_PAD  = 0.05;   // air kept around a sheet, as a share of it
 const SHEET_MAX_IN_SHOT = 10;   // more than this is a misread, not a round
@@ -12763,6 +12777,80 @@ function rotateSheetBox(b, deg) {
     x: Math.min(ax, bx), y: Math.min(ay, by),
     w: Math.abs(bx - ax), h: Math.abs(by - ay),
   };
+}
+
+// Which turn stands the sheets up. The reader is asked twice over — once for
+// the turn that makes the cell numbers read upright, once for the edge the
+// control numbers run along — because the one cue that catches the eye in
+// these photos is the worst one: the 4-digit control numbers are printed
+// sideways in the margin, so they read upright exactly when the sheet is on
+// its side. A bingo ark is a tall page, so the answer that stands the sheets
+// on end is the one taken, whichever of the two said it.
+const SHEET_ID_EDGE_TURN = { left: 0, top: 270, right: 180, bottom: 90 };
+
+function sheetTurnStandsUp(boxes, turn, w, h) {
+  const swap = (turn === 90 || turn === 270);
+  const cw = swap ? h : w, ch = swap ? w : h;
+  const r = boxes.map(b => rotateSheetBox(b, turn))
+                 .map(b => (b.w * cw) / Math.max(1, b.h * ch))
+                 .sort((a, b) => a - b);
+  return r[r.length >> 1] < 0.95;   // the middling sheet taller than it is wide
+}
+
+function pickSheetTurn(boxes, rotate, idEdge, w, h) {
+  const idTurn = SHEET_ID_EDGE_TURN[String(idEdge || '').toLowerCase()];
+  const rotTurn = [0, 90, 180, 270].includes(Number(rotate)) ? Number(rotate) : 0;
+  const cands = [];
+  const add = t => { t = ((t % 360) + 360) % 360; if (!cands.includes(t)) cands.push(t); };
+  if (idTurn != null) add(idTurn);
+  add(rotTurn);
+  if (idTurn != null) { add(idTurn + 90); add(idTurn + 270); }
+  add(rotTurn + 90); add(rotTurn + 270); add(rotTurn + 180);
+  return cands.find(t => sheetTurnStandsUp(boxes, t, w, h)) || cands[0];
+}
+
+// "Spill 3" on the paper → the game it belongs to. Matched by name first, so
+// a renamed or manual game list still lands right.
+function gameFromSpill(n) {
+  const k = Number(n);
+  if (!Number.isInteger(k) || k < 1) return null;
+  const byName = gameList.find(g => new RegExp('(^|\\D)' + k + '\\s*$').test(g.name || ''));
+  if (byName) return byName.id;
+  return getGameIds()[k - 1] || null;
+}
+
+// Sheets of the SAME game lying next to each other are different blocks; a
+// photo holding several games holds one block's arks. A photo where the game
+// couldn't be read off every sheet goes to the game the camera was on, as it
+// did before the paper was asked.
+function groupSheetsByGame(sheets, fallbackGame) {
+  const one = [{ game: fallbackGame, sheets }];
+  if (!sheets.every(sh => sh.game)) return one;
+  const out = [];
+  sheets.forEach(sh => {
+    let gr = out.find(g => g.game === sh.game);
+    if (!gr) out.push(gr = { game: sh.game, sheets: [] });
+    gr.sheets.push(sh);
+  });
+  // Blocks on a table make an even layout: every game that is there is there
+  // once per block. Anything ragged is a label read wrong, and putting an ark
+  // on the wrong game is worse than putting it where the camera was pointed —
+  // that paper can never win, and nobody finds out until mid-game.
+  if (out.some(gr => gr.sheets.length !== out[0].sheets.length)) return one;
+  const ids = getGameIds();
+  return out.sort((a, b) => ids.indexOf(a.game) - ids.indexOf(b.game));
+}
+
+// Would this photo land on arks the round has already read? Then it is the
+// next block on the table, not a retake of one that failed — it gets a round
+// of its own and the blocks already scanned are left alone.
+function roundWouldClash(groups) {
+  if (!_multiBatch) return false;
+  return groups.every(gr => gr.sheets.every((_, i) => {
+    const blk = _multiBatch[i];
+    return blk && _multiSent.has(i + ':' + gr.game) &&
+           !(blk._scanFail && blk._scanFail[gr.game]);
+  }));
 }
 
 // Reading order in the straightened photo: top band first, left to right
@@ -12808,6 +12896,28 @@ function cropSheetFile(canvas, box, i) {
   }, 'image/jpeg', 0.95));
 }
 
+// The reader answers with JSON — except when it doesn't. A sheet it thinks
+// it cannot read comes back as a sentence, and so does one with an
+// explanation in front of the array; both used to surface as "JSON.parse:
+// unexpected character", which tells the user nothing and tells us less.
+// Dig the array out when it is in there, and when it isn't, keep the reply in
+// the error log (bvErrorLog.get()) so the next one can be looked at.
+function parseStripsReply(raw, where) {
+  const clean = String(raw || '').replace(/```json|```/g, '').trim();
+  try { return JSON.parse(clean); } catch (e) {}
+  const i = clean.indexOf('['), j = clean.lastIndexOf(']');
+  if (i >= 0 && j > i) {
+    try { return JSON.parse(clean.slice(i, j + 1)); } catch (e) {}
+  }
+  console.warn('[BV] uleselig svar fra lesingen', where || '', clean.slice(0, 300));
+  if (window.bvErrorLog) {
+    window.bvErrorLog.record('scan', 'uleselig svar fra lesingen', '', {
+      where: where || '', reply: clean.slice(0, 500),
+    });
+  }
+  throw new Error(clean ? 'uventet svar fra lesingen' : 'tomt svar fra lesingen');
+}
+
 function getScanApiKey() {
   const el = document.getElementById('apikey-input');
   const typed = el ? el.value.trim() : '';
@@ -12821,9 +12931,11 @@ function getScanApiKey() {
 // is then cut out at full resolution and read by the ordinary scanner, so a
 // round is as accurate as scanning the arks one by one — as long as the
 // photo has the pixels to spare.
-// `expect` (0 = unknown) is how many sheets the round already has, which is
-// worth telling the reader: a block half out of frame is then one it says is
-// missing rather than one it quietly leaves out.
+// `expect` (0 = unknown) is how many sheets the round's first photo held,
+// which is worth telling the reader: a block half out of frame is then one it
+// says is missing rather than one it quietly leaves out.
+// Each sheet comes back with the game printed on it, so the arks go where the
+// paper says and not where the camera happened to be pointed.
 async function splitSheetsInPhoto(file, expect) {
   const apiKey = getScanApiKey();
   if (!apiKey) throw new Error('mangler API-nøkkel');
@@ -12841,14 +12953,20 @@ async function splitSheetsInPhoto(file, expect) {
   small.getContext('2d').drawImage(full, 0, 0, small.width, small.height);
   const b64 = small.toDataURL('image/jpeg', 0.9).split(',')[1];
 
-  const prompt = `This photo shows Norwegian 90-ball bingo sheets (bingoark) laid out next to each other. Each sheet is a tall portrait page of 6 stacked strips; every strip is a 3-row × 9-column grid of numbers with a 4-digit control number printed along its left margin.
-${expect ? `There should be exactly ${expect} sheets in this photo.\n` : ''}The photo may be turned: the sheets can appear upright, or rotated by 90, 180 or 270 degrees.
+  const prompt = `This photo shows Norwegian 90-ball bingo sheets (bingoark) lying next to each other on a table. Each sheet is one game out of a player's block: a tall portrait page with 6 strips stacked one above another, every strip a 3-row × 9-column grid of numbers.
+${expect ? `There should be ${expect} sheets in this photo.\n` : ''}
+WHICH WAY UP THE PHOTO IS
+The sheets may lie upright in the photo, or turned by 90, 180 or 270 degrees — a row of tall sheets only fits a photo held sideways. Judge this by the numbers INSIDE the grid cells. Do NOT judge it by the 4-digit control numbers: those are printed sideways in each strip's margin, so they read upright exactly when the sheet itself does not.
 
 Return raw JSON only — no prose, no markdown fences:
-{"rotate":0,"sheets":[{"x":0.01,"y":0.04,"w":0.19,"h":0.92}]}
+{"rotate":270,"idEdge":"top","sheets":[{"x":0.01,"y":0.04,"w":0.19,"h":0.92,"spill":1}]}
 
-"rotate": how many degrees the photo must be turned CLOCKWISE for the printed numbers to read upright. One of 0, 90, 180, 270.
-"sheets": one entry per bingo sheet, in any order. Each is that sheet's bounding box in the photo EXACTLY AS GIVEN TO YOU — do not rotate the coordinates — as fractions of the photo's width and height: "x","y" the top-left corner, "w","h" the width and height, each between 0 and 1. A box must hold the whole sheet (all 6 strips and the control numbers down its edge) and as little of the neighbouring sheets as possible. Ignore anything that is not a bingo sheet, and ignore a sheet of which only a narrow sliver is in the photo.`;
+"rotate": the turn CLOCKWISE, in degrees (0, 90, 180 or 270), that makes the numbers in the grid cells read upright. Turned that way every sheet must stand taller than it is wide, with its 6 strips stacked one above another.
+"idEdge": which edge of the photo the 4-digit control numbers run along, in the photo as given to you: "left", "right", "top" or "bottom". (On an upright sheet they run down its left-hand side.)
+"sheets": one entry per bingo sheet, in any order:
+  "x","y","w","h": the sheet's bounding box in the photo EXACTLY AS GIVEN TO YOU — do not rotate the coordinates — as fractions of the photo's width and height, "x","y" being the top-left corner. The box must hold the whole sheet (all 6 strips and the control numbers along its edge) and as little of the neighbouring sheets as possible.
+  "spill": which game the sheet is, 1 to 4, printed as "Spill N" along one edge of it. The sheets are colour-coded as well: Spill 1 blue, Spill 2 yellow, Spill 3 pink, Spill 4 white or grey. Use null if you cannot tell.
+Ignore anything that is not a bingo sheet, and ignore a sheet of which only a narrow sliver is in the photo.`;
 
   const response = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -12878,16 +12996,18 @@ Return raw JSON only — no prose, no markdown fences:
   const raw = (data.content.find(b => b.type === 'text') || {}).text || '';
   const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
 
-  const rot = [0, 90, 180, 270].includes(Number(parsed.rotate)) ? Number(parsed.rotate) : 0;
   const boxes = (Array.isArray(parsed.sheets) ? parsed.sheets : [])
-    .map(b => ({ x: Number(b.x), y: Number(b.y), w: Number(b.w), h: Number(b.h) }))
+    .map(b => ({ x: Number(b.x), y: Number(b.y), w: Number(b.w), h: Number(b.h),
+                 game: gameFromSpill(b.spill) }))
     .filter(b => [b.x, b.y, b.w, b.h].every(Number.isFinite) && b.w > 0.02 && b.h > 0.02);
   if (!boxes.length) return [];
   if (boxes.length > SHEET_MAX_IN_SHOT) throw new Error('fant ' + boxes.length + ' ark');
 
-  const upright = rotateCanvas(full, rot);
-  const ordered = orderSheetBoxes(boxes.map(b => rotateSheetBox(b, rot)));
-  return Promise.all(ordered.map((b, i) => cropSheetFile(upright, b, i)));
+  const turn = pickSheetTurn(boxes, parsed.rotate, parsed.idEdge, full.width, full.height);
+  const upright = rotateCanvas(full, turn);
+  const ordered = orderSheetBoxes(boxes.map(b =>
+    Object.assign(rotateSheetBox(b, turn), { game: b.game })));
+  return Promise.all(ordered.map(async (b, i) => ({ file: await cropSheetFile(upright, b, i), game: b.game })));
 }
 
 // A round's photos: one ark per block in each, cut up and handed to the
@@ -12905,46 +13025,60 @@ async function processMultiPending(scans) {
     if (el) el.textContent = t;
   };
 
-  let added = 0, sent = 0;
+  let added = 0, sent = 0, firstBlk = null, arks = 0;
   for (const s of scans) {
     const gname = getGameName(s.gameKey);
-    label(scans.length > 1 ? 'Finner blokkene — ' + gname + '…' : 'Finner blokkene i bildet…');
+    label(scans.length > 1 ? 'Finner arkene — bilde ' + (scans.indexOf(s) + 1) + ' av ' + scans.length + '…'
+                           : 'Finner arkene i bildet…');
     let sheets;
     try {
-      sheets = await splitSheetsInPhoto(s.file, _multiBatch ? _multiBatch.length : 0);
+      sheets = await splitSheetsInPhoto(s.file, _multiSheetCount);
     } catch (err) {
       console.error(err);
-      toast('⚠ ' + gname + ': fant ikke blokkene (' +
+      toast('⚠ ' + gname + ': fant ikke arkene (' +
             String((err && err.message) || err).slice(0, 40) + ') — ta bildet på nytt', 'err', 7000);
       continue;
     }
     if (!sheets.length) {
-      toast('⚠ ' + gname + ': fant ingen ark i bildet — ta det på nytt med blokkene side om side', 'err', 7000);
+      toast('⚠ ' + gname + ': fant ingen ark i bildet — ta det på nytt med arkene side om side', 'err', 7000);
       continue;
     }
+    // Where each ark goes is what the paper says, with the camera's own game
+    // as the fallback when the reader couldn't make the label out.
+    const groups = groupSheetsByGame(sheets, s.gameKey);
+    if (roundWouldClash(groups)) resetMultiBatch();
+
+    const need = Math.max(...groups.map(gr => gr.sheets.length));
     const before = blocks.length;
-    const target = multiBatchBlocks(sheets.length);
+    const target = multiBatchBlocks(need);
     if (!target) {
-      toast('⚠ ' + gname + ': fant ' + sheets.length + ' ark, men runden har ' +
-            _multiBatch.length + ' blokker — ta bildet på nytt med alle i bildet', 'err', 9000);
+      toast('⚠ ' + gname + ': bildet viser ' + need + ' blokk' + (need === 1 ? '' : 'er') +
+            ', men runden har ' + _multiBatch.length +
+            ' — ta bildet på nytt med alle i bildet', 'err', 9000);
       continue;
     }
     added += blocks.length - before;
-    _multiShotGames.add(s.gameKey);
-    sheets.forEach((file, i) => {
-      const bi = blocks.indexOf(target[i]);
-      if (bi >= 0) enqueueScan(file, s.gameKey, bi);
-    });
+    if (!_multiSheetCount) _multiSheetCount = sheets.length;
+    if (!firstBlk) firstBlk = target[0];
+    groups.forEach(gr => gr.sheets.forEach((sh, i) => {
+      const blk = target[i];
+      const bi = blk ? blocks.indexOf(blk) : -1;
+      if (bi < 0) return;
+      enqueueScan(sh.file, gr.game, bi);
+      _multiShotGames.add(gr.game);
+      _multiSent.add(i + ':' + gr.game);
+      arks++;
+    }));
     sent++;
   }
 
   if (added) { publishUserName(); refreshBlockTabs(); saveSession(); }
   document.getElementById('phone-processing').style.display = 'none';
 
-  // Back on the scan screen, on the round's first block and the next ark it
-  // still needs, so the next shot is one tap away.
-  if (_multiBatch && _multiBatch.length) {
-    const bi = blocks.indexOf(_multiBatch[0]);
+  // Back on the scan screen, on the first block this batch filled and the next
+  // ark it still needs, so the next shot is one tap away.
+  if (firstBlk) {
+    const bi = blocks.indexOf(firstBlk);
     if (bi >= 0 && bi !== activeBlockIdx) switchBlock(bi);
   }
   const next = nextUnshotGame();
@@ -12953,8 +13087,8 @@ async function processMultiPending(scans) {
   document.getElementById('phone-upload').style.display = 'flex';
   updateUploadTitle();
   refreshScanWarning();
-  if (sent && _multiBatch) {
-    toast('✓ ' + _multiBatch.length + ' blokker × ' + sent + ' ark sendt til lesing', 'ok', 3500);
+  if (arks) {
+    toast('✓ ' + arks + ' ark sendt til lesing', 'ok', 3500);
   }
 }
 
